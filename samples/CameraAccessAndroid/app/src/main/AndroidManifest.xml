@@ -20,7 +20,7 @@
         <!-- Without Developer Mode, this key will need to be set with ID from app registered in Wearables Developer Center -->
         <meta-data
             android:name="com.meta.wearable.mwdat.APPLICATION_ID"
-            android:value="0"
+            android:value="@string/mwdat_application_id"
             />
 
         <activity
