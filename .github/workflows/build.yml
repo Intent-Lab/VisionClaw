@@ -28,7 +28,7 @@ jobs:
         run: cp app/src/main/java/com/meta/wearable/dat/externalsampleapps/cameraaccess/Secrets.kt.example app/src/main/java/com/meta/wearable/dat/externalsampleapps/cameraaccess/Secrets.kt
 
       - name: Build Android sample
-        run: ./gradlew :app:assembleDebug
+        run: ./gradlew :app:assembleDebug -Dorg.gradle.java.home="$JAVA_HOME"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
