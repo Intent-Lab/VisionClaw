@@ -12,7 +12,13 @@ enum GeminiConfig {
   static let videoFrameInterval: TimeInterval = 1.0
   static let videoJPEGQuality: CGFloat = 0.5
 
-  static var systemInstruction: String { SettingsManager.shared.geminiSystemPrompt }
+  static var systemInstruction: String {
+    let userPrompt = SettingsManager.shared.geminiSystemPrompt
+    if userPrompt != defaultSystemInstruction {
+      return userPrompt
+    }
+    return isOpenClawConfigured ? defaultSystemInstruction : defaultSystemInstructionWithoutTools
+  }
 
   static let defaultSystemInstruction = """
     You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. You can see through their camera and have a voice conversation. Keep responses concise and natural.
@@ -40,6 +46,14 @@ enum GeminiConfig {
     Never call execute silently -- the user needs verbal confirmation that you heard them and are working on it. The tool may take several seconds to complete, so the acknowledgment lets them know something is happening.
 
     For messages, confirm recipient and content before delegating unless clearly urgent.
+    """
+
+  static let defaultSystemInstructionWithoutTools = """
+    You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. You can see through their camera and have a voice conversation. Keep responses concise and natural.
+
+    In this session, external actions are unavailable. You cannot send messages, search the web, manage lists, set reminders, or control apps/devices.
+
+    If the user asks for those actions, clearly say OpenClaw is not configured and ask them to enable it in Settings. Never pretend an action was completed.
     """
 
   // User-configurable values (Settings screen overrides, falling back to Secrets.swift)

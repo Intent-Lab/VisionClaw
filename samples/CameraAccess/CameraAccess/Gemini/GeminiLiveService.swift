@@ -164,39 +164,44 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
-    let setup: [String: Any] = [
-      "setup": [
-        "model": GeminiConfig.model,
-        "generationConfig": [
-          "responseModalities": ["AUDIO"],
-          "thinkingConfig": [
-            "thinkingBudget": 0
-          ]
+    var setupPayload: [String: Any] = [
+      "model": GeminiConfig.model,
+      "generationConfig": [
+        "responseModalities": ["AUDIO"],
+        "thinkingConfig": [
+          "thinkingBudget": 0
+        ]
+      ],
+      "systemInstruction": [
+        "parts": [
+          ["text": GeminiConfig.systemInstruction]
+        ]
+      ],
+      "realtimeInputConfig": [
+        "automaticActivityDetection": [
+          "disabled": false,
+          "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+          "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+          "silenceDurationMs": 500,
+          "prefixPaddingMs": 40
         ],
-        "systemInstruction": [
-          "parts": [
-            ["text": GeminiConfig.systemInstruction]
-          ]
-        ],
-        "tools": [
-          [
-            "functionDeclarations": ToolDeclarations.allDeclarations()
-          ]
-        ],
-        "realtimeInputConfig": [
-          "automaticActivityDetection": [
-            "disabled": false,
-            "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-            "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-            "silenceDurationMs": 500,
-            "prefixPaddingMs": 40
-          ],
-          "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
-          "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
-        ],
-        "inputAudioTranscription": [:] as [String: Any],
-        "outputAudioTranscription": [:] as [String: Any]
+        "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
+        "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
+      ],
+      "inputAudioTranscription": [:] as [String: Any],
+      "outputAudioTranscription": [:] as [String: Any]
+    ]
+
+    if GeminiConfig.isOpenClawConfigured {
+      setupPayload["tools"] = [
+        [
+          "functionDeclarations": ToolDeclarations.allDeclarations()
+        ]
       ]
+    }
+
+    let setup: [String: Any] = [
+      "setup": setupPayload
     ]
     sendJSON(setup)
   }

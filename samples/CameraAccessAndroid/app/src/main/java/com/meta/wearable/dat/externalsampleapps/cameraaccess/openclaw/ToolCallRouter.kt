@@ -1,6 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -25,6 +26,14 @@ class ToolCallRouter(
         val callName = call.name
 
         Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
+
+        if (!GeminiConfig.isOpenClawConfigured) {
+            val error = "OpenClaw is not configured. Add host and gateway token in Settings to enable tool calls."
+            Log.w(TAG, "Fast-fail tool call $callName (id: $callId): $error")
+            bridge.setToolCallStatus(ToolCallStatus.Failed(callName, error))
+            sendResponse(buildToolResponse(callId, callName, ToolResult.Failure(error)))
+            return
+        }
 
         val job = scope.launch {
             val taskDesc = call.args["task"]?.toString() ?: call.args.toString()

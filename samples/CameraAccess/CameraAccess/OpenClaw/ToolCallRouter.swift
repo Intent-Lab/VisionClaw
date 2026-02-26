@@ -15,6 +15,17 @@ class ToolCallRouter {
     _ call: GeminiFunctionCall,
     sendResponse: @escaping ([String: Any]) -> Void
   ) {
+    guard GeminiConfig.isOpenClawConfigured else {
+      let response = buildToolResponse(
+        callId: call.id,
+        name: call.name,
+        result: .failure("OpenClaw is not configured. Configure OpenClaw in Settings to enable tool calls.")
+      )
+      NSLog("[ToolCall] Fast-fail %@ (id: %@): OpenClaw is not configured", call.name, call.id)
+      sendResponse(response)
+      return
+    }
+
     let callId = call.id
     let callName = call.name
 

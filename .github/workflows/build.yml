@@ -1,0 +1,48 @@
+name: Build Verification
+
+"on":
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: samples/CameraAccessAndroid
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Create Android secrets file
+        run: cp app/src/main/java/com/meta/wearable/dat/externalsampleapps/cameraaccess/Secrets.kt.example app/src/main/java/com/meta/wearable/dat/externalsampleapps/cameraaccess/Secrets.kt
+
+      - name: Build Android sample
+        run: ./gradlew :app:assembleDebug
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ios-build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: samples/CameraAccess
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create iOS secrets file
+        run: cp CameraAccess/Secrets.swift.example CameraAccess/Secrets.swift
+
+      - name: Build iOS sample
+        run: xcodebuild -project CameraAccess.xcodeproj -scheme CameraAccess -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
