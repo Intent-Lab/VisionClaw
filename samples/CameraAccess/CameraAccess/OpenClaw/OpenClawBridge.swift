@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 enum OpenClawConnectionState: Equatable {
   case notConfigured
@@ -138,5 +139,37 @@ class OpenClawBridge: ObservableObject {
       lastToolCallStatus = .failed(toolName, error.localizedDescription)
       return .failure("Agent error: \(error.localizedDescription)")
     }
+  }
+
+  // MARK: - Image Upload via Task (base64 inline)
+
+  /// Sends a task to OpenClaw with an image attached as base64 in the message body.
+  /// The image is JPEG-compressed at 0.7 quality for a good size/quality tradeoff.
+  func delegateTaskWithImage(
+    task: String,
+    image: UIImage,
+    toolName: String = "capture_and_send"
+  ) async -> ToolResult {
+    lastToolCallStatus = .executing(toolName)
+
+    guard let jpegData = image.jpegData(compressionQuality: 0.7) else {
+      lastToolCallStatus = .failed(toolName, "JPEG conversion failed")
+      return .failure("Failed to convert image to JPEG")
+    }
+
+    let base64 = jpegData.base64EncodedString()
+    let sizeKB = jpegData.count / 1024
+    NSLog("[OpenClaw] Image captured: %dKB JPEG, base64 length: %d", sizeKB, base64.count)
+
+    // Build a task message that includes the base64 image for OpenClaw to process.
+    // OpenClaw will save the image to a temp file and send it via the appropriate channel.
+    let fullTask = """
+    \(task)
+
+    ATTACHED IMAGE (base64 JPEG — save to a temp file first, then send it):
+    \(base64)
+    """
+
+    return await delegateTask(task: fullTask, toolName: toolName)
   }
 }

@@ -170,3 +170,145 @@ struct SpeakingIndicator: View {
     .onDisappear { animating = false }
   }
 }
+
+// MARK: - Meeting Mode Components
+
+struct MeetingOverlay: View {
+  @ObservedObject var geminiVM: GeminiSessionViewModel
+  private let timeFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "HH:mm"
+    return f
+  }()
+
+  var body: some View {
+    VStack(spacing: 0) {
+      // Top bar: meeting pill + status
+      HStack(spacing: 8) {
+        MeetingModePill()
+        GeminiStatusBar(geminiVM: geminiVM)
+        Spacer()
+      }
+      .padding(.horizontal, 16)
+      .padding(.top, 16)
+
+      // Live transcript scroll area
+      ScrollViewReader { proxy in
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 8) {
+            ForEach(geminiVM.meetingLines) { line in
+              HStack(alignment: .top, spacing: 8) {
+                Text(timeFormatter.string(from: line.time))
+                  .font(.system(size: 11, design: .monospaced))
+                  .foregroundColor(.white.opacity(0.4))
+                  .frame(width: 40, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(line.speaker)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(line.speaker == "Notes" ? .orange : .cyan)
+                  Text(line.text)
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.9))
+                }
+              }
+              .id(line.id)
+            }
+          }
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+        }
+        .onChange(of: geminiVM.meetingLines.count) { _ in
+          if let last = geminiVM.meetingLines.last {
+            withAnimation {
+              proxy.scrollTo(last.id, anchor: .bottom)
+            }
+          }
+        }
+      }
+
+      // Bottom hint
+      if geminiVM.meetingLines.isEmpty {
+        VStack(spacing: 12) {
+          Spacer()
+          Image(systemName: "mic.fill")
+            .font(.system(size: 36))
+            .foregroundColor(.orange.opacity(0.5))
+          Text("Listening...")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundColor(.orange.opacity(0.7))
+          Text("Speak naturally. Notes will appear here.")
+            .font(.system(size: 14))
+            .foregroundColor(.white.opacity(0.4))
+          Spacer()
+        }
+      }
+
+      Spacer(minLength: 0)
+    }
+    .padding(.bottom, 80)
+  }
+}
+
+struct MeetingModePill: View {
+  @State private var pulsing = false
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Circle()
+        .fill(Color.orange)
+        .frame(width: 8, height: 8)
+        .scaleEffect(pulsing ? 1.3 : 1.0)
+        .animation(
+          .easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+          value: pulsing
+        )
+      Image(systemName: "note.text")
+        .font(.system(size: 10))
+        .foregroundColor(.orange)
+      Text("Meeting")
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundColor(.orange)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 6)
+    .background(Color.orange.opacity(0.15))
+    .cornerRadius(16)
+    .overlay(
+      RoundedRectangle(cornerRadius: 16)
+        .stroke(Color.orange.opacity(0.4), lineWidth: 1)
+    )
+    .onAppear { pulsing = true }
+  }
+}
+
+struct MeetingModeButton: View {
+  @ObservedObject var geminiVM: GeminiSessionViewModel
+
+  private var isMeeting: Bool { geminiVM.sessionMode == .meeting }
+
+  var body: some View {
+    Button(action: {
+      Task {
+        if geminiVM.isGeminiActive && isMeeting {
+          geminiVM.stopSession()
+        } else if !geminiVM.isGeminiActive {
+          await geminiVM.startMeetingSession()
+        }
+      }
+    }) {
+      VStack(spacing: 2) {
+        Image(systemName: isMeeting ? "note.text.badge.plus" : "note.text")
+          .font(.system(size: 14))
+        Text("Meet")
+          .font(.system(size: 10, weight: .medium))
+      }
+    }
+    .foregroundColor(isMeeting ? .white : .black)
+    .frame(width: 56, height: 56)
+    .background(isMeeting ? Color.orange : .white)
+    .clipShape(Circle())
+    // Disable if another session mode is already active
+    .opacity(geminiVM.isGeminiActive && !isMeeting ? 0.4 : 1.0)
+    .disabled(geminiVM.isGeminiActive && !isMeeting)
+  }
+}

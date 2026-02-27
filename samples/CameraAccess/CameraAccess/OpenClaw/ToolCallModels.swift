@@ -85,7 +85,7 @@ enum ToolCallStatus: Equatable {
 enum ToolDeclarations {
 
   static func allDeclarations() -> [[String: Any]] {
-    return [execute]
+    return [execute, captureAndSend]
   }
 
   static let execute: [String: Any] = [
@@ -100,6 +100,30 @@ enum ToolDeclarations {
         ]
       ],
       "required": ["task"]
+    ] as [String: Any],
+    "behavior": "BLOCKING"
+  ]
+
+  static let captureAndSend: [String: Any] = [
+    "name": "capture_and_send",
+    "description": "Instantly captures what the glasses camera is currently seeing and sends the photo to a contact. Use this whenever the user asks to send a photo, picture, image, or 'what I'm seeing' to someone. This captures the current video frame directly — it is instant, no shutter delay. Always prefer this over execute when the user wants to share a visual.",
+    "parameters": [
+      "type": "object",
+      "properties": [
+        "recipient": [
+          "type": "string",
+          "description": "Who to send the photo to. Use the contact's name as the user says it (e.g. 'Mom', 'João', 'the group chat')."
+        ],
+        "message": [
+          "type": "string",
+          "description": "Optional caption or message to send along with the photo. If the user doesn't specify one, leave empty."
+        ],
+        "platform": [
+          "type": "string",
+          "description": "Messaging platform to use. Defaults to 'whatsapp' if not specified. Options: whatsapp, telegram, imessage, slack, email."
+        ]
+      ],
+      "required": ["recipient"]
     ] as [String: Any],
     "behavior": "BLOCKING"
   ]

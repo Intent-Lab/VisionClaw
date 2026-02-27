@@ -23,6 +23,9 @@ class GeminiLiveService: ObservableObject {
   var onToolCall: ((GeminiToolCall) -> Void)?
   var onToolCallCancellation: ((GeminiToolCallCancellation) -> Void)?
 
+  /// Session mode controls system instruction, tools, and response modality.
+  var sessionMode: SessionMode = .normal
+
   // Latency tracking
   private var lastUserSpeechEnd: Date?
   private var responseLatencyLogged = false
@@ -63,17 +66,8 @@ class GeminiLiveService: ObservableObject {
       self.delegate.onClose = { [weak self] code, reason in
         guard let self else { return }
         let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "no reason"
-        Task { @MainActor in
-          self.resolveConnect(success: false)
-          self.connectionState = .disconnected
-          self.isModelSpeaking = false
-          self.onDisconnected?("Connection closed (code \(code.rawValue): \(reasonStr))")
-        }
-      }
-
-      self.delegate.onError = { [weak self] error in
-        guard let self else { return }
-        let msg = error?.localizedDescription ?? "Unknown error"
+        let msg = "WS closed: code=\(code.rawValue) reason=\(reasonStr)"
+        NSLog("[Gemini] %@", msg)
         Task { @MainActor in
           self.resolveConnect(success: false)
           self.connectionState = .error(msg)
@@ -82,8 +76,23 @@ class GeminiLiveService: ObservableObject {
         }
       }
 
+      self.delegate.onError = { [weak self] error in
+        guard let self else { return }
+        let nsError = error as NSError?
+        let msg = "\(error?.localizedDescription ?? "Unknown error") [domain=\(nsError?.domain ?? "?") code=\(nsError?.code ?? -1)]"
+        NSLog("[Gemini] WebSocket error: %@ — full: %@", msg, String(describing: error))
+        Task { @MainActor in
+          self.resolveConnect(success: false)
+          self.connectionState = .error(msg)
+          self.isModelSpeaking = false
+          self.onDisconnected?(msg)
+        }
+      }
+
+      NSLog("[Gemini] Connecting to: %@", url.absoluteString.prefix(80).description)
       self.webSocketTask = self.urlSession.webSocketTask(with: url)
       self.webSocketTask?.resume()
+      NSLog("[Gemini] WebSocket task resumed, state: %d", self.webSocketTask?.state.rawValue ?? -1)
 
       // Timeout after 15 seconds
       Task {
@@ -154,6 +163,26 @@ class GeminiLiveService: ObservableObject {
     }
   }
 
+  /// Send a text context message to Gemini (e.g. GPS coordinates).
+  /// Uses clientContent with a user-role text part so Gemini sees it as context.
+  func sendTextContext(_ text: String) {
+    guard connectionState == .ready else { return }
+    sendQueue.async { [weak self] in
+      let json: [String: Any] = [
+        "clientContent": [
+          "turns": [
+            [
+              "role": "user",
+              "parts": [["text": text]]
+            ]
+          ],
+          "turnComplete": true
+        ]
+      ]
+      self?.sendJSON(json)
+    }
+  }
+
   // MARK: - Private
 
   private func resolveConnect(success: Bool) {
@@ -164,40 +193,55 @@ class GeminiLiveService: ObservableObject {
   }
 
   private func sendSetupMessage() {
-    let setup: [String: Any] = [
-      "setup": [
-        "model": GeminiConfig.model,
-        "generationConfig": [
-          "responseModalities": ["AUDIO"],
-          "thinkingConfig": [
-            "thinkingBudget": 0
-          ]
+    let systemInstruction: String
+    switch sessionMode {
+    case .normal:  systemInstruction = GeminiConfig.systemInstruction
+    case .meeting: systemInstruction = GeminiConfig.meetingModeSystemInstruction
+    case .golf:    systemInstruction = GeminiConfig.golfModeSystemInstruction
+    }
+
+    // Meeting mode: TEXT only (silent note-taking, no voice output)
+    // Normal + Golf: AUDIO responses
+    let modalities: [String] = sessionMode == .meeting ? ["TEXT"] : ["AUDIO"]
+
+    var setupContent: [String: Any] = [
+      "model": GeminiConfig.model,
+      "generationConfig": [
+        "responseModalities": modalities,
+        "thinkingConfig": [
+          "thinkingBudget": 0
+        ]
+      ],
+      "systemInstruction": [
+        "parts": [
+          ["text": systemInstruction]
+        ]
+      ],
+      "realtimeInputConfig": [
+        "automaticActivityDetection": [
+          "disabled": false,
+          "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+          "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+          "silenceDurationMs": 500,
+          "prefixPaddingMs": 40
         ],
-        "systemInstruction": [
-          "parts": [
-            ["text": GeminiConfig.systemInstruction]
-          ]
-        ],
-        "tools": [
-          [
-            "functionDeclarations": ToolDeclarations.allDeclarations()
-          ]
-        ],
-        "realtimeInputConfig": [
-          "automaticActivityDetection": [
-            "disabled": false,
-            "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-            "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-            "silenceDurationMs": 500,
-            "prefixPaddingMs": 40
-          ],
-          "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
-          "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
-        ],
-        "inputAudioTranscription": [:] as [String: Any],
-        "outputAudioTranscription": [:] as [String: Any]
-      ]
+        "activityHandling": sessionMode == .meeting ? "NO_INTERRUPTION" : "START_OF_ACTIVITY_INTERRUPTS",
+        "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
+      ],
+      "inputAudioTranscription": [:] as [String: Any],
+      "outputAudioTranscription": [:] as [String: Any]
     ]
+
+    // Include tools in normal and golf modes — meeting mode has NO tools
+    if sessionMode != .meeting {
+      setupContent["tools"] = [
+        [
+          "functionDeclarations": ToolDeclarations.allDeclarations()
+        ]
+      ]
+    }
+
+    let setup: [String: Any] = ["setup": setupContent]
     sendJSON(setup)
   }
 

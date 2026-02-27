@@ -33,46 +33,34 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<!-- Begin required section for Device Access Toolkit Apps -->
-	<!-- Meta Wearables Device Access Toolkit Setup -->
 	<key>MWDAT</key>
 	<dict>
 		<key>AppLinkURLScheme</key>
-		<!-- Tell DAT your URL scheme so it can be called back from Meta AI -->
 		<string>cameraaccess://</string>
-		<key>MetaAppID</key>
-		<!-- Without Developer Mode, this key will need to be set with ID from the app registered in Wearables Developer Center -->
-		<string>$(META_APP_ID)</string>
-		<!-- Without Developer Mode, this key will need to be set with ClientToken from the app registered in Wearables Developer Center -->
 		<key>ClientToken</key>
 		<string>$(CLIENT_TOKEN)</string>
-		<!-- Without Developer Mode, this key will need to be set with your Apple Developer Team ID - Set this in Xcode under Signing & Capabilities -->
+		<key>MetaAppID</key>
+		<string>$(META_APP_ID)</string>
 		<key>TeamID</key>
 		<string>$(DEVELOPMENT_TEAM)</string>
 	</dict>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>bluetooth-peripheral</string>
-		<string>external-accessory</string>
-	</array>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Needed to connect to Meta AI Glasses</string>
-	<key>UISupportedExternalAccessoryProtocols</key>
-	<array>
-		<string>com.meta.ar.wearable</string>
-	</array>
-	<!-- End required section for Device Access Toolkit Apps -->
-	<key>NSCameraUsageDescription</key>
-	<string>This app uses the camera for iPhone testing mode, allowing you to test the AI assistant pipeline without glasses.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>This app uses the microphone to have voice conversations with the AI assistant while streaming from your glasses.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>This app needs access to save photos captured from your glasses.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
 	</dict>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Needed to connect to Meta AI Glasses</string>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera for iPhone testing mode, allowing you to test the AI assistant pipeline without glasses.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app uses the microphone to have voice conversations with the AI assistant while streaming from your glasses.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Golf Mode uses your location to identify the golf course and provide accurate club recommendations based on local conditions.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>This app needs access to save photos captured from your glasses.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -80,14 +68,21 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-peripheral</string>
+		<string>external-accessory</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>armv7</string>
 	</array>
-
+	<key>UISupportedExternalAccessoryProtocols</key>
+	<array>
+		<string>com.meta.ar.wearable</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

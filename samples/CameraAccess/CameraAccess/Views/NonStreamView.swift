@@ -20,6 +20,7 @@ import SwiftUI
 struct NonStreamView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
+  @ObservedObject var geminiVM: GeminiSessionViewModel
   @State private var sheetHeight: CGFloat = 300
   @State private var showSettings = false
 
@@ -103,6 +104,54 @@ struct NonStreamView: View {
             .foregroundColor(.white.opacity(0.4))
         }
         .padding(.bottom, 12)
+
+        CustomButton(
+          title: "Audio Only (no camera)",
+          style: .secondary,
+          isDisabled: false
+        ) {
+          viewModel.handleStartAudioOnly()
+        }
+
+        // Meeting Mode: audio-only + note-taking (no commands, no tools)
+        Button(action: {
+          viewModel.handleStartAudioOnly()
+          Task {
+            await geminiVM.startMeetingSession()
+          }
+        }) {
+          HStack(spacing: 8) {
+            Image(systemName: "note.text")
+              .font(.system(size: 15))
+            Text("Meeting Mode")
+              .font(.system(size: 15, weight: .semibold))
+          }
+          .foregroundColor(.black)
+          .frame(maxWidth: .infinity)
+          .frame(height: 56)
+          .background(Color.orange)
+          .cornerRadius(30)
+        }
+
+        // Golf Mode: AI caddie with GPS, scorecard, club recommendations
+        Button(action: {
+          viewModel.handleStartAudioOnly()
+          Task {
+            await geminiVM.startGolfSession()
+          }
+        }) {
+          HStack(spacing: 8) {
+            Image(systemName: "flag.fill")
+              .font(.system(size: 15))
+            Text("Golf Mode")
+              .font(.system(size: 15, weight: .semibold))
+          }
+          .foregroundColor(.black)
+          .frame(maxWidth: .infinity)
+          .frame(height: 56)
+          .background(Color.green)
+          .cornerRadius(30)
+        }
 
         CustomButton(
           title: "Start on iPhone",

@@ -35,13 +35,17 @@ struct StreamSessionView: View {
         StreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
       } else {
         // Pre-streaming setup view with permissions and start button
-        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel)
+        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, geminiVM: geminiVM)
       }
     }
     .task {
       viewModel.geminiSessionVM = geminiVM
       viewModel.webrtcSessionVM = webrtcVM
       geminiVM.streamingMode = viewModel.streamingMode
+      // Wire frame provider so capture_and_send can grab the current video frame instantly
+      geminiVM.currentFrameProvider = { [weak viewModel] in
+        viewModel?.currentVideoFrame
+      }
     }
     .onChange(of: viewModel.streamingMode) { newMode in
       geminiVM.streamingMode = newMode

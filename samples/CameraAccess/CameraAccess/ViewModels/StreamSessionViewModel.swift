@@ -242,6 +242,21 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[Stream] iPhone camera mode stopped")
   }
 
+  // MARK: - Audio-Only Mode (no camera, no LED)
+
+  func handleStartAudioOnly() {
+    streamingMode = .iPhone  // reuse iPhone mode flag for Gemini wiring
+    streamingStatus = .streaming
+    // No camera started — Gemini gets voice only, no video frames
+    NSLog("[Stream] Audio-only mode started (no camera, no LED)")
+  }
+
+  func stopAudioOnlySession() {
+    streamingStatus = .stopped
+    streamingMode = .glasses
+    NSLog("[Stream] Audio-only mode stopped")
+  }
+
   func dismissError() {
     showError = false
     errorMessage = ""

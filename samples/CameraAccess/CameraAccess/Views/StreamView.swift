@@ -23,6 +23,42 @@ struct StreamView: View {
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
 
+  private var audioOnlyIcon: String {
+    switch geminiVM.sessionMode {
+    case .meeting: return "note.text"
+    case .golf:    return "flag.fill"
+    case .normal:  return "headphones.circle.fill"
+    }
+  }
+  private var audioOnlyIconColor: Color {
+    switch geminiVM.sessionMode {
+    case .meeting: return .orange.opacity(0.8)
+    case .golf:    return .green.opacity(0.8)
+    case .normal:  return .white.opacity(0.6)
+    }
+  }
+  private var audioOnlyTitle: String {
+    switch geminiVM.sessionMode {
+    case .meeting: return "Meeting Mode"
+    case .golf:    return "Golf Mode"
+    case .normal:  return "Audio Only"
+    }
+  }
+  private var audioOnlyTitleColor: Color {
+    switch geminiVM.sessionMode {
+    case .meeting: return .orange
+    case .golf:    return .green
+    case .normal:  return .white
+    }
+  }
+  private var audioOnlySubtitle: String {
+    switch geminiVM.sessionMode {
+    case .meeting: return "Taking notes — AI will not respond to commands"
+    case .golf:    return "Golf caddie active — tracking your round"
+    case .normal:  return "No camera active — no LED"
+    }
+  }
+
   var body: some View {
     ZStack {
       // Black background for letterboxing/pillarboxing
@@ -45,6 +81,21 @@ struct StreamView: View {
             .clipped()
         }
         .edgesIgnoringSafeArea(.all)
+      } else if viewModel.streamingMode == .iPhone && viewModel.currentVideoFrame == nil && !viewModel.hasReceivedFirstFrame && viewModel.streamingStatus == .streaming {
+        // Audio-only mode: no camera feed
+        VStack(spacing: 16) {
+          Image(systemName: audioOnlyIcon)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 80, height: 80)
+            .foregroundColor(audioOnlyIconColor)
+          Text(audioOnlyTitle)
+            .font(.system(size: 24, weight: .semibold))
+            .foregroundColor(audioOnlyTitleColor)
+          Text(audioOnlySubtitle)
+            .font(.system(size: 14))
+            .foregroundColor(.white.opacity(0.5))
+        }
       } else {
         ProgressView()
           .scaleEffect(1.5)
@@ -53,36 +104,47 @@ struct StreamView: View {
 
       // Gemini status overlay (top) + speaking indicator
       if geminiVM.isGeminiActive {
-        VStack {
-          GeminiStatusBar(geminiVM: geminiVM)
-          Spacer()
-
-          VStack(spacing: 8) {
-            if !geminiVM.userTranscript.isEmpty || !geminiVM.aiTranscript.isEmpty {
-              TranscriptView(
-                userText: geminiVM.userTranscript,
-                aiText: geminiVM.aiTranscript
-              )
+        if geminiVM.sessionMode == .meeting {
+          // Meeting mode: full-screen transcript overlay
+          MeetingOverlay(geminiVM: geminiVM)
+        } else if geminiVM.sessionMode == .golf {
+          // Golf mode: green overlay with scorecard HUD
+          GolfOverlay(geminiVM: geminiVM)
+        } else {
+          // Normal AI mode: status bar + transcript + speaking indicator
+          VStack {
+            HStack(spacing: 8) {
+              GeminiStatusBar(geminiVM: geminiVM)
             }
+            Spacer()
 
-            ToolCallStatusView(status: geminiVM.toolCallStatus)
-
-            if geminiVM.isModelSpeaking {
-              HStack(spacing: 8) {
-                Image(systemName: "speaker.wave.2.fill")
-                  .foregroundColor(.white)
-                  .font(.system(size: 14))
-                SpeakingIndicator()
+            VStack(spacing: 8) {
+              if !geminiVM.userTranscript.isEmpty || !geminiVM.aiTranscript.isEmpty {
+                TranscriptView(
+                  userText: geminiVM.userTranscript,
+                  aiText: geminiVM.aiTranscript
+                )
               }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 8)
-              .background(Color.black.opacity(0.5))
-              .cornerRadius(20)
+
+              ToolCallStatusView(status: geminiVM.toolCallStatus)
+
+              if geminiVM.isModelSpeaking {
+                HStack(spacing: 8) {
+                  Image(systemName: "speaker.wave.2.fill")
+                    .foregroundColor(.white)
+                    .font(.system(size: 14))
+                  SpeakingIndicator()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.5))
+                .cornerRadius(20)
+              }
             }
+            .padding(.bottom, 80)
           }
-          .padding(.bottom, 80)
+          .padding(.all, 24)
         }
-        .padding(.all, 24)
       }
 
       // WebRTC status overlay (top)
@@ -156,12 +218,16 @@ struct ControlsView: View {
     // Controls row
     HStack(spacing: 8) {
       CustomButton(
-        title: "Stop streaming",
+        title: viewModel.currentVideoFrame == nil ? "Stop audio" : "Stop streaming",
         style: .destructive,
         isDisabled: false
       ) {
         Task {
-          await viewModel.stopSession()
+          if viewModel.currentVideoFrame == nil {
+            viewModel.stopAudioOnlySession()
+          } else {
+            await viewModel.stopSession()
+          }
         }
       }
 
@@ -187,6 +253,16 @@ struct ControlsView: View {
       }
       .opacity(webrtcVM.isActive ? 0.4 : 1.0)
       .disabled(webrtcVM.isActive)
+
+      // Meeting Mode button (disabled when WebRTC is active — audio conflict)
+      MeetingModeButton(geminiVM: geminiVM)
+        .opacity(webrtcVM.isActive ? 0.4 : 1.0)
+        .disabled(webrtcVM.isActive)
+
+      // Golf Mode button (disabled when WebRTC is active — audio conflict)
+      GolfModeButton(geminiVM: geminiVM)
+        .opacity(webrtcVM.isActive ? 0.4 : 1.0)
+        .disabled(webrtcVM.isActive)
 
       // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
       CircleButton(
