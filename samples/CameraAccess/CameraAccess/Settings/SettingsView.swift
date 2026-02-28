@@ -9,6 +9,8 @@ struct SettingsView: View {
   @State private var openClawPort: String = ""
   @State private var openClawHookToken: String = ""
   @State private var openClawGatewayToken: String = ""
+  @State private var openClawModel: String = ""
+  @State private var openClawThinking: String = ""
   @State private var geminiSystemPrompt: String = ""
   @State private var webrtcSignalingURL: String = ""
   @State private var showResetConfirmation = false
@@ -74,6 +76,26 @@ struct SettingsView: View {
               .disableAutocorrection(true)
               .font(.system(.body, design: .monospaced))
           }
+
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Model Override (optional)")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            TextField("e.g. openai-codex/gpt-5.3-codex", text: $openClawModel)
+              .autocapitalization(.none)
+              .disableAutocorrection(true)
+              .font(.system(.body, design: .monospaced))
+          }
+
+          Picker("Thinking Level", selection: $openClawThinking) {
+            Text("Gateway Default").tag("")
+            Text("Off").tag("off")
+            Text("Minimal").tag("minimal")
+            Text("Low").tag("low")
+            Text("Medium").tag("medium")
+            Text("High").tag("high")
+            Text("XHigh").tag("xhigh")
+          }
         }
 
         Section(header: Text("WebRTC")) {
@@ -134,6 +156,8 @@ struct SettingsView: View {
     openClawPort = String(settings.openClawPort)
     openClawHookToken = settings.openClawHookToken
     openClawGatewayToken = settings.openClawGatewayToken
+    openClawModel = settings.openClawModel
+    openClawThinking = settings.openClawThinking
     webrtcSignalingURL = settings.webrtcSignalingURL
   }
 
@@ -146,6 +170,8 @@ struct SettingsView: View {
     }
     settings.openClawHookToken = openClawHookToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.openClawGatewayToken = openClawGatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.openClawModel = openClawModel.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.openClawThinking = openClawThinking.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.webrtcSignalingURL = webrtcSignalingURL.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 }

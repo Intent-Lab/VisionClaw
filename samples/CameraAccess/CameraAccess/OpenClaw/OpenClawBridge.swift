@@ -16,6 +16,8 @@ class OpenClawBridge: ObservableObject {
   private let pingSession: URLSession
   private var sessionKey: String
   private var conversationHistory: [[String: String]] = []
+  private var appliedSessionModel: String?
+  private var appliedSessionThinking: String?
   private let maxHistoryTurns = 10
 
   init() {
@@ -65,7 +67,100 @@ class OpenClawBridge: ObservableObject {
   func resetSession() {
     sessionKey = OpenClawBridge.newSessionKey()
     conversationHistory = []
+    appliedSessionModel = nil
+    appliedSessionThinking = nil
     NSLog("[OpenClaw] New session: %@", sessionKey)
+  }
+
+  private func normalizedSessionOverride(_ value: String) -> String? {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    return trimmed
+  }
+
+  private func parseAssistantContent(from data: Data) -> String? {
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let choices = json["choices"] as? [[String: Any]],
+          let first = choices.first,
+          let message = first["message"] as? [String: Any],
+          let content = message["content"] as? String else {
+      return nil
+    }
+    return content
+  }
+
+  private func sendSessionCommand(
+    command: String,
+    label: String
+  ) async -> ToolResult {
+    guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
+      return .failure("Invalid gateway URL")
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue(sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
+
+    let body: [String: Any] = [
+      "model": "openclaw",
+      "messages": [["role": "user", "content": command]],
+      "stream": false
+    ]
+
+    do {
+      request.httpBody = try JSONSerialization.data(withJSONObject: body)
+      let (data, response) = try await session.data(for: request)
+      let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+      guard (200...299).contains(statusCode) else {
+        return .failure("OpenClaw \(label) override failed (HTTP \(statusCode))")
+      }
+
+      guard let content = parseAssistantContent(from: data)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !content.isEmpty else {
+        return .failure("OpenClaw \(label) override failed: empty response")
+      }
+
+      let lower = content.lowercased()
+      if lower.contains("not allowed") || lower.contains("failed") || lower.contains("invalid") {
+        return .failure("OpenClaw \(label) override failed: \(content)")
+      }
+      return .success(content)
+    } catch {
+      return .failure("OpenClaw \(label) override error: \(error.localizedDescription)")
+    }
+  }
+
+  private func applySessionOverridesIfNeeded(toolName: String) async -> ToolResult? {
+    let desiredModel = normalizedSessionOverride(GeminiConfig.openClawModel)
+    let desiredThinking = normalizedSessionOverride(GeminiConfig.openClawThinking)?.lowercased()
+
+    if desiredModel == nil {
+      appliedSessionModel = nil
+    } else if desiredModel != appliedSessionModel, let model = desiredModel {
+      switch await sendSessionCommand(command: "/model \(model)", label: "model") {
+      case .success:
+        appliedSessionModel = model
+      case .failure(let error):
+        lastToolCallStatus = .failed(toolName, error)
+        return .failure(error)
+      }
+    }
+
+    if desiredThinking == nil {
+      appliedSessionThinking = nil
+    } else if desiredThinking != appliedSessionThinking, let thinking = desiredThinking {
+      switch await sendSessionCommand(command: "/think \(thinking)", label: "thinking") {
+      case .success:
+        appliedSessionThinking = thinking
+      case .failure(let error):
+        lastToolCallStatus = .failed(toolName, error)
+        return .failure(error)
+      }
+    }
+
+    return nil
   }
 
   private static func newSessionKey() -> String {
@@ -84,6 +179,10 @@ class OpenClawBridge: ObservableObject {
     guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
       lastToolCallStatus = .failed(toolName, "Invalid URL")
       return .failure("Invalid gateway URL")
+    }
+
+    if let overrideFailure = await applySessionOverridesIfNeeded(toolName: toolName) {
+      return overrideFailure
     }
 
     // Append the new user message to conversation history
@@ -127,11 +226,7 @@ class OpenClawBridge: ObservableObject {
         return .failure("Agent returned HTTP \(code)")
       }
 
-      if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-         let choices = json["choices"] as? [[String: Any]],
-         let first = choices.first,
-         let message = first["message"] as? [String: Any],
-         let content = message["content"] as? String {
+      if let content = parseAssistantContent(from: data) {
         // Append assistant response to history for continuity
         conversationHistory.append(["role": "assistant", "content": content])
         NSLog("[OpenClaw] Agent result: %@", String(content.prefix(200)))
