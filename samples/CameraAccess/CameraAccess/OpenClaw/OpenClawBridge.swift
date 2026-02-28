@@ -45,9 +45,14 @@ class OpenClawBridge: ObservableObject {
     request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
     do {
       let (_, response) = try await pingSession.data(for: request)
-      if let http = response as? HTTPURLResponse, (200...499).contains(http.statusCode) {
-        connectionState = .connected
-        NSLog("[OpenClaw] Gateway reachable (HTTP %d)", http.statusCode)
+      if let http = response as? HTTPURLResponse {
+        if (200...299).contains(http.statusCode) {
+          connectionState = .connected
+          NSLog("[OpenClaw] Gateway reachable (HTTP %d)", http.statusCode)
+        } else {
+          connectionState = .unreachable("HTTP \(http.statusCode)")
+          NSLog("[OpenClaw] Gateway check failed (HTTP %d)", http.statusCode)
+        }
       } else {
         connectionState = .unreachable("Unexpected response")
       }
@@ -113,6 +118,12 @@ class OpenClawBridge: ObservableObject {
         let bodyStr = String(data: data, encoding: .utf8) ?? "no body"
         NSLog("[OpenClaw] Chat failed: HTTP %d - %@", code, String(bodyStr.prefix(200)))
         lastToolCallStatus = .failed(toolName, "HTTP \(code)")
+        if code == 401 {
+          return .failure("OpenClaw unauthorized (HTTP 401). Check OpenClaw Gateway Token in Settings.")
+        }
+        if code == 403 {
+          return .failure("OpenClaw forbidden (HTTP 403). Check gateway auth mode/token.")
+        }
         return .failure("Agent returned HTTP \(code)")
       }
 
