@@ -213,6 +213,11 @@ const val openClawPort = 18789
 const val openClawGatewayToken = "your-gateway-token-here"
 ```
 
+Optional runtime settings (in-app **Settings**):
+- **Model Override** -- if set, VisionClaw applies `/model <value>` for the current OpenClaw session and reapplies if changed.
+- **Thinking Level** -- if set, VisionClaw applies `/think <value>` for the current session and reapplies if changed.
+- Leaving either field empty explicitly clears that remote override and returns to gateway defaults (`/model default`, `/think default`, with fallback commands).
+
 To find your Mac's Bonjour hostname: **System Settings > General > Sharing** -- it's shown at the top (e.g., `Johns-MacBook-Pro.local`).
 
 > Both iOS and Android also have an in-app Settings screen where you can change these values at runtime without editing source code.

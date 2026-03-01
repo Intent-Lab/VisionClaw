@@ -7,44 +7,83 @@ enum OpenClawConnectionState: Equatable {
   case unreachable(String)
 }
 
+protocol OpenClawBridgeConfig {
+  var host: String { get }
+  var port: Int { get }
+  var gatewayToken: String { get }
+  var modelOverride: String { get }
+  var thinkingOverride: String { get }
+}
+
+struct DefaultOpenClawBridgeConfig: OpenClawBridgeConfig {
+  var host: String { GeminiConfig.openClawHost }
+  var port: Int { GeminiConfig.openClawPort }
+  var gatewayToken: String { GeminiConfig.openClawGatewayToken }
+  var modelOverride: String { GeminiConfig.openClawModel }
+  var thinkingOverride: String { GeminiConfig.openClawThinking }
+}
+
 @MainActor
 class OpenClawBridge: ObservableObject {
+  private enum AppliedSessionOverrideState: Equatable {
+    case unknown
+    case value(String)
+    case cleared
+  }
+
   @Published var lastToolCallStatus: ToolCallStatus = .idle
   @Published var connectionState: OpenClawConnectionState = .notConfigured
 
   private let session: URLSession
   private let pingSession: URLSession
+  private let config: OpenClawBridgeConfig
+  private let sessionKeyFactory: () -> String
   private var sessionKey: String
   private var conversationHistory: [[String: String]] = []
-  private var appliedSessionModel: String?
-  private var appliedSessionThinking: String?
+  private var appliedSessionModel: AppliedSessionOverrideState = .unknown
+  private var appliedSessionThinking: AppliedSessionOverrideState = .unknown
   private let maxHistoryTurns = 10
 
-  init() {
-    let config = URLSessionConfiguration.default
-    config.timeoutIntervalForRequest = 120
-    self.session = URLSession(configuration: config)
+  init(
+    session: URLSession? = nil,
+    pingSession: URLSession? = nil,
+    config: OpenClawBridgeConfig = DefaultOpenClawBridgeConfig(),
+    sessionKeyFactory: @escaping () -> String = OpenClawBridge.newSessionKey
+  ) {
+    if let session {
+      self.session = session
+    } else {
+      let config = URLSessionConfiguration.default
+      config.timeoutIntervalForRequest = 120
+      self.session = URLSession(configuration: config)
+    }
 
-    let pingConfig = URLSessionConfiguration.default
-    pingConfig.timeoutIntervalForRequest = 5
-    self.pingSession = URLSession(configuration: pingConfig)
+    if let pingSession {
+      self.pingSession = pingSession
+    } else {
+      let pingConfig = URLSessionConfiguration.default
+      pingConfig.timeoutIntervalForRequest = 5
+      self.pingSession = URLSession(configuration: pingConfig)
+    }
 
-    self.sessionKey = OpenClawBridge.newSessionKey()
+    self.config = config
+    self.sessionKeyFactory = sessionKeyFactory
+    self.sessionKey = sessionKeyFactory()
   }
 
   func checkConnection() async {
-    guard GeminiConfig.isOpenClawConfigured else {
+    guard isConfigured else {
       connectionState = .notConfigured
       return
     }
     connectionState = .checking
-    guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
+    guard let url = gatewayURL else {
       connectionState = .unreachable("Invalid URL")
       return
     }
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
-    request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(config.gatewayToken)", forHTTPHeaderField: "Authorization")
     do {
       let (_, response) = try await pingSession.data(for: request)
       if let http = response as? HTTPURLResponse {
@@ -65,10 +104,10 @@ class OpenClawBridge: ObservableObject {
   }
 
   func resetSession() {
-    sessionKey = OpenClawBridge.newSessionKey()
+    sessionKey = sessionKeyFactory()
     conversationHistory = []
-    appliedSessionModel = nil
-    appliedSessionThinking = nil
+    appliedSessionModel = .unknown
+    appliedSessionThinking = .unknown
     NSLog("[OpenClaw] New session: %@", sessionKey)
   }
 
@@ -89,17 +128,30 @@ class OpenClawBridge: ObservableObject {
     return content
   }
 
+  private var isConfigured: Bool {
+    let token = config.gatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    let host = config.host.trimmingCharacters(in: .whitespacesAndNewlines)
+    return token != "YOUR_OPENCLAW_GATEWAY_TOKEN"
+      && !token.isEmpty
+      && host != "http://YOUR_MAC_HOSTNAME.local"
+      && !host.isEmpty
+  }
+
+  private var gatewayURL: URL? {
+    URL(string: "\(config.host):\(config.port)/v1/chat/completions")
+  }
+
   private func sendSessionCommand(
     command: String,
     label: String
   ) async -> ToolResult {
-    guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
+    guard let url = gatewayURL else {
       return .failure("Invalid gateway URL")
     }
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
-    request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(config.gatewayToken)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue(sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
 
@@ -132,28 +184,66 @@ class OpenClawBridge: ObservableObject {
     }
   }
 
-  private func applySessionOverridesIfNeeded(toolName: String) async -> ToolResult? {
-    let desiredModel = normalizedSessionOverride(GeminiConfig.openClawModel)
-    let desiredThinking = normalizedSessionOverride(GeminiConfig.openClawThinking)?.lowercased()
+  private func sendFirstSuccessfulSessionCommand(
+    commands: [String],
+    label: String
+  ) async -> ToolResult {
+    var lastError = "OpenClaw \(label) override failed"
+    for command in commands {
+      switch await sendSessionCommand(command: command, label: label) {
+      case .success(let response):
+        return .success(response)
+      case .failure(let error):
+        lastError = error
+      }
+    }
+    return .failure(lastError)
+  }
 
-    if desiredModel == nil {
-      appliedSessionModel = nil
-    } else if desiredModel != appliedSessionModel, let model = desiredModel {
-      switch await sendSessionCommand(command: "/model \(model)", label: "model") {
+  private func applySessionOverridesIfNeeded(toolName: String) async -> ToolResult? {
+    let desiredModel = normalizedSessionOverride(config.modelOverride)
+    let desiredThinking = normalizedSessionOverride(config.thinkingOverride)?.lowercased()
+
+    if let model = desiredModel {
+      if appliedSessionModel != .value(model) {
+        switch await sendSessionCommand(command: "/model \(model)", label: "model") {
+        case .success:
+          appliedSessionModel = .value(model)
+        case .failure(let error):
+          lastToolCallStatus = .failed(toolName, error)
+          return .failure(error)
+        }
+      }
+    } else if appliedSessionModel != .cleared {
+      switch await sendFirstSuccessfulSessionCommand(
+        commands: ["/model default", "/model reset", "/model clear"],
+        label: "model clear"
+      ) {
       case .success:
-        appliedSessionModel = model
+        appliedSessionModel = .cleared
       case .failure(let error):
         lastToolCallStatus = .failed(toolName, error)
         return .failure(error)
       }
     }
 
-    if desiredThinking == nil {
-      appliedSessionThinking = nil
-    } else if desiredThinking != appliedSessionThinking, let thinking = desiredThinking {
-      switch await sendSessionCommand(command: "/think \(thinking)", label: "thinking") {
+    if let thinking = desiredThinking {
+      if appliedSessionThinking != .value(thinking) {
+        switch await sendSessionCommand(command: "/think \(thinking)", label: "thinking") {
+        case .success:
+          appliedSessionThinking = .value(thinking)
+        case .failure(let error):
+          lastToolCallStatus = .failed(toolName, error)
+          return .failure(error)
+        }
+      }
+    } else if appliedSessionThinking != .cleared {
+      switch await sendFirstSuccessfulSessionCommand(
+        commands: ["/think default", "/think off"],
+        label: "thinking clear"
+      ) {
       case .success:
-        appliedSessionThinking = thinking
+        appliedSessionThinking = .cleared
       case .failure(let error):
         lastToolCallStatus = .failed(toolName, error)
         return .failure(error)
@@ -163,7 +253,7 @@ class OpenClawBridge: ObservableObject {
     return nil
   }
 
-  private static func newSessionKey() -> String {
+  private nonisolated static func newSessionKey() -> String {
     let ts = ISO8601DateFormatter().string(from: Date())
     return "agent:main:glass:\(ts)"
   }
@@ -176,7 +266,7 @@ class OpenClawBridge: ObservableObject {
   ) async -> ToolResult {
     lastToolCallStatus = .executing(toolName)
 
-    guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
+    guard let url = gatewayURL else {
       lastToolCallStatus = .failed(toolName, "Invalid URL")
       return .failure("Invalid gateway URL")
     }
@@ -195,7 +285,7 @@ class OpenClawBridge: ObservableObject {
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
-    request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
+    request.setValue("Bearer \(config.gatewayToken)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue(sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
 
