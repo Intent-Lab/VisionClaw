@@ -54,6 +54,10 @@ class WearablesViewModel: ObservableObject {
         self.registrationState = registrationState
         if self.showGettingStartedSheet == false && registrationState == .registered && previousState == .registering {
           self.showGettingStartedSheet = true
+        } else if registrationState == .available && previousState == .registering {
+          self.showError(
+            "Registration did not complete. Enable Developer Mode in Meta AI (Settings -> App Info -> tap App version 5x) and retry."
+          )
         }
       }
     }
