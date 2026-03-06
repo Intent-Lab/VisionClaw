@@ -572,9 +572,11 @@ class GazeTracker:
 
     # Per-display offsets: 3 dots per display (top-left area, center, bottom-right area)
     _PER_DISPLAY_OFFSETS = [
-        (0.2, 0.2),   # top-left area
+        (0.2, 0.2),   # top-left
+        (0.8, 0.2),   # top-right
         (0.5, 0.5),   # center
-        (0.8, 0.8),   # bottom-right area
+        (0.2, 0.8),   # bottom-left
+        (0.8, 0.8),   # bottom-right
     ]
 
     def __init__(self):
