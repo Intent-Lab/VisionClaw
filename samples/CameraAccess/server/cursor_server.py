@@ -396,9 +396,9 @@ class PinchDetector:
     Short pinch naturally becomes a click. Long pinch = press-and-hold.
     """
 
-    PINCH_CLOSE = 0.045   # Normalized distance to trigger pinch
-    PINCH_OPEN = 0.07     # Distance to release (hysteresis)
-    DEBOUNCE_FRAMES = 2   # Consecutive frames before confirming
+    PINCH_CLOSE = 0.06    # Normalized distance to trigger pinch
+    PINCH_OPEN = 0.09     # Distance to release (hysteresis)
+    DEBOUNCE_FRAMES = 1   # Immediate response (1 = no debounce)
 
     def __init__(self):
         self.state = PinchState.OPEN
@@ -1185,13 +1185,16 @@ class GazeTracker:
 
         options = HandLandmarkerOptions(
             base_options=MPBaseOptions(model_asset_path=model_path),
-            running_mode=MPRunningMode.IMAGE,
+            running_mode=MPRunningMode.VIDEO,
             num_hands=1,
-            min_hand_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
+            min_hand_detection_confidence=0.3,
+            min_hand_presence_confidence=0.3,
+            min_tracking_confidence=0.3,
         )
         landmarker = HandLandmarker.create_from_options(options)
         no_hand_count = 0
+        frame_idx = 0
+        log_counter = 0
 
         while self._hand_thread_active:
             # Wait for a new frame (timeout 1s to allow clean shutdown)
@@ -1209,9 +1212,13 @@ class GazeTracker:
             if frame is None:
                 continue
 
-            # Convert numpy RGB to MediaPipe Image
+            frame_idx += 1
+            t0 = time.time()
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
-            results = landmarker.detect(mp_image)
+            # VIDEO mode: uses temporal tracking (faster after first detection)
+            timestamp_ms = int(time.time() * 1000)
+            results = landmarker.detect_for_video(mp_image, timestamp_ms)
+            dt_ms = (time.time() - t0) * 1000
 
             if results.hand_landmarks:
                 no_hand_count = 0
@@ -1225,12 +1232,19 @@ class GazeTracker:
                     (index_tip.x, index_tip.y),
                 )
 
+                # Log distance periodically so we can tune thresholds
+                log_counter += 1
+                if action is not None or log_counter % 30 == 0:
+                    print(f"[Hand] {dt_ms:.0f}ms dist={self._pinch.distance:.3f} "
+                          f"state={self._pinch.state.value}", flush=True)
+
                 if action is not None:
                     self._execute_pinch_action(action)
             else:
                 no_hand_count += 1
-                # Only trigger hand-lost after a few frames to avoid false negatives
                 if no_hand_count > 3:
+                    if self._pinch.hand_detected:
+                        print(f"[Hand] Lost ({dt_ms:.0f}ms)", flush=True)
                     action = self._pinch.on_hand_lost()
                     if action is not None:
                         self._execute_pinch_action(action)
