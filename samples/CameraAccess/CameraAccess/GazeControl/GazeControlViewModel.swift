@@ -121,13 +121,18 @@ class GazeControlViewModel: ObservableObject {
           return
         }
 
-        self.matchCount = result.matchCount
-        self.confidence = result.confidence
-
         if let point = result.point {
+          self.matchCount = result.matchCount
+          self.confidence = result.confidence
           self.mode = self.isDragging ? .dragging : .tracking
           self.applySmoothedPoint(point)
+        } else if result.matchCount > 0 {
+          // Flow-only frame with valid position — keep tracking mode
+          self.matchCount = result.matchCount
+          self.confidence = result.confidence
         } else {
+          self.matchCount = 0
+          self.confidence = 0.0
           if !self.isDragging {
             self.mode = .noMatch
           }
