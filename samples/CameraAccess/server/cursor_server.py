@@ -1052,7 +1052,10 @@ class GazeTracker:
                     vy += ay * dt
                     nx = cx + vx * dt
                     ny = cy + vy * dt
-                    move_mouse(nx, ny)
+                    if self._pinch.state == PinchState.HELD:
+                        mouse_drag_to(nx, ny)
+                    else:
+                        move_mouse(nx, ny)
                     with self._cursor_lock:
                         self._cursor_current = (nx, ny)
                 else:
