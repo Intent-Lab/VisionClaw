@@ -824,9 +824,18 @@ class GazeTracker:
         avg_x = sum(c[0] * c[2] for c in top) / total_inliers
         avg_y = sum(c[1] * c[2] for c in top) / total_inliers
         avg_conf = sum(c[3] * c[2] for c in top) / total_inliers
-        best_scale = top[0][4]
+        best_scale = top[0][4]  # sqrt(det) from best anchor
 
-        self._scale_factor = best_scale
+        # Full camera-to-screen scale for optical flow.
+        # Anchor matching uses: cam_to_screen = scr_dim / frame_dim * sqrt(det)
+        # Previously _scale_factor was just sqrt(det) (~1.0), missing the
+        # scr/frame ratio (~4x). This made subtle head movements invisible.
+        scr_ox2, scr_oy2, scr_w2, scr_h2 = get_screen_size()
+        new_sf = (scr_w2 / cam_w + scr_h2 / cam_h) / 2.0 * best_scale
+        if abs(new_sf - self._scale_factor) > 0.5:
+            print(f"[scale] camera->screen factor: {new_sf:.2f} "
+                  f"(was {self._scale_factor:.2f}, sqrt_det={best_scale:.2f})", flush=True)
+        self._scale_factor = new_sf
         return (avg_x, avg_y, total_inliers, avg_conf)
 
     def _compute_optical_flow(self, prev_gray, curr_gray):
@@ -868,8 +877,9 @@ class GazeTracker:
         dy = float(np.median(displacements[:, 1]))
 
         # Dead zone: ignore sub-pixel noise (camera sensor + JPEG artifacts)
+        # Low threshold (0.5px) to preserve subtle head movements
         mag = math.sqrt(dx * dx + dy * dy)
-        if mag < 1.5:
+        if mag < 0.5:
             return 0.0, 0.0
 
         return dx, dy
