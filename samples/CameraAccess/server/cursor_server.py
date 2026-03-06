@@ -379,8 +379,8 @@ class GazeTracker:
         self._last_anchor_time = 0
         self._frame_count = 0  # Frames since last anchor match
         self._anchor_interval = 5  # Do anchor matching every N frames
-        self._max_jump_px = 400  # Max allowed jump per anchor update (pixels)
         self._min_accept_matches = 12  # Minimum inliers to accept an anchor result
+        self._ema_alpha = 0.35  # EMA blend: 0=ignore new, 1=no smoothing
 
         # Screen content layer (per-monitor, retina-aware)
         self._screen_monitors = []  # List of (monitor, feats, retina_scale, feat_scale)
@@ -592,26 +592,22 @@ class GazeTracker:
             if best is not None:
                 sx, sy, mc, conf = best
 
-                # Outlier rejection: reject low-quality or dampen big jumps
+                # Outlier rejection: too few inliers → skip
                 if mc < self._min_accept_matches and self._current_pos is not None:
-                    # Too few inliers and we already have a position — skip
                     self._prev_gray = gray
                     elapsed_ms = (time.time() - t0) * 1000
                     print(f"[locate] {elapsed_ms:.0f}ms {source} REJECTED "
                           f"(matches={mc} < {self._min_accept_matches})", flush=True)
                 else:
-                    # Dampen large jumps
+                    # EMA smoothing: blend new result with current position
                     if self._current_pos is not None:
                         ox, oy = self._current_pos
-                        dx = sx - ox
-                        dy = sy - oy
-                        dist = math.sqrt(dx * dx + dy * dy)
-                        if dist > self._max_jump_px:
-                            # Blend: move at most max_jump_px toward the new point
-                            ratio = self._max_jump_px / dist
-                            sx = ox + dx * ratio
-                            sy = oy + dy * ratio
-                            print(f"[locate] DAMPED jump {dist:.0f}px -> {self._max_jump_px}px", flush=True)
+                        # Higher alpha for high-confidence results
+                        alpha = self._ema_alpha
+                        if conf > 0.6:
+                            alpha = min(0.6, alpha * 1.5)
+                        sx = ox + (sx - ox) * alpha
+                        sy = oy + (sy - oy) * alpha
 
                     self._current_pos = (sx, sy)
                     self._last_anchor_time = time.time()
