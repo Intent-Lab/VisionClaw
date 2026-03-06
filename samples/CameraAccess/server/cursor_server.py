@@ -461,6 +461,12 @@ class GazeTracker:
         self._min_accept_matches = 12  # Minimum inliers to accept an anchor result
         self._kalman = GazeKalmanFilter()  # Smooth + predict cursor position
 
+        # Server-side cursor interpolation (60fps smooth movement)
+        self._cursor_target = None  # Where Kalman says we should be
+        self._cursor_current = None  # Where the cursor actually is (lerped)
+        self._cursor_lock = threading.Lock()
+        self._cursor_thread_active = False
+
         # Screen content layer (per-monitor, retina-aware)
         self._screen_monitors = []  # List of (monitor, feats, retina_scale, feat_scale)
         self._screen_last_matched_idx = 0  # Prioritize last matched monitor
@@ -704,8 +710,8 @@ class GazeTracker:
         ky = max(scr_oy, min(scr_oy + scr_h, ky))
         self._current_pos = (kx, ky)
 
-        # Move cursor directly from server
-        move_mouse(kx, ky)
+        # Set target for 60fps interpolation thread (smooth movement)
+        self.set_cursor_target(kx, ky)
 
         elapsed_ms = (time.time() - t0) * 1000
         if source:
@@ -854,6 +860,52 @@ class GazeTracker:
             return 0.0, 0.0
 
         return dx, dy
+
+    # -- Server-side cursor interpolation --
+
+    def start_cursor_interpolation(self):
+        """Start 60fps thread that smoothly lerps cursor toward Kalman target."""
+        if self._cursor_thread_active:
+            return
+        self._cursor_thread_active = True
+        t = threading.Thread(target=self._cursor_interpolation_loop, daemon=True)
+        t.start()
+        print("[Cursor] 60fps interpolation started", flush=True)
+
+    def _cursor_interpolation_loop(self):
+        """60fps: lerp actual cursor position toward Kalman target."""
+        interval = 1.0 / 60.0
+        while self._cursor_thread_active:
+            with self._cursor_lock:
+                target = self._cursor_target
+                current = self._cursor_current
+
+            if target is not None and current is not None:
+                tx, ty = target
+                cx, cy = current
+                dx = tx - cx
+                dy = ty - cy
+                dist = math.sqrt(dx * dx + dy * dy)
+
+                if dist > 0.5:
+                    # Adaptive lerp: faster for large distances
+                    lerp = 0.25 if dist < 100 else 0.4
+                    nx = cx + dx * lerp
+                    ny = cy + dy * lerp
+                    move_mouse(nx, ny)
+                    with self._cursor_lock:
+                        self._cursor_current = (nx, ny)
+
+            time.sleep(interval)
+
+    def set_cursor_target(self, x, y):
+        """Set the target position for the interpolation thread."""
+        with self._cursor_lock:
+            self._cursor_target = (x, y)
+            # First point: jump directly
+            if self._cursor_current is None:
+                self._cursor_current = (x, y)
+                move_mouse(x, y)
 
     # -- Persistence --
 
@@ -1131,5 +1183,6 @@ if __name__ == "__main__":
     print(f"[CursorServer] Calibrated: {gaze_tracker.is_calibrated()} "
           f"({len(gaze_tracker._anchors)} anchors)")
     gaze_tracker.start_screen_capture()
+    gaze_tracker.start_cursor_interpolation()
     print(f"[CursorServer] Starting on http://0.0.0.0:8765")
     app.run(host="0.0.0.0", port=8765, threaded=True)
