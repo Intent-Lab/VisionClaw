@@ -121,7 +121,7 @@ struct GazeControlButtons: View {
           CircleButton(icon: "xmark", text: "Cancel") {
             Task { await gazeVM.cancelCalibration() }
           }
-        } else if gazeVM.mode == .tracking || gazeVM.mode == .dragging {
+        } else if gazeVM.mode == .tracking || gazeVM.mode == .dragging || gazeVM.mode == .noMatch {
           CircleButton(icon: "scope", text: "Calibrate") {
             Task { await gazeVM.startCalibration() }
           }
