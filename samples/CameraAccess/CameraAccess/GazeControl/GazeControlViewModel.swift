@@ -24,6 +24,9 @@ class GazeControlViewModel: ObservableObject {
   private var smoothedPoint: CGPoint?
   private var dragStartPoint: CGPoint?
 
+  // Progressive calibration: accumulate markers seen across frames
+  private var accumulatedMarkers: [String: CGPoint] = [:]
+
   // MARK: - Session Control
 
   func startSession() async {
@@ -32,6 +35,7 @@ class GazeControlViewModel: ObservableObject {
     calibrationCount = 0
     gazeScreenPoint = nil
     smoothedPoint = nil
+    accumulatedMarkers = [:]
     homography.reset()
 
     await cursorBridge.checkConnection()
@@ -55,6 +59,7 @@ class GazeControlViewModel: ObservableObject {
     calibrationCount = 0
     gazeScreenPoint = nil
     smoothedPoint = nil
+    accumulatedMarkers = [:]
     homography.reset()
     NSLog("[GazeControl] Session stopped")
   }
@@ -70,15 +75,21 @@ class GazeControlViewModel: ObservableObject {
     lastSendTime = now
 
     let result = markerDetector.detectMarkers(in: image)
-    calibrationCount = result.detectedCount
 
-    if result.isFullyCalibrated {
-      updateCalibration(result)
+    // Progressive calibration: accumulate markers seen across multiple frames
+    // (camera FOV is too narrow to see all 4 corners at once)
+    for (id, marker) in result.markers {
+      accumulatedMarkers[id] = marker.center
+    }
+
+    calibrationCount = accumulatedMarkers.count
+
+    if accumulatedMarkers.count == 4 {
+      // All 4 markers have been seen (possibly across different frames)
+      updateCalibration(accumulatedMarkers)
       updateGazePoint(image: image)
-    } else if mode == .calibrating {
-      // Still waiting for all 4 markers
-    } else {
-      // Lost calibration - use last known homography if available
+    } else if mode != .calibrating {
+      // Already calibrated — keep tracking with last known homography
       if homography.isCalibrated {
         updateGazePoint(image: image)
       }
@@ -118,13 +129,11 @@ class GazeControlViewModel: ObservableObject {
 
   // MARK: - Internal
 
-  private func updateCalibration(_ result: MarkerDetectionResult) {
+  private func updateCalibration(_ centers: [String: CGPoint]) {
     guard let screenSize = cursorBridge.remoteScreenSize else {
       NSLog("[GazeControl] No screen size from server yet")
       return
     }
-
-    let centers = result.markers.mapValues { $0.center }
 
     if homography.calibrate(markerCenters: centers, screenSize: screenSize) {
       if mode == .calibrating {

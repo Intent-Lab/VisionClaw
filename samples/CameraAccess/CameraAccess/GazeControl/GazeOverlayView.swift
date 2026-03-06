@@ -56,7 +56,7 @@ struct GazeOverlayView: View {
       // Mode and coordinate info
       VStack(spacing: 6) {
         if gazeVM.mode == .calibrating {
-          Text("Point glasses at screen with colored markers")
+          Text("Slowly scan across the screen corners")
             .font(.system(size: 14, weight: .medium))
             .foregroundColor(.white)
             .padding(.horizontal, 16)
