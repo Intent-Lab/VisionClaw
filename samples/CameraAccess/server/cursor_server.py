@@ -219,11 +219,11 @@ def handle_health():
 _device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 _extractor = SuperPoint(max_num_keypoints=2048).eval().to(_device)
 
-# BFMatcher with cross-check (mutual nearest neighbor) — high precision matching
-_bf_cross = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+# BFMatcher for kNN ratio test — more robust at varying distances
+_bf = cv2.BFMatcher(cv2.NORM_L2)
 
 # Max camera frame dimension (downscale large frames before extraction)
-_MAX_CAM_DIM = 640
+_MAX_CAM_DIM = 960
 
 
 class ScreenshotCache:
@@ -333,8 +333,13 @@ class ScreenshotCache:
             if len(cam_desc) < 2 or len(scr_desc) < 2:
                 continue
 
-            matches = _bf_cross.match(cam_desc, scr_desc)
-            matches = sorted(matches, key=lambda m: m.distance)
+            raw = _bf.knnMatch(cam_desc, scr_desc, k=2)
+            matches = []
+            for pair in raw:
+                if len(pair) == 2:
+                    m, n = pair
+                    if m.distance < 0.85 * n.distance:
+                        matches.append(m)
 
             n_matches = len(matches)
             if n_matches < min_matches:
