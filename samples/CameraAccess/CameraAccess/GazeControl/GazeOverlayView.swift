@@ -6,7 +6,7 @@ struct GazeStatusBar: View {
   var body: some View {
     HStack(spacing: 8) {
       StatusPill(color: serverStatusColor, text: serverStatusText)
-      StatusPill(color: calibrationColor, text: calibrationText)
+      StatusPill(color: matchColor, text: matchText)
 
       if gazeVM.mode == .dragging {
         StatusPill(color: .orange, text: "Dragging")
@@ -32,16 +32,19 @@ struct GazeStatusBar: View {
     }
   }
 
-  private var calibrationColor: Color {
-    switch gazeVM.calibrationCount {
-    case 4: return .green
-    case 1...3: return .yellow
-    default: return .gray
+  private var matchColor: Color {
+    switch gazeVM.mode {
+    case .tracking, .dragging: return .green
+    case .noMatch: return .red
+    case .connecting: return .gray
     }
   }
 
-  private var calibrationText: String {
-    "\(gazeVM.calibrationCount)/4"
+  private var matchText: String {
+    if gazeVM.matchCount > 0 {
+      return "\(gazeVM.matchCount)pt"
+    }
+    return "No Match"
   }
 }
 
@@ -53,10 +56,9 @@ struct GazeOverlayView: View {
       GazeStatusBar(gazeVM: gazeVM)
       Spacer()
 
-      // Mode and coordinate info
       VStack(spacing: 6) {
-        if gazeVM.mode == .calibrating {
-          Text("Slowly scan across the screen corners")
+        if gazeVM.mode == .noMatch {
+          Text("No features detected on screen")
             .font(.system(size: 14, weight: .medium))
             .foregroundColor(.white)
             .padding(.horizontal, 16)
@@ -85,14 +87,12 @@ struct GazeControlButtons: View {
   @ObservedObject var gazeVM: GazeControlViewModel
 
   var body: some View {
-    if gazeVM.isActive && gazeVM.mode != .calibrating {
+    if gazeVM.isActive && (gazeVM.mode == .tracking || gazeVM.mode == .dragging) {
       HStack(spacing: 8) {
-        // Click button
         CircleButton(icon: "hand.tap.fill", text: "Tap") {
           gazeVM.triggerClick()
         }
 
-        // Drag toggle button
         CircleButton(
           icon: gazeVM.isDragging ? "hand.raised.fill" : "hand.draw.fill",
           text: gazeVM.isDragging ? "Drop" : "Grab"

@@ -89,6 +89,50 @@ class CursorControlBridge: ObservableObject {
     sendCommand("mouse_up", body: ["x": point.x, "y": point.y])
   }
 
+  // MARK: - Locate (server-side ORB matching)
+
+  struct LocateResult {
+    let status: String      // "ok" or "no_match"
+    let point: CGPoint?     // screen coordinate (nil when no_match)
+    let matchCount: Int
+    let confidence: Double
+  }
+
+  /// POST a camera frame JPEG to /locate and get back screen coordinates.
+  func locateGaze(imageData: Data) async -> LocateResult? {
+    guard let url = URL(string: "\(GazeConfig.cursorServerBaseURL)/locate") else { return nil }
+
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+    req.httpBody = imageData
+
+    do {
+      let (data, response) = try await session.data(for: req)
+      guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+
+      guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let status = json["status"] as? String
+      else { return nil }
+
+      let point: CGPoint?
+      if status == "ok", let x = json["x"] as? Double, let y = json["y"] as? Double {
+        point = CGPoint(x: x, y: y)
+      } else {
+        point = nil
+      }
+
+      return LocateResult(
+        status: status,
+        point: point,
+        matchCount: json["matches"] as? Int ?? 0,
+        confidence: json["confidence"] as? Double ?? 0.0
+      )
+    } catch {
+      return nil
+    }
+  }
+
   // MARK: - Internal
 
   private func sendCommand(_ endpoint: String, body: [String: Any]) {
