@@ -36,7 +36,7 @@ import numpy as np
 import Quartz
 import torch
 from flask import Flask, request, jsonify
-from lightglue import LightGlue, SuperPoint
+from lightglue import SuperPoint
 from lightglue.utils import numpy_image_to_torch
 
 app = Flask(__name__)
@@ -217,8 +217,11 @@ def handle_health():
 # ---------------------------------------------------------------------------
 
 _device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-_extractor = SuperPoint(max_num_keypoints=512).eval().to(_device)
-_matcher = LightGlue(features="superpoint", depth=6, width=128).eval().to(_device)
+_extractor = SuperPoint(max_num_keypoints=1024).eval().to(_device)
+
+# FLANN matcher with ratio test
+_flann = cv2.FlannBasedMatcher(dict(algorithm=1, trees=5), dict(checks=50))
+_RATIO_THRESH = 0.9
 
 # Max camera frame dimension (downscale large frames before extraction)
 _MAX_CAM_DIM = 640
@@ -309,25 +312,29 @@ class ScreenshotCache:
         # Try last matched monitor first, then others
         order = [start_idx] + [i for i in range(len(monitors)) if i != start_idx]
 
+        cam_desc = cam_feats["descriptors"][0].cpu().numpy().astype(np.float32)
+        cam_kps = cam_feats["keypoints"][0].cpu().numpy()
+
         for idx in order:
             mon, screen_feats, scale, feat_scale = monitors[idx]
 
-            with torch.no_grad():
-                result = _matcher({"image0": screen_feats, "image1": cam_feats})
+            scr_desc = screen_feats["descriptors"][0].cpu().numpy().astype(np.float32)
+            scr_kps = screen_feats["keypoints"][0].cpu().numpy()
 
-            matches = result["matches0"][0]
-            valid = matches > -1
-            n_matches = int(valid.sum().item())
+            if len(cam_desc) < 2 or len(scr_desc) < 2:
+                continue
+            raw_matches = _flann.knnMatch(cam_desc, scr_desc, k=2)
+            good = []
+            for pair in raw_matches:
+                if len(pair) == 2 and pair[0].distance < _RATIO_THRESH * pair[1].distance:
+                    good.append(pair[0])
 
+            n_matches = len(good)
             if n_matches < min_matches:
                 continue
 
-            # Get matched keypoint coordinates
-            kps0 = screen_feats["keypoints"][0][valid].cpu().numpy()
-            kps1 = cam_feats["keypoints"][0][matches[valid]].cpu().numpy()
-
-            src_pts = kps1.reshape(-1, 1, 2)
-            dst_pts = kps0.reshape(-1, 1, 2)
+            src_pts = cam_kps[[m.queryIdx for m in good]].reshape(-1, 1, 2)
+            dst_pts = scr_kps[[m.trainIdx for m in good]].reshape(-1, 1, 2)
 
             H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
             if H is None:
@@ -377,9 +384,13 @@ def handle_locate():
         return jsonify({"error": "Empty or invalid JPEG"}), 400
 
     t_start = time.time()
-    result = screenshot_cache.locate(jpeg_data, min_matches=15)
+    result = screenshot_cache.locate(jpeg_data, min_matches=8)
     elapsed_ms = (time.time() - t_start) * 1000
-    print(f"[locate] {elapsed_ms:.0f}ms", flush=True)
+    if result:
+        _, _, mc, conf = result
+        print(f"[locate] {elapsed_ms:.0f}ms matches={mc} conf={conf:.2f}", flush=True)
+    else:
+        print(f"[locate] {elapsed_ms:.0f}ms NO MATCH", flush=True)
 
     if result is None:
         return jsonify({
