@@ -217,13 +217,13 @@ def handle_health():
 # ---------------------------------------------------------------------------
 
 _device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-_extractor = SuperPoint(max_num_keypoints=1024).eval().to(_device)
+_extractor = SuperPoint(max_num_keypoints=2048).eval().to(_device)
 
 # BFMatcher with cross-check (mutual nearest neighbor) — high precision matching
 _bf_cross = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
 
 # Max camera frame dimension (downscale large frames before extraction)
-_MAX_CAM_DIM = 640
+_MAX_CAM_DIM = 960
 
 
 class ScreenshotCache:
@@ -242,38 +242,47 @@ class ScreenshotCache:
         self._monitors = []
         self._last_refresh = 0
         self._last_matched_idx = 0  # Prioritize last matched monitor
+        self._refreshing = False  # Background refresh flag
 
     def _refresh_if_needed(self):
         now = time.time()
         if now - self._last_refresh < self.refresh_interval:
             return
-        monitors = []
-        # Detect Retina scale from primary monitor
-        logical_w = Quartz.CGDisplayPixelsWide(Quartz.CGMainDisplayID())
+        if self._refreshing:
+            return  # Already refreshing in background
+        self._refreshing = True
+        thread = threading.Thread(target=self._do_refresh, daemon=True)
+        thread.start()
 
-        with mss.mss() as sct:
-            primary_w = sct.monitors[1]["width"] if len(sct.monitors) > 1 else 1
-            scale = primary_w / logical_w if logical_w > 0 else 1.0
+    def _do_refresh(self):
+        try:
+            monitors = []
+            logical_w = Quartz.CGDisplayPixelsWide(Quartz.CGMainDisplayID())
 
-            for mon in sct.monitors[1:]:  # Skip virtual screen [0]
-                screenshot = sct.grab(mon)
-                img = np.array(screenshot)[:, :, :3]
-                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                # Downscale screenshot for faster extraction (keep ratio for coord mapping)
-                sh, sw = gray.shape[:2]
-                max_dim = max(sh, sw)
-                feat_scale = 1.0
-                if max_dim > 1280:
-                    feat_scale = 1280 / max_dim
-                    gray = cv2.resize(gray, (int(sw * feat_scale), int(sh * feat_scale)))
-                tensor = numpy_image_to_torch(gray).to(_device)
-                with torch.no_grad():
-                    feats = _extractor.extract(tensor)
-                monitors.append((mon, feats, scale, feat_scale))
+            with mss.mss() as sct:
+                primary_w = sct.monitors[1]["width"] if len(sct.monitors) > 1 else 1
+                scale = primary_w / logical_w if logical_w > 0 else 1.0
 
-        with self._lock:
-            self._monitors = monitors
-            self._last_refresh = now
+                for mon in sct.monitors[1:]:  # Skip virtual screen [0]
+                    screenshot = sct.grab(mon)
+                    img = np.array(screenshot)[:, :, :3]
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    sh, sw = gray.shape[:2]
+                    max_dim = max(sh, sw)
+                    feat_scale = 1.0
+                    if max_dim > 1600:
+                        feat_scale = 1600 / max_dim
+                        gray = cv2.resize(gray, (int(sw * feat_scale), int(sh * feat_scale)))
+                    tensor = numpy_image_to_torch(gray).to(_device)
+                    with torch.no_grad():
+                        feats = _extractor.extract(tensor)
+                    monitors.append((mon, feats, scale, feat_scale))
+
+            with self._lock:
+                self._monitors = monitors
+                self._last_refresh = time.time()
+        finally:
+            self._refreshing = False
 
     def locate(self, camera_jpeg_bytes, min_matches=15):
         """Match camera JPEG against all monitors using SuperPoint + LightGlue.
@@ -394,11 +403,11 @@ def handle_locate():
         return jsonify({"error": "Empty or invalid JPEG"}), 400
 
     t_start = time.time()
-    result = screenshot_cache.locate(jpeg_data, min_matches=8)
+    result = screenshot_cache.locate(jpeg_data, min_matches=5)
     elapsed_ms = (time.time() - t_start) * 1000
 
     # Filter out low-confidence results (bad homography)
-    if result and result[3] < 0.15:
+    if result and result[3] < 0.08:
         print(f"[locate] {elapsed_ms:.0f}ms x={result[0]:.0f} y={result[1]:.0f} matches={result[2]} conf={result[3]:.2f} REJECTED", flush=True)
         result = None
     elif result:
