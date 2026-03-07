@@ -36,14 +36,15 @@ class AudioManager {
   func setupAudioSession(useIPhoneMode: Bool = false) throws {
     self.useIPhoneMode = useIPhoneMode
     let session = AVAudioSession.sharedInstance()
-    // iPhone mode: voiceChat for aggressive echo cancellation (mic + speaker co-located)
-    // Glasses mode: allowBluetoothHFP + mixWithOthers for background streaming support
-    // When speaker output enabled, audio routes to iPhone speaker (for demos)
-    if useIPhoneMode {
+    // voiceChat: aggressive echo cancellation (mic + speaker co-located on phone)
+    // videoChat: mild AEC (mic on glasses, speaker on glasses)
+    // When Speaker Output is ON, speaker is on phone so always use voiceChat AEC
+    let forceSpeaker = SettingsManager.shared.speakerOutputEnabled
+    if useIPhoneMode || forceSpeaker {
       try session.setCategory(
         .playAndRecord,
         mode: .voiceChat,
-        options: [.defaultToSpeaker, .allowBluetooth]
+        options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
       )
     } else {
       try session.setCategory(
