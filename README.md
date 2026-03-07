@@ -235,6 +235,8 @@ Now when you talk to the AI, it can execute tasks through OpenClaw.
 
 ## Architecture
 
+> **System docs:** For the complete F.R.I.D.A.Y. agentic backend architecture (agents, skills, memory, cron jobs, expected-event engine), see [`docs/friday-system-architecture.md`](docs/friday-system-architecture.md).
+
 ### Key Files (iOS)
 
 All source code is in `samples/CameraAccess/CameraAccess/`:
