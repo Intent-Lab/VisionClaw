@@ -34,6 +34,9 @@ import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
   companion object {
+    const val ACTION_QUICK_START_STREAMING =
+        "com.meta.wearable.dat.externalsampleapps.cameraaccess.action.QUICK_START_STREAMING"
+
     val PERMISSIONS: Array<String> = arrayOf(
         BLUETOOTH, BLUETOOTH_CONNECT, INTERNET, RECORD_AUDIO, CAMERA,
     )
@@ -85,6 +88,19 @@ class MainActivity : ComponentActivity() {
           onRequestWearablesPermission = ::requestWearablesPermission,
       )
     }
+
+    handleQuickIntent(intent)
+  }
+
+  override fun onNewIntent(intent: android.content.Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    handleQuickIntent(intent)
+  }
+
+  private fun handleQuickIntent(intent: android.content.Intent?) {
+    if (intent?.action != ACTION_QUICK_START_STREAMING) return
+    viewModel.quickStartStreaming(::requestWearablesPermission)
   }
 
   fun checkPermissions(onPermissionsGranted: () -> Unit) {

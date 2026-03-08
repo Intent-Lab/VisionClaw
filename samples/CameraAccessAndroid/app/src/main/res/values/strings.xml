@@ -54,4 +54,7 @@
     <string name="getting_started_tip_led" description="Tip about capture LED">The capture LED lets others know when you\'re capturing content or going live.</string>
     <string name="getting_started_tip_photo" description="Tip about photo capture">Capture photos by tapping the camera button.</string>
     <string name="getting_started_continue" description="Continue button">Continue</string>
+
+    <!-- Quick settings tile -->
+    <string name="quick_tile_label" description="Quick Settings tile label">VisionClaw</string>
 </resources>

@@ -158,6 +158,23 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     _uiState.update { it.copy(isStreaming = true, isPhoneMode = true) }
   }
 
+  fun quickStartStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
+    val state = _uiState.value
+    if (state.isStreaming) {
+      setRecentError("Already streaming")
+      return
+    }
+    if (!state.isRegistered) {
+      setRecentError("Connect and register glasses first")
+      return
+    }
+    if (!state.hasActiveDevice) {
+      setRecentError("No active glasses device")
+      return
+    }
+    navigateToStreaming(onRequestWearablesPermission)
+  }
+
   fun navigateToDeviceSelection() {
     _uiState.update { it.copy(isStreaming = false, isPhoneMode = false) }
   }
