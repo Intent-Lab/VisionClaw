@@ -96,7 +96,7 @@ struct SettingsView: View {
           }
         }
 
-        Section(header: Text("Golf"), footer: Text("Free API key at golfcourseapi.com — enables course data, distance to green, and hole info.")) {
+        Section(header: Text("Golf"), footer: Text("Free API key at golfcourseapi.com — enables course data, distance to green, and hole info. Your 7-iron carry distance calibrates all club recommendations.")) {
           VStack(alignment: .leading, spacing: 4) {
             Text("Golf Course API Key")
               .font(.caption)
@@ -104,6 +104,15 @@ struct SettingsView: View {
             TextField("Enter API key", text: $golfCourseAPIKey)
               .autocapitalization(.none)
               .disableAutocorrection(true)
+              .font(.system(.body, design: .monospaced))
+          }
+
+          VStack(alignment: .leading, spacing: 4) {
+            Text("7-Iron Carry Distance (yards)")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            TextField("140", text: $golfSevenIronCarry)
+              .keyboardType(.numberPad)
               .font(.system(.body, design: .monospaced))
           }
         }
