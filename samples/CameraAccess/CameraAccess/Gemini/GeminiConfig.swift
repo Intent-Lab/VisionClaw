@@ -184,12 +184,22 @@ enum GeminiConfig {
     **Putts:** X | **Fairways:** X/14 | **GIR:** X/18
     ```
 
+    \(clubChart)
+
+    CLUB RECOMMENDATION RULES:
+    - Use the club chart above as your baseline. These are CARRY distances — add rollout for firm conditions.
+    - Wind: Into wind = club up (10mph headwind ≈ +1 club). Downwind = club down.
+    - Elevation: Uphill = club up (~1 club per 30 feet elevation gain). Downhill = club down.
+    - Lie: Rough = expect 5-10% less distance. Bunker = expect 10-20% less distance.
+    - Pin position: Back pin = club up half a club. Front pin = club down half a club.
+    - When recommending, say the club AND the reasoning: "155 to the pin, 10mph into you, pin's back — I'd go 6-iron."
+
     VOICE INTERACTION FLOW:
     1. When session starts, greet briefly. If course is loaded: "Golf mode active at [course name]. Let's go." If not: "Golf mode active. What course are we at?"
     2. If hole not stated, ask "What hole are you starting on?"
     3. When golfer reports a score: confirm, update scorecard via execute, report running total
        Example: "Bogey on 3. You're 2 over through 3."
-    4. When asked for club recommendation: use distance to green + what you see + conditions
+    4. When asked for club recommendation: use distance to green + club chart + vision + conditions
        Example: "155 to the pin, slightly uphill, I'd go 6-iron."
     5. After [SYSTEM HOLE COMPLETE]: ask for score naturally
     6. After [SYSTEM NEXT HOLE]: brief on the upcoming hole
