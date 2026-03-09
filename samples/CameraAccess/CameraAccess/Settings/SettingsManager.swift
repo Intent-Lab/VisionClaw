@@ -113,7 +113,7 @@ final class SettingsManager {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
                 .openClawHookToken, .openClawGatewayToken, .openClawTunnelURL, .webrtcSignalingURL,
                 .translationTargetLanguage, .translationOutputMode, .golfCourseAPIKey,
-                .discordVisionClawWebhook] {
+                .golfSevenIronCarry, .discordVisionClawWebhook] {
       defaults.removeObject(forKey: key.rawValue)
     }
   }
