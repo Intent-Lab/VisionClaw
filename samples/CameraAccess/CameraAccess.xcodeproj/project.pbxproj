@@ -272,6 +272,7 @@
 			isa = PBXGroup;
 			children = (
 				9DD894AF2F4047630090B9B9 /* SettingsManager.swift */,
+				9DD894B12F4047630090B9B9 /* KeychainHelper.swift */,
 				9DD894B02F4047630090B9B9 /* SettingsView.swift */,
 			);
 			path = Settings;
