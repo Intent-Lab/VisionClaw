@@ -887,6 +887,83 @@ class GeminiSessionViewModel: ObservableObject {
     NSLog("[GolfSession] Advanced to hole %d", nextHole)
   }
 
+  // MARK: - Golf: Course Confirmation
+
+  /// Confirm the auto-detected course
+  func confirmGolfCourse() {
+    golfState?.courseConfirmed = true
+  }
+
+  /// Switch to a different nearby course
+  func selectGolfCourse(_ course: GolfCourse) async {
+    // Load full details if needed
+    let detailed: GolfCourse
+    if course.holes.isEmpty, let d = await GolfCourseAPIService.shared.getCourseDetails(courseId: course.id) {
+      detailed = d
+    } else {
+      detailed = course
+    }
+    GolfCourseAPIService.shared.activeCourse = detailed
+    golfState?.courseId = detailed.id
+    golfState?.courseName = detailed.name
+    golfState?.holesData = detailed.holes
+    golfState?.courseConfirmed = true
+    if let firstHole = detailed.holes.first(where: { $0.number == 1 }) {
+      golfState?.par = firstHole.par
+      golfState?.holeYardage = firstHole.yardage
+    }
+    injectCourseDataToGemini(course: detailed)
+  }
+
+  /// Toggle the mini satellite map
+  func toggleMiniMap() {
+    golfState?.showMiniMap.toggle()
+  }
+
+  // MARK: - Golf: Wind Conditions
+
+  /// Fetch wind from Open-Meteo (free, no API key needed)
+  private func fetchWindConditions(lat: Double, lng: Double) async {
+    let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lng)&current=wind_speed_10m,wind_direction_10m&wind_speed_unit=mph"
+    guard let url = URL(string: urlString) else { return }
+
+    do {
+      let (data, response) = try await URLSession.shared.data(from: url)
+      guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else { return }
+      guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let current = json["current"] as? [String: Any] else { return }
+
+      let speed = current["wind_speed_10m"] as? Double ?? 0
+      let direction = current["wind_direction_10m"] as? Double ?? 0
+
+      let dirLabel = Self.windDirectionLabel(degrees: direction)
+      let windStr: String
+      if speed < 3 {
+        windStr = "Calm"
+      } else {
+        windStr = "\(dirLabel) \(Int(speed))mph"
+      }
+
+      golfState?.wind = windStr
+      golfState?.windSpeed = speed
+      golfState?.windDirection = dirLabel
+
+      // Inject wind to Gemini
+      let windContext = "[SYSTEM WEATHER] Wind: \(windStr) (\(String(format: "%.0f", speed)) mph from \(dirLabel), direction \(Int(direction))°)"
+      geminiService.sendTextContext(windContext)
+      NSLog("[GolfSession] Wind loaded: %@", windStr)
+    } catch {
+      NSLog("[GolfSession] Wind fetch failed: %@", error.localizedDescription)
+    }
+  }
+
+  private static func windDirectionLabel(degrees: Double) -> String {
+    let dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+    let idx = Int((degrees + 11.25).truncatingRemainder(dividingBy: 360) / 22.5)
+    return dirs[idx % 16]
+  }
+
   func sendVideoFrameIfThrottled(image: UIImage) {
     guard isGeminiActive, connectionState == .ready else { return }
     let now = Date()
