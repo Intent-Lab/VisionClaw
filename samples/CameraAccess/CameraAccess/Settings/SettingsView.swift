@@ -26,15 +26,7 @@ struct SettingsView: View {
     NavigationView {
       Form {
         Section(header: Text("Gemini API")) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("API Key")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Enter Gemini API key", text: $geminiAPIKey)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
-          }
+          SecureSettingsField(label: "API Key", placeholder: "Enter Gemini API key", text: $geminiAPIKey)
         }
 
         Section(header: Text("System Prompt"), footer: Text("Customize the AI assistant's behavior and personality. Changes take effect on the next Gemini session.")) {
@@ -64,25 +56,8 @@ struct SettingsView: View {
               .font(.system(.body, design: .monospaced))
           }
 
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Hook Token")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Hook token", text: $openClawHookToken)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
-          }
-
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Gateway Token")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Gateway auth token", text: $openClawGatewayToken)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
-          }
+          SecureSettingsField(label: "Hook Token", placeholder: "Hook token", text: $openClawHookToken)
+          SecureSettingsField(label: "Gateway Token", placeholder: "Gateway auth token", text: $openClawGatewayToken)
 
           VStack(alignment: .leading, spacing: 4) {
             Text("Tunnel URL (off-WiFi fallback)")
@@ -97,15 +72,7 @@ struct SettingsView: View {
         }
 
         Section(header: Text("Golf"), footer: Text("Free API key at golfcourseapi.com — enables course data, distance to green, and hole info. Your 7-iron carry distance calibrates all club recommendations.")) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Golf Course API Key")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("Enter API key", text: $golfCourseAPIKey)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .font(.system(.body, design: .monospaced))
-          }
+          SecureSettingsField(label: "Golf Course API Key", placeholder: "Enter API key", text: $golfCourseAPIKey)
 
           VStack(alignment: .leading, spacing: 4) {
             Text("7-Iron Carry Distance (yards)")
@@ -132,16 +99,7 @@ struct SettingsView: View {
         }
 
         Section(header: Text("Discord"), footer: Text("Webhook URL for #visionclaw channel. Server Settings > Integrations > Webhooks in Discord.")) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Webhook URL")
-              .font(.caption)
-              .foregroundColor(.secondary)
-            TextField("https://discord.com/api/webhooks/...", text: $discordVisionClawWebhook)
-              .autocapitalization(.none)
-              .disableAutocorrection(true)
-              .keyboardType(.URL)
-              .font(.system(.body, design: .monospaced))
-          }
+          SecureSettingsField(label: "Webhook URL", placeholder: "https://discord.com/api/webhooks/...", text: $discordVisionClawWebhook)
         }
 
         Section(header: Text("WebRTC")) {
@@ -229,5 +187,41 @@ struct SettingsView: View {
       settings.golfSevenIronCarry = carry
     }
     settings.discordVisionClawWebhook = discordVisionClawWebhook.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+}
+
+// MARK: - Secure field with reveal toggle
+
+struct SecureSettingsField: View {
+  let label: String
+  let placeholder: String
+  @Binding var text: String
+  @State private var isRevealed = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(label)
+        .font(.caption)
+        .foregroundColor(.secondary)
+      HStack {
+        if isRevealed {
+          TextField(placeholder, text: $text)
+            .autocapitalization(.none)
+            .disableAutocorrection(true)
+            .font(.system(.body, design: .monospaced))
+        } else {
+          SecureField(placeholder, text: $text)
+            .autocapitalization(.none)
+            .disableAutocorrection(true)
+            .font(.system(.body, design: .monospaced))
+        }
+        Button(action: { isRevealed.toggle() }) {
+          Image(systemName: isRevealed ? "eye.slash.fill" : "eye.fill")
+            .foregroundColor(.secondary)
+            .font(.system(size: 14))
+        }
+        .buttonStyle(.plain)
+      }
+    }
   }
 }
