@@ -229,6 +229,7 @@ enum GeminiConfig {
     - Use golf terminology naturally (GIR, fairway, up-and-down, etc.)
     - When reading greens via camera, be transparent: "I can see some slope but I'd want to feel it with your feet too"
     """
+  }
 
   static var translationModeSystemInstruction: String {
     let target = SettingsManager.shared.translationTargetLanguage
