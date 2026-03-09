@@ -37,7 +37,7 @@
 		9DD6CB0E2F3C64F400ED7098 /* WebRTCOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD6CB0D2F3C64F400ED7098 /* WebRTCOverlayView.swift */; };
 		9DD894B22F4047630090B9B9 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894AF2F4047630090B9B9 /* SettingsManager.swift */; };
 		9DD894B32F4047630090B9B9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894B02F4047630090B9B9 /* SettingsView.swift */; };
-		9DD894B42F4047630090B9B9 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894B12F4047630090B9B9 /* KeychainHelper.swift */; };
+		9DD894B42F4047630090B9B9 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894B52F4047630090B9B9 /* KeychainHelper.swift */; };
 		9DD895962F405E0E0090B9B9 /* RTCVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD895952F405E0E0090B9B9 /* RTCVideoView.swift */; };
 		9DD895972F405E0E0090B9B9 /* PiPVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD895942F405E0E0090B9B9 /* PiPVideoView.swift */; };
 		A1B2C3D42F0A000200000001 /* GeminiConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000001 /* GeminiConfig.swift */; };
@@ -111,7 +111,7 @@
 		9DD6CB032F3C637D00ED7098 /* WebRTCSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebRTCSessionViewModel.swift; sourceTree = "<group>"; };
 		9DD6CB0D2F3C64F400ED7098 /* WebRTCOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebRTCOverlayView.swift; sourceTree = "<group>"; };
 		9DD894AF2F4047630090B9B9 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
-		9DD894B12F4047630090B9B9 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		9DD894B52F4047630090B9B9 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		9DD894B02F4047630090B9B9 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		9DD895942F405E0E0090B9B9 /* PiPVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiPVideoView.swift; sourceTree = "<group>"; };
 		9DD895952F405E0E0090B9B9 /* RTCVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RTCVideoView.swift; sourceTree = "<group>"; };
@@ -272,7 +272,7 @@
 			isa = PBXGroup;
 			children = (
 				9DD894AF2F4047630090B9B9 /* SettingsManager.swift */,
-				9DD894B12F4047630090B9B9 /* KeychainHelper.swift */,
+				9DD894B52F4047630090B9B9 /* KeychainHelper.swift */,
 				9DD894B02F4047630090B9B9 /* SettingsView.swift */,
 			);
 			path = Settings;
