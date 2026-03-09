@@ -46,6 +46,7 @@
 		A1B2C3D42F0A000200000005 /* GeminiOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000005 /* GeminiOverlayView.swift */; };
 		A1B2C3D42F0A000200000006 /* LocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000006 /* LocationManager.swift */; };
 		A1B2C3D42F0A000200000009 /* GolfCourseAPIService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000009 /* GolfCourseAPIService.swift */; };
+		A1B2C3D42F0A00020000000A /* ClubDistanceModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A00010000000A /* ClubDistanceModel.swift */; };
 		A1B2C3D42F0A000200000007 /* GolfOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000007 /* GolfOverlayView.swift */; };
 		A1B2C3D42F0A000200000008 /* TranslationOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000008 /* TranslationOverlayView.swift */; };
 		E66D30242E7DA71900470B48 /* MockDeviceKitButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */; };
