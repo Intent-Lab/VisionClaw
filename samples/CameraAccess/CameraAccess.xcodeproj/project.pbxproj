@@ -283,6 +283,7 @@
 				A1B2C3D42F0A000100000002 /* GeminiLiveService.swift */,
 				A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */,
 				A1B2C3D42F0A000100000009 /* GolfCourseAPIService.swift */,
+				A1B2C3D42F0A00010000000A /* ClubDistanceModel.swift */,
 				A1B2C3D42F0A000100000006 /* LocationManager.swift */,
 			);
 			path = Gemini;
