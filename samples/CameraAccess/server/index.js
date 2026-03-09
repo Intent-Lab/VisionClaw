@@ -12,9 +12,15 @@ const ROOM_GRACE_PERIOD_MS = 60_000;
 
 // TURN: ExpressTURN (1000 GB/month free, reliable)
 // Ports 3478 (standard), 80, 443 (firewall bypass)
-const EXPRESSTURN_SERVER = process.env.EXPRESSTURN_SERVER || "free.expressturn.com";
-const EXPRESSTURN_USER = process.env.EXPRESSTURN_USER || "efPU52K4SLOQ34W2QY";
-const EXPRESSTURN_PASS = process.env.EXPRESSTURN_PASS || "1TJPNFxHKXrZfelz";
+// SECURITY: Credentials MUST be set via environment variables — no hardcoded fallbacks
+const EXPRESSTURN_SERVER = process.env.EXPRESSTURN_SERVER;
+const EXPRESSTURN_USER = process.env.EXPRESSTURN_USER;
+const EXPRESSTURN_PASS = process.env.EXPRESSTURN_PASS;
+
+if (!EXPRESSTURN_SERVER || !EXPRESSTURN_USER || !EXPRESSTURN_PASS) {
+  console.warn("[WARN] TURN credentials not set via environment variables. /api/turn will return STUN-only config.");
+  console.warn("[WARN] Set EXPRESSTURN_SERVER, EXPRESSTURN_USER, EXPRESSTURN_PASS for relay support.");
+}
 
 function getTurnCredentials() {
   return {
