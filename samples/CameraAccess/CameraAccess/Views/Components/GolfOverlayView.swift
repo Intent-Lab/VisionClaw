@@ -1,3 +1,4 @@
+import MapKit
 import SwiftUI
 
 // MARK: - Golf Overlay (full overlay shown during golf session)
@@ -20,12 +21,46 @@ struct GolfOverlay: View {
         }
         GeminiStatusBar(geminiVM: geminiVM)
         Spacer()
+        // Mini map toggle
+        Button(action: { geminiVM.toggleMiniMap() }) {
+          Image(systemName: geminiVM.golfState?.showMiniMap == true ? "map.fill" : "map")
+            .font(.system(size: 14))
+            .foregroundColor(.green)
+            .padding(8)
+            .background(Color.black.opacity(0.5))
+            .clipShape(Circle())
+        }
         if let state = geminiVM.golfState {
           ScoreToParBadge(scoreToPar: state.scoreToPar, thruHole: state.currentHole > 1 ? state.currentHole - 1 : 0)
         }
       }
       .padding(.horizontal, 16)
       .padding(.top, 16)
+
+      // Course confirmation banner
+      if let state = geminiVM.golfState, state.courseLoaded && !state.courseConfirmed {
+        CourseConfirmationBanner(
+          courseName: state.courseName,
+          nearbyCourses: state.nearbyCoursesForPicker,
+          onConfirm: { geminiVM.confirmGolfCourse() },
+          onSelect: { course in Task { await geminiVM.selectGolfCourse(course) } }
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+      }
+
+      // Mini satellite map
+      if let state = geminiVM.golfState, state.showMiniMap {
+        GolfMiniMap(state: state, locationManager: geminiVM.locationManagerAccess)
+          .frame(height: 180)
+          .cornerRadius(14)
+          .overlay(
+            RoundedRectangle(cornerRadius: 14)
+              .stroke(Color.green.opacity(0.3), lineWidth: 1)
+          )
+          .padding(.horizontal, 16)
+          .padding(.top, 8)
+      }
 
       Spacer()
 
@@ -65,6 +100,171 @@ struct GolfOverlay: View {
     }
     .padding(.bottom, 80)
     .padding(.horizontal, 8)
+  }
+}
+
+// MARK: - Course Confirmation Banner
+
+struct CourseConfirmationBanner: View {
+  let courseName: String
+  let nearbyCourses: [GolfCourse]
+  let onConfirm: () -> Void
+  let onSelect: (GolfCourse) -> Void
+  @State private var showPicker = false
+
+  var body: some View {
+    VStack(spacing: 8) {
+      HStack(spacing: 10) {
+        Image(systemName: "location.fill")
+          .foregroundColor(.green)
+          .font(.system(size: 14))
+        Text("Detected: **\(courseName)**")
+          .font(.system(size: 14))
+          .foregroundColor(.white)
+        Spacer()
+      }
+      HStack(spacing: 12) {
+        Button(action: onConfirm) {
+          HStack(spacing: 4) {
+            Image(systemName: "checkmark")
+              .font(.system(size: 12, weight: .bold))
+            Text("Confirm")
+              .font(.system(size: 13, weight: .semibold))
+          }
+          .foregroundColor(.white)
+          .padding(.horizontal, 14)
+          .padding(.vertical, 8)
+          .background(Color.green)
+          .cornerRadius(8)
+        }
+        if nearbyCourses.count > 1 {
+          Button(action: { showPicker = true }) {
+            HStack(spacing: 4) {
+              Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 12))
+              Text("Change")
+                .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundColor(.green)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.green.opacity(0.15))
+            .cornerRadius(8)
+            .overlay(
+              RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.green.opacity(0.4), lineWidth: 1)
+            )
+          }
+        }
+        Spacer()
+      }
+
+      // Nearby courses picker
+      if showPicker {
+        VStack(alignment: .leading, spacing: 4) {
+          ForEach(nearbyCourses, id: \.id) { course in
+            Button(action: {
+              showPicker = false
+              onSelect(course)
+            }) {
+              HStack {
+                Text(course.name)
+                  .font(.system(size: 13))
+                  .foregroundColor(.white)
+                Spacer()
+                if !course.city.isEmpty {
+                  Text(course.city)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.5))
+                }
+              }
+              .padding(.vertical, 6)
+              .padding(.horizontal, 10)
+              .background(course.name == courseName ? Color.green.opacity(0.2) : Color.clear)
+              .cornerRadius(6)
+            }
+          }
+        }
+        .padding(.top, 4)
+      }
+    }
+    .padding(12)
+    .background(Color.black.opacity(0.8))
+    .cornerRadius(12)
+    .overlay(
+      RoundedRectangle(cornerRadius: 12)
+        .stroke(Color.green.opacity(0.4), lineWidth: 1)
+    )
+  }
+}
+
+// MARK: - Golf Mini Map (satellite view with position + green pin)
+
+struct GolfMiniMap: View {
+  let state: GolfState
+  let locationManager: LocationManager?
+
+  var body: some View {
+    GolfMapRepresentable(
+      userCoord: locationManager?.lastCoordinate,
+      greenCoord: greenCoordinate,
+      courseName: state.courseName
+    )
+  }
+
+  private var greenCoordinate: CLLocationCoordinate2D? {
+    guard let holeData = state.holesData.first(where: { $0.number == state.currentHole }),
+          let lat = holeData.greenLatitude,
+          let lng = holeData.greenLongitude else { return nil }
+    return CLLocationCoordinate2D(latitude: lat, longitude: lng)
+  }
+}
+
+struct GolfMapRepresentable: UIViewRepresentable {
+  let userCoord: CLLocationCoordinate2D?
+  let greenCoord: CLLocationCoordinate2D?
+  let courseName: String
+
+  func makeUIView(context: Context) -> MKMapView {
+    let map = MKMapView()
+    map.mapType = .satellite
+    map.isUserInteractionEnabled = false
+    map.showsUserLocation = true
+    map.isZoomEnabled = false
+    map.isScrollEnabled = false
+    return map
+  }
+
+  func updateUIView(_ map: MKMapView, context: Context) {
+    // Remove old annotations
+    map.removeAnnotations(map.annotations.filter { !($0 is MKUserLocation) })
+
+    // Center on user or green
+    if let user = userCoord {
+      let region: MKCoordinateRegion
+      if let green = greenCoord {
+        // Show both user and green
+        let centerLat = (user.latitude + green.latitude) / 2
+        let centerLng = (user.longitude + green.longitude) / 2
+        let latDelta = abs(user.latitude - green.latitude) * 1.8 + 0.001
+        let lngDelta = abs(user.longitude - green.longitude) * 1.8 + 0.001
+        region = MKCoordinateRegion(
+          center: CLLocationCoordinate2D(latitude: centerLat, longitude: centerLng),
+          span: MKCoordinateSpan(latitudeDelta: max(latDelta, 0.002), longitudeDelta: max(lngDelta, 0.002))
+        )
+        // Green pin
+        let pin = MKPointAnnotation()
+        pin.coordinate = green
+        pin.title = "Green"
+        map.addAnnotation(pin)
+      } else {
+        region = MKCoordinateRegion(
+          center: user,
+          span: MKCoordinateSpan(latitudeDelta: 0.003, longitudeDelta: 0.003)
+        )
+      }
+      map.setRegion(region, animated: false)
+    }
   }
 }
 
@@ -159,7 +359,7 @@ struct GolfHoleCard: View {
       divider
       cardItem(label: "WIND", value: state.wind.isEmpty ? "—" : state.wind)
       divider
-      cardItem(label: "LAST", value: state.lastClub.isEmpty ? "—" : state.lastClub)
+      clubItem(label: "CLUB", value: state.recommendedClub.isEmpty ? "—" : state.recommendedClub)
     }
     .background(Color.black.opacity(0.75))
     .cornerRadius(14)
@@ -192,6 +392,21 @@ struct GolfHoleCard: View {
       Text(value)
         .font(.system(size: 18, weight: .bold, design: .rounded))
         .foregroundColor(.green)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+    }
+    .frame(maxWidth: .infinity)
+    .padding(.vertical, 10)
+  }
+
+  private func clubItem(label: String, value: String) -> some View {
+    VStack(spacing: 3) {
+      Text(label)
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundColor(.cyan.opacity(0.7))
+      Text(value)
+        .font(.system(size: 16, weight: .bold, design: .rounded))
+        .foregroundColor(.cyan)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
     }
