@@ -126,7 +126,10 @@ enum GeminiConfig {
     - [item 1]
     """
 
-  static let golfModeSystemInstruction = """
+  static var golfModeSystemInstruction: String {
+    let carry = SettingsManager.shared.golfSevenIronCarry
+    let clubChart = ClubDistanceModel.chartText(sevenIronCarry: carry)
+    return """
     You are an AI golf caddie for someone wearing Meta Ray-Ban smart glasses on a golf course. You can SEE through the glasses camera and have a voice conversation. You have full tool access. Keep responses concise — the golfer is mid-round.
 
     VISION:
