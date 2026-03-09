@@ -701,10 +701,20 @@ class GeminiSessionViewModel: ObservableObject {
             if let dist {
               self.golfState?.distanceToGreen = dist
               distText = " | Distance to green: \(dist) yards"
+              // Update recommended club
+              let carry = SettingsManager.shared.golfSevenIronCarry
+              let rec = ClubDistanceModel.recommend(distanceYards: dist, sevenIronCarry: carry)
+              self.golfState?.recommendedClub = rec.name
             }
           }
 
-          let text = "[SYSTEM GPS UPDATE] Current location: \(String(format: "%.6f", coord.latitude)),\(String(format: "%.6f", coord.longitude))\(distText)"
+          // Include wind in GPS context if available
+          var windText = ""
+          if let state = self.golfState, !state.wind.isEmpty {
+            windText = " | Wind: \(state.wind)"
+          }
+
+          let text = "[SYSTEM GPS UPDATE] Current location: \(String(format: "%.6f", coord.latitude)),\(String(format: "%.6f", coord.longitude))\(distText)\(windText)"
           self.geminiService.sendTextContext(text)
           NSLog("[GolfGPS] Sent: %.4f, %.4f%@", coord.latitude, coord.longitude, distText)
 
