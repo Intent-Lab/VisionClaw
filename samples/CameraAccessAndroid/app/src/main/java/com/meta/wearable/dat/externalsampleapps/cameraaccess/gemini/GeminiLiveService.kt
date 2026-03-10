@@ -208,9 +208,11 @@ class GeminiLiveService {
                         put("text", GeminiConfig.systemInstruction)
                     }))
                 })
-                put("tools", JSONArray().put(JSONObject().apply {
-                    put("functionDeclarations", ToolDeclarations.allDeclarationsJSON())
-                }))
+                if (GeminiConfig.isOpenClawConfigured) {
+                    put("tools", JSONArray().put(JSONObject().apply {
+                        put("functionDeclarations", ToolDeclarations.allDeclarationsJSON())
+                    }))
+                }
                 put("realtimeInputConfig", JSONObject().apply {
                     put("automaticActivityDetection", JSONObject().apply {
                         put("disabled", false)

@@ -16,7 +16,16 @@ object GeminiConfig {
     const val VIDEO_JPEG_QUALITY = 50
 
     val systemInstruction: String
-        get() = SettingsManager.geminiSystemPrompt
+        get() {
+            val prompt = SettingsManager.geminiSystemPrompt
+            val isUsingDefaultPrompt = prompt == SettingsManager.DEFAULT_SYSTEM_PROMPT
+
+            return if (!isOpenClawConfigured && isUsingDefaultPrompt) {
+                SettingsManager.DEFAULT_SYSTEM_PROMPT_WITHOUT_TOOLS
+            } else {
+                prompt
+            }
+        }
 
     val apiKey: String
         get() = SettingsManager.geminiAPIKey
