@@ -1,0 +1,9 @@
+# Auto-generated local Android configuration example.
+# Copy to local.properties or run ../../scripts/setup-local.ps1 from the repo root.
+
+# Point this at your local Android SDK directory.
+sdk.dir=C:/Users/YOUR_NAME/AppData/Local/Android/Sdk
+
+# Optional: GitHub personal access token with read:packages scope.
+# You can also provide this via the GITHUB_TOKEN environment variable instead.
+# github_token=ghp_your_token_here

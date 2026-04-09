@@ -1,0 +1,52 @@
+name: iOS Conference Tests
+
+on:
+  push:
+    paths:
+      - ".github/workflows/ios-conference-tests.yml"
+      - "samples/CameraAccess/**"
+  pull_request:
+    paths:
+      - ".github/workflows/ios-conference-tests.yml"
+      - "samples/CameraAccess/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-conference-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conference-tests:
+    runs-on: macos-15
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare local secrets stub
+        run: |
+          cp samples/CameraAccess/CameraAccess/Secrets.swift.example \
+             samples/CameraAccess/CameraAccess/Secrets.swift
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Resolve Swift package dependencies
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
+            -project samples/CameraAccess/CameraAccess.xcodeproj \
+            -scheme CameraAccess
+
+      - name: Run conference-mode unit tests
+        run: |
+          xcodebuild test \
+            -project samples/CameraAccess/CameraAccess.xcodeproj \
+            -scheme CameraAccess \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -only-testing:CameraAccessTests/ConferenceModeTests \
+            CODE_SIGNING_ALLOWED=NO

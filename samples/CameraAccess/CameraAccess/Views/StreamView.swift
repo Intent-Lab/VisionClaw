@@ -65,6 +65,10 @@ struct StreamView: View {
               )
             }
 
+            if geminiVM.isConferenceModeEnabled, let extraction = geminiVM.lastConferenceExtraction {
+              ConferenceExtractionCard(extraction: extraction)
+            }
+
             ToolCallStatusView(status: geminiVM.toolCallStatus)
 
             if geminiVM.isModelSpeaking {

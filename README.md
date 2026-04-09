@@ -21,6 +21,26 @@ Put on your glasses, tap the AI button, and talk:
 
 The glasses camera streams at ~1fps to Gemini for visual context, while audio flows bidirectionally in real-time.
 
+## Local Setup
+
+For an existing checkout, the fastest way to make the repo usable locally is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
+```
+
+That script:
+- creates `Secrets.swift` and `Secrets.kt` from the checked-in examples
+- creates `samples/CameraAccessAndroid/local.properties` with the detected Android SDK path
+- installs the WebRTC signaling server dependencies in `samples/CameraAccess/server`
+
+What you still need to provide yourself:
+- a Gemini API key
+- a GitHub token with `read:packages` scope for the Android DAT SDK
+- a Mac with Xcode if you want to build the iOS sample
+
+If you prefer to set up Android manually, use [`samples/CameraAccessAndroid/local.properties.example`](samples/CameraAccessAndroid/local.properties.example) as the template.
+
 ## How It Works
 
 ![How It Works](assets/how.png)
@@ -64,17 +84,14 @@ Gemini Live API (WebSocket)
 
 ```bash
 git clone https://github.com/sseanliu/VisionClaw.git
-cd VisionClaw/samples/CameraAccess
-open CameraAccess.xcodeproj
+cd <your-local-folder>/samples/CameraAccess
 ```
+
+Open `CameraAccess.xcodeproj` in Xcode.
 
 ### 2. Add your secrets
 
-Copy the example file and fill in your values:
-
-```bash
-cp CameraAccess/Secrets.swift.example CameraAccess/Secrets.swift
-```
+Run the local setup script from the repo root, or copy `CameraAccess/Secrets.swift.example` to `CameraAccess/Secrets.swift` manually.
 
 Edit `Secrets.swift` with your [Gemini API key](https://aistudio.google.com/apikey) (required) and optional OpenClaw/WebRTC config.
 
@@ -105,6 +122,40 @@ Then in VisionClaw:
 1. Tap **"Start Streaming"** in the app
 2. Tap the **AI button** for voice + vision conversation
 
+### iOS-first conference mode check
+
+If your main focus is the iPhone app, this is the shortest useful validation path for the new conference-mode flow:
+
+1. Open the iOS app's **Settings**
+2. Add your Gemini API key if it is not already set
+3. Turn on **Enable Conference Mode**
+4. Start **iPhone mode** and begin a Gemini session
+5. Point the camera at a printed conference badge, business card, booth sign, or slide
+
+Expected behavior:
+- passive detections stay silent
+- the latest extraction appears in the on-screen Gemini overlay
+- repeated views of the same badge are suppressed for 10 seconds
+- normal voice requests still work when you directly address the assistant
+
+### No Mac? Use GitHub to test iOS
+
+If you do not have a Mac, you still cannot run the iPhone app locally from Windows, but you can get real iOS compile-and-test feedback through GitHub Actions.
+
+This repo now includes [`ios-conference-tests.yml`](.github/workflows/ios-conference-tests.yml), which:
+- runs on a GitHub-hosted macOS runner
+- copies `Secrets.swift.example` into place for CI
+- resolves Swift packages
+- runs the `ConferenceModeTests` suite on an iPhone simulator
+
+Practical flow:
+1. Commit and push your changes to GitHub
+2. Open the **Actions** tab in your GitHub repo
+3. Run or inspect **iOS Conference Tests**
+4. Use the result as your compile/test signal for iOS-specific changes
+
+That gives you real Apple-toolchain validation even if your daily editing happens on Windows.
+
 ---
 
 ## Quick Start (Android)
@@ -128,16 +179,15 @@ The Meta DAT Android SDK is distributed via GitHub Packages. You need a GitHub P
 github_token=YOUR_GITHUB_TOKEN
 ```
 
+If you already ran `scripts/setup-local.ps1`, the file should already exist with `sdk.dir` populated for this machine.
+
 > **Tip:** If you have the `gh` CLI installed, you can run `gh auth token` to get a valid token. Make sure it has `read:packages` scope -- if not, run `gh auth refresh -s read:packages`.
 >
 > **Note:** GitHub Packages requires authentication even for public repositories. The 401 error means your token is missing or invalid.
 
 ### 3. Add your secrets
 
-```bash
-cd samples/CameraAccessAndroid/app/src/main/java/com/meta/wearable/dat/externalsampleapps/cameraaccess/
-cp Secrets.kt.example Secrets.kt
-```
+Run the local setup script from the repo root, or copy `Secrets.kt.example` to `Secrets.kt` manually.
 
 Edit `Secrets.kt` with your [Gemini API key](https://aistudio.google.com/apikey) (required) and optional OpenClaw/WebRTC config.
 
@@ -353,7 +403,7 @@ For full details, see [`samples/CameraAccess/CameraAccess/WebRTC/README.md`](sam
 
 ### Android-specific
 
-**Gradle sync fails with 401 Unauthorized** -- Your GitHub token is missing or doesn't have `read:packages` scope. Check `local.properties` for `gpr.user` and `gpr.token`. Generate a new token at [github.com/settings/tokens](https://github.com/settings/tokens).
+**Gradle sync fails with 401 Unauthorized** -- Your GitHub token is missing or doesn't have `read:packages` scope. Check `samples/CameraAccessAndroid/local.properties` for `github_token`, or set the `GITHUB_TOKEN` environment variable. Generate a new token at [github.com/settings/tokens](https://github.com/settings/tokens).
 
 **Gemini WebSocket times out** -- The Gemini Live API sends binary WebSocket frames. If you're building a custom client, make sure to handle both text and binary frame types.
 

@@ -31,6 +31,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.conference.ConferenceExtraction
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.conference.ConferenceExtractionDisposition
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
@@ -60,6 +62,11 @@ fun GeminiOverlay(
             )
         }
 
+        if (uiState.conferenceModeEnabled && uiState.lastConferenceExtraction != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            ConferenceExtractionCard(extraction = uiState.lastConferenceExtraction)
+        }
+
         // Tool call status
         val toolStatus = uiState.toolCallStatus
         if (toolStatus !is ToolCallStatus.Idle) {
@@ -71,6 +78,71 @@ fun GeminiOverlay(
         if (uiState.isModelSpeaking) {
             Spacer(modifier = Modifier.height(4.dp))
             SpeakingIndicator()
+        }
+    }
+}
+
+@Composable
+fun ConferenceExtractionCard(
+    extraction: ConferenceExtraction?,
+    modifier: Modifier = Modifier,
+) {
+    if (extraction == null) return
+
+    Column(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = extraction.disposition.displayName,
+                color = if (extraction.disposition == ConferenceExtractionDisposition.ACCEPTED) {
+                    Color(0xFF4CAF50)
+                } else {
+                    Color(0xFFFFC107)
+                },
+                fontSize = 11.sp,
+            )
+            Text(
+                text = "${extraction.sourceType.displayName} | ${extraction.confidenceText}",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+
+        Text(
+            text = extraction.name,
+            color = Color.White,
+            fontSize = 16.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        if (extraction.summaryText.isNotEmpty()) {
+            Text(
+                text = extraction.summaryText,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        extraction.observedText?.takeIf { it.isNotBlank() }?.let { observedText ->
+            Text(
+                text = observedText,
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 12.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

@@ -7,6 +7,7 @@ final class SettingsManager {
 
   private enum Key: String {
     case geminiAPIKey
+    case conferenceModeEnabled
     case openClawHost
     case openClawPort
     case openClawHookToken
@@ -30,6 +31,11 @@ final class SettingsManager {
   var geminiSystemPrompt: String {
     get { defaults.string(forKey: Key.geminiSystemPrompt.rawValue) ?? GeminiConfig.defaultSystemInstruction }
     set { defaults.set(newValue, forKey: Key.geminiSystemPrompt.rawValue) }
+  }
+
+  var conferenceModeEnabled: Bool {
+    get { defaults.object(forKey: Key.conferenceModeEnabled.rawValue) as? Bool ?? false }
+    set { defaults.set(newValue, forKey: Key.conferenceModeEnabled.rawValue) }
   }
 
   // MARK: - OpenClaw
@@ -88,7 +94,7 @@ final class SettingsManager {
   // MARK: - Reset
 
   func resetAll() {
-    for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
+    for key in [Key.geminiAPIKey, .geminiSystemPrompt, .conferenceModeEnabled, .openClawHost, .openClawPort,
                 .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
                 .speakerOutputEnabled, .videoStreamingEnabled,
                 .proactiveNotificationsEnabled] {

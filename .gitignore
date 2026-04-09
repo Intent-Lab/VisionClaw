@@ -6,3 +6,9 @@ samples/CameraAccessAndroid/local.properties
 samples/CameraAccessAndroid/.gradle/
 samples/CameraAccessAndroid/build/
 samples/CameraAccessAndroid/app/build/
+
+# iOS
+samples/CameraAccess/CameraAccess/Secrets.swift
+
+# Node
+samples/CameraAccess/server/node_modules/

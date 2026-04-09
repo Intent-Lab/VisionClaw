@@ -76,6 +76,7 @@ dependencies {
   implementation(libs.datastore.preferences)
   implementation(libs.gson)
   implementation(libs.lifecycle.process)
+  testImplementation("junit:junit:4.13.2")
   androidTestImplementation(libs.androidx.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)

@@ -21,6 +21,10 @@ object SettingsManager {
         get() = prefs.getString("geminiSystemPrompt", null) ?: DEFAULT_SYSTEM_PROMPT
         set(value) = prefs.edit().putString("geminiSystemPrompt", value).apply()
 
+    var conferenceModeEnabled: Boolean
+        get() = prefs.getBoolean("conferenceModeEnabled", false)
+        set(value) = prefs.edit().putBoolean("conferenceModeEnabled", value).apply()
+
     var openClawHost: String
         get() = prefs.getString("openClawHost", null) ?: Secrets.openClawHost
         set(value) = prefs.edit().putString("openClawHost", value).apply()

@@ -11,6 +11,7 @@ class GeminiSessionViewModel: ObservableObject {
   @Published var aiTranscript: String = ""
   @Published var toolCallStatus: ToolCallStatus = .idle
   @Published var openClawConnectionState: OpenClawConnectionState = .notConfigured
+  @Published var lastConferenceExtraction: ConferenceExtraction?
   private let geminiService = GeminiLiveService()
   private let openClawBridge = OpenClawBridge()
   private var toolCallRouter: ToolCallRouter?
@@ -18,8 +19,10 @@ class GeminiSessionViewModel: ObservableObject {
   private let eventClient = OpenClawEventClient()
   private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
+  private var conferenceProcessor = ConferenceExtractionProcessor()
 
   var streamingMode: StreamingMode = .glasses
+  var isConferenceModeEnabled: Bool { SettingsManager.shared.conferenceModeEnabled }
 
   func startSession() async {
     guard !isGeminiActive else { return }
@@ -30,6 +33,8 @@ class GeminiSessionViewModel: ObservableObject {
     }
 
     isGeminiActive = true
+    lastConferenceExtraction = nil
+    conferenceProcessor = ConferenceExtractionProcessor(config: .current)
 
     // Wire audio callbacks
     audioManager.onAudioCaptured = { [weak self] data in
@@ -95,6 +100,12 @@ class GeminiSessionViewModel: ObservableObject {
       guard let self else { return }
       Task { @MainActor in
         for call in toolCall.functionCalls {
+          if call.name == ToolDeclarations.extractEntityName {
+            let response = self.handleConferenceToolCall(call)
+            self.geminiService.sendToolResponse(response)
+            continue
+          }
+
           self.toolCallRouter?.handleToolCall(call) { [weak self] response in
             self?.geminiService.sendToolResponse(response)
           }
@@ -190,6 +201,7 @@ class GeminiSessionViewModel: ObservableObject {
     userTranscript = ""
     aiTranscript = ""
     toolCallStatus = .idle
+    lastConferenceExtraction = nil
   }
 
   func sendVideoFrameIfThrottled(image: UIImage) {
@@ -199,6 +211,88 @@ class GeminiSessionViewModel: ObservableObject {
     guard now.timeIntervalSince(lastVideoFrameTime) >= GeminiConfig.videoFrameInterval else { return }
     lastVideoFrameTime = now
     geminiService.sendVideoFrame(image: image)
+  }
+
+  private func handleConferenceToolCall(_ call: GeminiFunctionCall) -> [String: Any] {
+    guard isConferenceModeEnabled else {
+      return buildLocalToolResponse(
+        callId: call.id,
+        name: call.name,
+        result: .failure("Conference mode is disabled")
+      )
+    }
+
+    let result = conferenceProcessor.handle(args: call.args)
+    switch result {
+    case .accepted(let extraction):
+      lastConferenceExtraction = extraction
+      logConferenceExtraction(extraction, event: "accepted")
+      return buildLocalToolResponse(
+        callId: call.id,
+        name: call.name,
+        result: .success("Accepted conference extraction for \(extraction.name)")
+      )
+    case .review(let extraction):
+      lastConferenceExtraction = extraction
+      logConferenceExtraction(extraction, event: "review")
+      return buildLocalToolResponse(
+        callId: call.id,
+        name: call.name,
+        result: .success("Queued conference extraction for review for \(extraction.name)")
+      )
+    case .ignoredLowConfidence(let confidence):
+      NSLog("[Conference] Ignored low-confidence extraction (%.2f): %@", confidence, String(describing: call.args))
+      return buildLocalToolResponse(
+        callId: call.id,
+        name: call.name,
+        result: .success("Ignored low-confidence conference extraction")
+      )
+    case .ignoredDuplicate:
+      NSLog("[Conference] Ignored duplicate extraction: %@", String(describing: call.args))
+      return buildLocalToolResponse(
+        callId: call.id,
+        name: call.name,
+        result: .success("Ignored duplicate conference extraction")
+      )
+    case .invalid(let message):
+      NSLog("[Conference] Invalid extraction payload: %@ %@", message, String(describing: call.args))
+      return buildLocalToolResponse(
+        callId: call.id,
+        name: call.name,
+        result: .failure(message)
+      )
+    }
+  }
+
+  private func logConferenceExtraction(_ extraction: ConferenceExtraction, event: String) {
+    NSLog(
+      "[Conference] %@ name=%@ company=%@ role=%@ source=%@ confidence=%.2f observed_text=%@",
+      event,
+      extraction.name,
+      extraction.company ?? "",
+      extraction.role ?? "",
+      extraction.sourceType.rawValue,
+      extraction.confidence,
+      extraction.observedText ?? ""
+    )
+  }
+
+  private func buildLocalToolResponse(
+    callId: String,
+    name: String,
+    result: ToolResult
+  ) -> [String: Any] {
+    [
+      "toolResponse": [
+        "functionResponses": [
+          [
+            "id": callId,
+            "name": name,
+            "response": result.responseValue
+          ]
+        ]
+      ]
+    ]
   }
 
 }

@@ -12,7 +12,12 @@ enum GeminiConfig {
   static let videoFrameInterval: TimeInterval = 1.0
   static let videoJPEGQuality: CGFloat = 0.5
 
-  static var systemInstruction: String { SettingsManager.shared.geminiSystemPrompt }
+  static var systemInstruction: String {
+    ConferencePrompts.activeSystemInstruction(
+      conferenceModeEnabled: isConferenceModeEnabled,
+      fallbackPrompt: SettingsManager.shared.geminiSystemPrompt
+    )
+  }
 
   static let defaultSystemInstruction = """
     You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. You can see through their camera and have a voice conversation. Keep responses concise and natural.
@@ -44,6 +49,7 @@ enum GeminiConfig {
 
   // User-configurable values (Settings screen overrides, falling back to Secrets.swift)
   static var apiKey: String { SettingsManager.shared.geminiAPIKey }
+  static var isConferenceModeEnabled: Bool { SettingsManager.shared.conferenceModeEnabled }
   static var openClawHost: String { SettingsManager.shared.openClawHost }
   static var openClawPort: Int { SettingsManager.shared.openClawPort }
   static var openClawHookToken: String { SettingsManager.shared.openClawHookToken }

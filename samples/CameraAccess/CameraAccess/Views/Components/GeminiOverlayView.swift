@@ -149,6 +149,46 @@ struct ToolCallStatusView: View {
   }
 }
 
+struct ConferenceExtractionCard: View {
+  let extraction: ConferenceExtraction
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Text(extraction.disposition.displayName)
+          .font(.system(size: 11, weight: .semibold))
+          .foregroundColor(extraction.disposition == .accepted ? .green : .yellow)
+        Spacer()
+        Text("\(extraction.sourceType.displayName) | \(extraction.confidenceText)")
+          .font(.system(size: 11, weight: .medium, design: .monospaced))
+          .foregroundColor(.white.opacity(0.7))
+      }
+
+      Text(extraction.name)
+        .font(.system(size: 16, weight: .semibold))
+        .foregroundColor(.white)
+
+      if !extraction.summaryText.isEmpty {
+        Text(extraction.summaryText)
+          .font(.system(size: 13))
+          .foregroundColor(.white.opacity(0.85))
+      }
+
+      if let observedText = extraction.observedText, !observedText.isEmpty {
+        Text(observedText)
+          .font(.system(size: 12))
+          .foregroundColor(.white.opacity(0.65))
+          .lineLimit(2)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+    .background(Color.black.opacity(0.6))
+    .cornerRadius(12)
+  }
+}
+
 struct SpeakingIndicator: View {
   @State private var animating = false
 

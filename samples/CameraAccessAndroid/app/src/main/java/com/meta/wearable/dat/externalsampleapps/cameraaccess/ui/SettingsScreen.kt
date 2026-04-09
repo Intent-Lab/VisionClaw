@@ -44,6 +44,7 @@ fun SettingsScreen(
 ) {
     var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
+    var conferenceModeEnabled by remember { mutableStateOf(SettingsManager.conferenceModeEnabled) }
     var openClawHost by remember { mutableStateOf(SettingsManager.openClawHost) }
     var openClawPort by remember { mutableStateOf(SettingsManager.openClawPort.toString()) }
     var openClawHookToken by remember { mutableStateOf(SettingsManager.openClawHookToken) }
@@ -56,6 +57,7 @@ fun SettingsScreen(
     fun save() {
         SettingsManager.geminiAPIKey = geminiAPIKey.trim()
         SettingsManager.geminiSystemPrompt = systemPrompt.trim()
+        SettingsManager.conferenceModeEnabled = conferenceModeEnabled
         SettingsManager.openClawHost = openClawHost.trim()
         openClawPort.trim().toIntOrNull()?.let { SettingsManager.openClawPort = it }
         SettingsManager.openClawHookToken = openClawHookToken.trim()
@@ -68,6 +70,7 @@ fun SettingsScreen(
     fun reload() {
         geminiAPIKey = SettingsManager.geminiAPIKey
         systemPrompt = SettingsManager.geminiSystemPrompt
+        conferenceModeEnabled = SettingsManager.conferenceModeEnabled
         openClawHost = SettingsManager.openClawHost
         openClawPort = SettingsManager.openClawPort.toString()
         openClawHookToken = SettingsManager.openClawHookToken
@@ -115,6 +118,26 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth().height(200.dp),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             )
+
+            SectionHeader("Conference Mode")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("Enable Conference Mode", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Uses a built-in silent prompt and shows the latest extraction in the stream overlay.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = conferenceModeEnabled,
+                    onCheckedChange = { conferenceModeEnabled = it },
+                )
+            }
 
             // OpenClaw section
             SectionHeader("OpenClaw")

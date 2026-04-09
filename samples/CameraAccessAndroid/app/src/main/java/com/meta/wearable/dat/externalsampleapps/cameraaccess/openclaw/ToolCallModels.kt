@@ -1,5 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.conference.ConferenceSourceType
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -102,25 +103,120 @@ sealed class OpenClawConnectionState {
 // Tool Declarations (for Gemini setup message)
 
 object ToolDeclarations {
-    fun allDeclarationsJSON(): JSONArray {
-        return JSONArray().put(executeJSON())
+    const val EXECUTE_NAME = "execute"
+    const val EXTRACT_ENTITY_NAME = "extract_entity"
+
+    data class ToolDeclaration(
+        val name: String,
+        val description: String,
+        val parameters: Map<String, Any>,
+        val behavior: String,
+    )
+
+    fun allDeclarations(conferenceModeEnabled: Boolean = false): List<ToolDeclaration> {
+        return buildList {
+            add(executeDeclaration())
+            if (conferenceModeEnabled) {
+                add(extractEntityDeclaration())
+            }
+        }
     }
 
-    private fun executeJSON(): JSONObject {
+    fun allDeclarationsJSON(conferenceModeEnabled: Boolean = false): JSONArray {
+        return JSONArray().apply {
+            allDeclarations(conferenceModeEnabled).forEach { declaration ->
+                put(declaration.toJSON())
+            }
+        }
+    }
+
+    private fun executeDeclaration(): ToolDeclaration {
+        return ToolDeclaration(
+            name = EXECUTE_NAME,
+            description = "Your only way to take action. You have no memory, storage, or ability to do anything on your own -- use this tool for everything: sending messages, searching the web, adding to lists, setting reminders, creating notes, research, drafts, scheduling, smart home control, app interactions, or any request that goes beyond answering a question. When in doubt, use this tool.",
+            parameters = mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "task" to mapOf(
+                        "type" to "string",
+                        "description" to "Clear, detailed description of what to do. Include all relevant context: names, content, platforms, quantities, etc.",
+                    ),
+                ),
+                "required" to listOf("task"),
+            ),
+            behavior = "BLOCKING",
+        )
+    }
+
+    private fun extractEntityDeclaration(): ToolDeclaration {
+        return ToolDeclaration(
+            name = EXTRACT_ENTITY_NAME,
+            description = "Local-only conference mode extraction tool. Use it to silently report a detected badge, business card, booth sign, or slide without speaking.",
+            parameters = mapOf(
+                "type" to "object",
+                "properties" to mapOf(
+                    "name" to mapOf(
+                        "type" to "string",
+                        "description" to "Detected person or entity name.",
+                    ),
+                    "company" to mapOf(
+                        "type" to "string",
+                        "description" to "Detected company or organization name.",
+                    ),
+                    "role" to mapOf(
+                        "type" to "string",
+                        "description" to "Detected job title or role.",
+                    ),
+                    "source_type" to mapOf(
+                        "type" to "string",
+                        "enum" to ConferenceSourceType.entries.map { it.wireValue },
+                        "description" to "Where the entity was detected.",
+                    ),
+                    "confidence" to mapOf(
+                        "type" to "number",
+                        "description" to "Confidence score from 0.0 to 1.0.",
+                    ),
+                    "observed_text" to mapOf(
+                        "type" to "string",
+                        "description" to "Optional raw snippet seen in the frame.",
+                    ),
+                ),
+                "required" to listOf("name", "source_type", "confidence"),
+            ),
+            behavior = "NON_BLOCKING",
+        )
+    }
+
+    private fun ToolDeclaration.toJSON(): JSONObject {
         return JSONObject().apply {
-            put("name", "execute")
-            put("description", "Your only way to take action. You have no memory, storage, or ability to do anything on your own -- use this tool for everything: sending messages, searching the web, adding to lists, setting reminders, creating notes, research, drafts, scheduling, smart home control, app interactions, or any request that goes beyond answering a question. When in doubt, use this tool.")
-            put("parameters", JSONObject().apply {
-                put("type", "object")
-                put("properties", JSONObject().apply {
-                    put("task", JSONObject().apply {
-                        put("type", "string")
-                        put("description", "Clear, detailed description of what to do. Include all relevant context: names, content, platforms, quantities, etc.")
-                    })
-                })
-                put("required", JSONArray().put("task"))
-            })
-            put("behavior", "BLOCKING")
+            put("name", name)
+            put("description", description)
+            put("parameters", parameters.toJSONObject())
+            put("behavior", behavior)
+        }
+    }
+
+    private fun Map<String, *>.toJSONObject(): JSONObject {
+        return JSONObject().apply {
+            entries.forEach { (key, value) ->
+                put(key, value.toJsonValue())
+            }
+        }
+    }
+
+    private fun Any?.toJsonValue(): Any {
+        return when (this) {
+            null -> JSONObject.NULL
+            is Map<*, *> -> {
+                val mapped = entries.associate { (key, value) -> key.toString() to value }
+                mapped.toJSONObject()
+            }
+            is List<*> -> JSONArray().apply {
+                this@toJsonValue.forEach { item ->
+                    put(item.toJsonValue())
+                }
+            }
+            else -> this
         }
     }
 }

@@ -10,6 +10,7 @@ struct SettingsView: View {
   @State private var openClawHookToken: String = ""
   @State private var openClawGatewayToken: String = ""
   @State private var geminiSystemPrompt: String = ""
+  @State private var conferenceModeEnabled: Bool = false
   @State private var webrtcSignalingURL: String = ""
   @State private var speakerOutputEnabled: Bool = false
   @State private var videoStreamingEnabled: Bool = true
@@ -35,6 +36,10 @@ struct SettingsView: View {
           TextEditor(text: $geminiSystemPrompt)
             .font(.system(.body, design: .monospaced))
             .frame(minHeight: 200)
+        }
+
+        Section(header: Text("Conference Mode"), footer: Text("Conference mode silently watches for badges, cards, booth signage, and slides. It uses a built-in prompt while enabled and shows the latest detection in the stream overlay.")) {
+          Toggle("Enable Conference Mode", isOn: $conferenceModeEnabled)
         }
 
         Section(header: Text("OpenClaw"), footer: Text("Connect to an OpenClaw gateway running on your Mac for agentic tool-calling.")) {
@@ -145,6 +150,7 @@ struct SettingsView: View {
   private func loadCurrentValues() {
     geminiAPIKey = settings.geminiAPIKey
     geminiSystemPrompt = settings.geminiSystemPrompt
+    conferenceModeEnabled = settings.conferenceModeEnabled
     openClawHost = settings.openClawHost
     openClawPort = String(settings.openClawPort)
     openClawHookToken = settings.openClawHookToken
@@ -158,6 +164,7 @@ struct SettingsView: View {
   private func save() {
     settings.geminiAPIKey = geminiAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.geminiSystemPrompt = geminiSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    settings.conferenceModeEnabled = conferenceModeEnabled
     settings.openClawHost = openClawHost.trimmingCharacters(in: .whitespacesAndNewlines)
     if let port = Int(openClawPort.trimmingCharacters(in: .whitespacesAndNewlines)) {
       settings.openClawPort = port

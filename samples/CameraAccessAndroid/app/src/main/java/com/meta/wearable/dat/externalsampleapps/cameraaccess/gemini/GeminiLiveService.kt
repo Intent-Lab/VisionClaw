@@ -226,7 +226,12 @@ class GeminiLiveService {
                     }))
                 })
                 put("tools", JSONArray().put(JSONObject().apply {
-                    put("functionDeclarations", ToolDeclarations.allDeclarationsJSON())
+                    put(
+                        "functionDeclarations",
+                        ToolDeclarations.allDeclarationsJSON(
+                            conferenceModeEnabled = GeminiConfig.isConferenceModeEnabled,
+                        ),
+                    )
                 }))
                 put("realtimeInputConfig", JSONObject().apply {
                     put("automaticActivityDetection", JSONObject().apply {

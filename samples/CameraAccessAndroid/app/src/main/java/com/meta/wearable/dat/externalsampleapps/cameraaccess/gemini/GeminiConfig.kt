@@ -1,5 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.conference.ConferencePrompts
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 
 object GeminiConfig {
@@ -16,10 +17,16 @@ object GeminiConfig {
     const val VIDEO_JPEG_QUALITY = 50
 
     val systemInstruction: String
-        get() = SettingsManager.geminiSystemPrompt
+        get() = ConferencePrompts.activeSystemInstruction(
+            conferenceModeEnabled = isConferenceModeEnabled,
+            fallbackPrompt = SettingsManager.geminiSystemPrompt,
+        )
 
     val apiKey: String
         get() = SettingsManager.geminiAPIKey
+
+    val isConferenceModeEnabled: Boolean
+        get() = SettingsManager.conferenceModeEnabled
 
     val openClawHost: String
         get() = SettingsManager.openClawHost

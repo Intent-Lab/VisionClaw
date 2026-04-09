@@ -194,7 +194,9 @@ class GeminiLiveService: ObservableObject {
         ],
         "tools": [
           [
-            "functionDeclarations": ToolDeclarations.allDeclarations()
+            "functionDeclarations": ToolDeclarations.allDeclarations(
+              conferenceModeEnabled: GeminiConfig.isConferenceModeEnabled
+            )
           ]
         ],
         "realtimeInputConfig": [
