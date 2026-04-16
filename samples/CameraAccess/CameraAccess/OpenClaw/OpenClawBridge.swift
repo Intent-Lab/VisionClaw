@@ -48,7 +48,8 @@ class OpenClawBridge: ObservableObject {
     request.setValue("glass", forHTTPHeaderField: "x-openclaw-message-channel")
     do {
       let (_, response) = try await pingSession.data(for: request)
-      if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+      if let http = response as? HTTPURLResponse,
+         (200...499).contains(http.statusCode), http.statusCode != 404 {
         connectionState = .connected
         NSLog("[OpenClaw] Gateway reachable (HTTP %d)", http.statusCode)
       } else {
