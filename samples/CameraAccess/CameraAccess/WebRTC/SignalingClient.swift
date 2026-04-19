@@ -76,6 +76,14 @@ class SignalingClient {
     ] as [String: Any])
   }
 
+  func sendTranscript(speaker: String, text: String) {
+    sendJSON([
+      "type": "transcript",
+      "speaker": speaker,
+      "text": text,
+    ] as [String: Any])
+  }
+
   func disconnect() {
     receiveTask?.cancel()
     receiveTask = nil

@@ -17,6 +17,10 @@ struct WebRTCStatusBar: View {
           text: webrtcVM.isMuted ? "Muted" : "Mic On"
         )
       }
+
+      if webrtcVM.isCollaborativeMode {
+        CollaborativeBadge()
+      }
     }
   }
 
@@ -39,6 +43,23 @@ struct WebRTCStatusBar: View {
     case .error: return "Error"
     case .disconnected: return "Off"
     }
+  }
+}
+
+struct CollaborativeBadge: View {
+  var body: some View {
+    HStack(spacing: 4) {
+      Image(systemName: "person.2.fill")
+        .font(.system(size: 10, weight: .bold))
+        .foregroundColor(.cyan)
+      Text("Collab")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundColor(.white)
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 5)
+    .background(Color.cyan.opacity(0.3))
+    .cornerRadius(12)
   }
 }
 

@@ -51,6 +51,13 @@ struct StreamView: View {
           .foregroundColor(.white)
       }
 
+      // Branding banner (top)
+      VStack {
+        BrandingBanner(noteCount: geminiVM.sessionContext?.notes.count ?? 0)
+        Spacer()
+      }
+      .padding(.top, 4)
+
       // Gemini status overlay (top) + speaking indicator
       if geminiVM.isGeminiActive {
         VStack {
@@ -125,6 +132,15 @@ struct StreamView: View {
         )
       }
     }
+    // Report share sheet
+    .sheet(isPresented: Binding(
+      get: { geminiVM.reportURLToShare != nil },
+      set: { if !$0 { geminiVM.reportURLToShare = nil } }
+    )) {
+      if let url = geminiVM.reportURLToShare {
+        ActivityViewController(activityItems: [url])
+      }
+    }
     // Gemini error alert
     .alert("AI Assistant", isPresented: Binding(
       get: { geminiVM.errorMessage != nil },
@@ -144,6 +160,49 @@ struct StreamView: View {
       Text(webrtcVM.errorMessage ?? "")
     }
   }
+}
+
+// MARK: - Branding Banner
+
+struct BrandingBanner: View {
+  let noteCount: Int
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Text("Demo By:")
+        .font(.system(size: 11, weight: .medium))
+        .foregroundColor(.white.opacity(0.6))
+      Text("FieldMatrix.Ai")
+        .font(.system(size: 14, weight: .bold))
+        .foregroundColor(.cyan)
+
+      if noteCount > 0 {
+        Text("\(noteCount) notes")
+          .font(.system(size: 11, weight: .medium))
+          .foregroundColor(.white.opacity(0.7))
+          .padding(.horizontal, 8)
+          .padding(.vertical, 2)
+          .background(Color.white.opacity(0.15))
+          .cornerRadius(8)
+      }
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 6)
+    .background(Color.black.opacity(0.5))
+    .cornerRadius(16)
+  }
+}
+
+// MARK: - Activity View Controller (Share Sheet)
+
+struct ActivityViewController: UIViewControllerRepresentable {
+  let activityItems: [Any]
+
+  func makeUIViewController(context: Context) -> UIActivityViewController {
+    UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+  }
+
+  func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // Extracted controls for clarity
@@ -172,7 +231,7 @@ struct ControlsView: View {
         }
       }
 
-      // Gemini AI button (disabled when WebRTC is active — audio conflict)
+      // Gemini AI button
       CircleButton(
         icon: geminiVM.isGeminiActive ? "waveform.circle.fill" : "waveform.circle",
         text: "AI"
@@ -185,10 +244,8 @@ struct ControlsView: View {
           }
         }
       }
-      .opacity(webrtcVM.isActive ? 0.4 : 1.0)
-      .disabled(webrtcVM.isActive)
 
-      // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
+      // WebRTC Live Stream button (collaborative mode when Gemini also active)
       CircleButton(
         icon: webrtcVM.isActive
           ? "antenna.radiowaves.left.and.right.circle.fill"
@@ -200,11 +257,13 @@ struct ControlsView: View {
             webrtcVM.stopSession()
           } else {
             await webrtcVM.startSession()
+            // Enter collaborative mode if Gemini is already active
+            if geminiVM.isGeminiActive {
+              webrtcVM.enterCollaborativeMode()
+            }
           }
         }
       }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
     }
   }
 }

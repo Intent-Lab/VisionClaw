@@ -16,6 +16,18 @@ final class SettingsManager {
     case speakerOutputEnabled
     case videoStreamingEnabled
     case proactiveNotificationsEnabled
+    case inspectionInterval
+    case inspectionAutoStart
+    case safetyMonitorInterval
+    case safetyMonitorAutoStart
+    case workerName
+    case defaultJobId
+    case defaultJobDescription
+    case defaultSiteAddress
+    case multisetClientId
+    case multisetClientSecret
+    case multisetMapCode
+    case multisetEnabled
   }
 
   private init() {}
@@ -85,13 +97,99 @@ final class SettingsManager {
     set { defaults.set(newValue, forKey: Key.proactiveNotificationsEnabled.rawValue) }
   }
 
+  // MARK: - Inspection
+
+  var inspectionInterval: Int {
+    get {
+      let stored = defaults.integer(forKey: Key.inspectionInterval.rawValue)
+      return stored != 0 ? stored : 10
+    }
+    set { defaults.set(newValue, forKey: Key.inspectionInterval.rawValue) }
+  }
+
+  var inspectionAutoStart: Bool {
+    get { defaults.bool(forKey: Key.inspectionAutoStart.rawValue) }
+    set { defaults.set(newValue, forKey: Key.inspectionAutoStart.rawValue) }
+  }
+
+  // MARK: - Safety Monitor
+
+  var safetyMonitorInterval: Int {
+    get {
+      let stored = defaults.integer(forKey: Key.safetyMonitorInterval.rawValue)
+      return stored != 0 ? stored : 15
+    }
+    set { defaults.set(newValue, forKey: Key.safetyMonitorInterval.rawValue) }
+  }
+
+  var safetyMonitorAutoStart: Bool {
+    get { defaults.bool(forKey: Key.safetyMonitorAutoStart.rawValue) }
+    set { defaults.set(newValue, forKey: Key.safetyMonitorAutoStart.rawValue) }
+  }
+
+  // MARK: - Field Worker
+
+  var workerName: String {
+    get { defaults.string(forKey: Key.workerName.rawValue) ?? "" }
+    set { defaults.set(newValue, forKey: Key.workerName.rawValue) }
+  }
+
+  var defaultJobId: String {
+    get { defaults.string(forKey: Key.defaultJobId.rawValue) ?? "" }
+    set { defaults.set(newValue, forKey: Key.defaultJobId.rawValue) }
+  }
+
+  var defaultJobDescription: String {
+    get { defaults.string(forKey: Key.defaultJobDescription.rawValue) ?? "" }
+    set { defaults.set(newValue, forKey: Key.defaultJobDescription.rawValue) }
+  }
+
+  var defaultSiteAddress: String {
+    get { defaults.string(forKey: Key.defaultSiteAddress.rawValue) ?? "" }
+    set { defaults.set(newValue, forKey: Key.defaultSiteAddress.rawValue) }
+  }
+
+  // MARK: - Multiset VPS
+
+  var multisetClientId: String {
+    get { defaults.string(forKey: Key.multisetClientId.rawValue) ?? Secrets.multisetClientId }
+    set { defaults.set(newValue, forKey: Key.multisetClientId.rawValue) }
+  }
+
+  var multisetClientSecret: String {
+    get { defaults.string(forKey: Key.multisetClientSecret.rawValue) ?? Secrets.multisetClientSecret }
+    set { defaults.set(newValue, forKey: Key.multisetClientSecret.rawValue) }
+  }
+
+  var multisetMapCode: String {
+    get { defaults.string(forKey: Key.multisetMapCode.rawValue) ?? Secrets.multisetMapCode }
+    set { defaults.set(newValue, forKey: Key.multisetMapCode.rawValue) }
+  }
+
+  var multisetEnabled: Bool {
+    get { defaults.object(forKey: Key.multisetEnabled.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Key.multisetEnabled.rawValue) }
+  }
+
+  /// True when all Multiset credentials + a map code are present and VPS is enabled.
+  var isMultisetConfigured: Bool {
+    return multisetEnabled
+      && !multisetClientId.isEmpty
+      && !multisetClientSecret.isEmpty
+      && !multisetMapCode.isEmpty
+  }
+
   // MARK: - Reset
 
   func resetAll() {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
                 .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
                 .speakerOutputEnabled, .videoStreamingEnabled,
-                .proactiveNotificationsEnabled] {
+                .proactiveNotificationsEnabled,
+                .inspectionInterval, .inspectionAutoStart,
+                .safetyMonitorInterval, .safetyMonitorAutoStart,
+                .workerName, .defaultJobId, .defaultJobDescription, .defaultSiteAddress,
+                .multisetClientId, .multisetClientSecret, .multisetMapCode, .multisetEnabled] {
       defaults.removeObject(forKey: key.rawValue)
     }
   }

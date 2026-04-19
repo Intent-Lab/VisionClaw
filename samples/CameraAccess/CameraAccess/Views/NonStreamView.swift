@@ -28,7 +28,13 @@ struct NonStreamView: View {
       Color.black.edgesIgnoringSafeArea(.all)
 
       VStack {
-        HStack {
+        HStack(spacing: 8) {
+          Text("Demo By:")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.white.opacity(0.6))
+          Text("FieldMatrix.Ai")
+            .font(.system(size: 14, weight: .bold))
+            .foregroundColor(.cyan)
           Spacer()
           Menu {
             Button("Settings") {

@@ -33,6 +33,7 @@ class GeminiLiveService: ObservableObject {
   private let delegate = WebSocketDelegate()
   private var urlSession: URLSession!
   private let sendQueue = DispatchQueue(label: "gemini.send", qos: .userInitiated)
+  var sessionContextString: String?
 
   init() {
     let config = URLSessionConfiguration.default
@@ -189,7 +190,13 @@ class GeminiLiveService: ObservableObject {
         ],
         "systemInstruction": [
           "parts": [
-            ["text": GeminiConfig.systemInstruction]
+            ["text": {
+              var instruction = GeminiConfig.systemInstruction
+              if let ctx = sessionContextString, !ctx.isEmpty {
+                instruction += "\n\n" + ctx
+              }
+              return instruction
+            }()]
           ]
         ],
         "tools": [

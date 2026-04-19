@@ -10,6 +10,17 @@ struct GeminiStatusBar: View {
 
       // OpenClaw connection pill
       StatusPill(color: openClawStatusColor, text: openClawStatusText)
+
+      if let spatial = geminiVM.spatialService {
+        SpatialBadge(spatialService: spatial)
+      }
+
+      if geminiVM.isInspectionActive {
+        InspectionBadge()
+      }
+      if geminiVM.isSafetyMonitorActive {
+        SafetyBadge()
+      }
     }
   }
 
@@ -149,6 +160,50 @@ struct ToolCallStatusView: View {
   }
 }
 
+struct InspectionBadge: View {
+  @State private var pulsing = false
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Circle()
+        .fill(Color.blue)
+        .frame(width: 8, height: 8)
+        .scaleEffect(pulsing ? 1.3 : 1.0)
+        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulsing)
+      Text("Inspecting")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundColor(.white)
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 5)
+    .background(Color.blue.opacity(0.4))
+    .cornerRadius(12)
+    .onAppear { pulsing = true }
+  }
+}
+
+struct SafetyBadge: View {
+  @State private var pulsing = false
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Image(systemName: "shield.checkered")
+        .font(.system(size: 10, weight: .bold))
+        .foregroundColor(.yellow)
+        .scaleEffect(pulsing ? 1.2 : 1.0)
+        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulsing)
+      Text("Safety")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundColor(.white)
+    }
+    .padding(.horizontal, 10)
+    .padding(.vertical, 5)
+    .background(Color.orange.opacity(0.4))
+    .cornerRadius(12)
+    .onAppear { pulsing = true }
+  }
+}
+
 struct SpeakingIndicator: View {
   @State private var animating = false
 
@@ -168,5 +223,51 @@ struct SpeakingIndicator: View {
     }
     .onAppear { animating = true }
     .onDisappear { animating = false }
+  }
+}
+
+
+struct SpatialBadge: View {
+  @ObservedObject var spatialService: SpatialLocalizationService
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Image(systemName: icon)
+        .font(.system(size: 10, weight: .bold))
+      Text(label)
+        .font(.system(size: 11, weight: .semibold))
+    }
+    .foregroundColor(.white)
+    .padding(.horizontal, 8)
+    .padding(.vertical, 4)
+    .background(color.opacity(0.9))
+    .cornerRadius(8)
+  }
+
+  private var icon: String {
+    switch spatialService.activeSource {
+    case .multiset: return "scope"
+    case .googleGeo: return "globe"
+    case .gps: return "location.fill"
+    case .unknown: return "location.slash"
+    }
+  }
+
+  private var label: String {
+    switch spatialService.activeSource {
+    case .multiset: return "VPS ±5cm"
+    case .googleGeo: return "GEO ±1m"
+    case .gps: return "GPS"
+    case .unknown: return "Spatial"
+    }
+  }
+
+  private var color: Color {
+    switch spatialService.activeSource {
+    case .multiset: return .purple
+    case .googleGeo: return .indigo
+    case .gps: return .blue
+    case .unknown: return .gray
+    }
   }
 }
