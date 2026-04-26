@@ -18,13 +18,19 @@ import UIKit
 struct StreamSessionView: View {
   let wearables: WearablesInterface
   @ObservedObject private var wearablesViewModel: WearablesViewModel
+  @ObservedObject private var shortcutLaunchCoordinator: ShortcutLaunchCoordinator
   @StateObject private var viewModel: StreamSessionViewModel
   @StateObject private var geminiVM = GeminiSessionViewModel()
   @StateObject private var webrtcVM = WebRTCSessionViewModel()
 
-  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel) {
+  init(
+    wearables: WearablesInterface,
+    wearablesVM: WearablesViewModel,
+    shortcutLaunchCoordinator: ShortcutLaunchCoordinator
+  ) {
     self.wearables = wearables
     self.wearablesViewModel = wearablesVM
+    self.shortcutLaunchCoordinator = shortcutLaunchCoordinator
     self._viewModel = StateObject(wrappedValue: StreamSessionViewModel(wearables: wearables))
   }
 
@@ -42,9 +48,13 @@ struct StreamSessionView: View {
       viewModel.geminiSessionVM = geminiVM
       viewModel.webrtcSessionVM = webrtcVM
       geminiVM.streamingMode = viewModel.streamingMode
+      await handlePendingShortcutRequestIfNeeded()
     }
-    .onChange(of: viewModel.streamingMode) { newMode in
+    .onChange(of: viewModel.streamingMode) { _, newMode in
       geminiVM.streamingMode = newMode
+    }
+    .task(id: shortcutLaunchCoordinator.pendingRequest?.id) {
+      await handlePendingShortcutRequestIfNeeded()
     }
     .onAppear {
       UIApplication.shared.isIdleTimerDisabled = true
@@ -58,6 +68,30 @@ struct StreamSessionView: View {
       }
     } message: {
       Text(viewModel.errorMessage)
+    }
+  }
+
+  private func handlePendingShortcutRequestIfNeeded() async {
+    guard let request = shortcutLaunchCoordinator.consumePendingRequest() else { return }
+
+    wearablesViewModel.skipToIPhoneMode = true
+
+    switch request.action {
+    case .startIPhoneStreaming(let startAISession):
+      if viewModel.streamingMode != .iPhone && geminiVM.isGeminiActive {
+        geminiVM.stopSession()
+      }
+
+      if viewModel.streamingMode != .iPhone && viewModel.isStreaming {
+        await viewModel.stopSession()
+      }
+
+      if !viewModel.isStreaming || viewModel.streamingMode != .iPhone {
+        await viewModel.handleStartIPhone()
+      }
+
+      guard startAISession, viewModel.streamingMode == .iPhone, viewModel.isStreaming else { return }
+      await geminiVM.startSession()
     }
   }
 }
