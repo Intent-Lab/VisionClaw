@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Default policy: HTTPS only. Cleartext HTTP is permitted ONLY for the
+  hosts the OpenClaw gateway is reachable on during local development:
+
+    *.local        mDNS-advertised hostnames (e.g. yourmac.local). The
+                   sample's default Secrets.kt.example points at this.
+    localhost      app-on-device-talks-to-itself debugging
+    127.0.0.1      same as above, IP form
+    10.0.2.2       Android emulator alias for the host machine
+
+  If you run the OpenClaw gateway on a private LAN IP that doesn't
+  match the rules above, add the IP here rather than re-enabling
+  cleartext globally. Production builds that talk only to public
+  HTTPS endpoints can remove the entire <domain-config> block.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">local</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
