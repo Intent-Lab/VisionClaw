@@ -1,6 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -131,7 +132,11 @@ class OpenClawBridge {
             response.close()
 
             if (statusCode !in 200..299) {
-                Log.d(TAG, "Chat failed: HTTP $statusCode - ${responseBody.take(200)}")
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "Chat failed: HTTP $statusCode - ${responseBody.take(200)}")
+                } else {
+                    Log.d(TAG, "Chat failed: HTTP $statusCode")
+                }
                 _lastToolCallStatus.value = ToolCallStatus.Failed(toolName, "HTTP $statusCode")
                 return@withContext ToolResult.Failure("Agent returned HTTP $statusCode")
             }
@@ -147,7 +152,7 @@ class OpenClawBridge {
                     put("role", "assistant")
                     put("content", content)
                 })
-                Log.d(TAG, "Agent result: ${content.take(200)}")
+                if (BuildConfig.DEBUG) Log.d(TAG, "Agent result: ${content.take(200)}")
                 _lastToolCallStatus.value = ToolCallStatus.Completed(toolName)
                 return@withContext ToolResult.Success(content)
             }
@@ -156,7 +161,7 @@ class OpenClawBridge {
                 put("role", "assistant")
                 put("content", responseBody)
             })
-            Log.d(TAG, "Agent raw: ${responseBody.take(200)}")
+            if (BuildConfig.DEBUG) Log.d(TAG, "Agent raw: ${responseBody.take(200)}")
             _lastToolCallStatus.value = ToolCallStatus.Completed(toolName)
             return@withContext ToolResult.Success(responseBody)
         } catch (e: Exception) {

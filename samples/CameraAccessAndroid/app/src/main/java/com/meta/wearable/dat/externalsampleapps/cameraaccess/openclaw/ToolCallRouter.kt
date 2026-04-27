@@ -1,6 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -29,7 +30,11 @@ class ToolCallRouter(
         val callId = call.id
         val callName = call.name
 
-        Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
+        } else {
+            Log.d(TAG, "Received: $callName (id: $callId)")
+        }
 
         // Circuit breaker: stop sending tool calls after repeated failures
         val failureCount = consecutiveFailures.get()
@@ -48,7 +53,12 @@ class ToolCallRouter(
             val result = bridge.delegateTask(task = taskDesc, toolName = callName)
 
             if (!coroutineContext[Job]!!.isCancelled) {
-                Log.d(TAG, "Result for $callName (id: $callId): $result")
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "Result for $callName (id: $callId): $result")
+                } else {
+                    val status = if (result is ToolResult.Success) "success" else "failure"
+                    Log.d(TAG, "Result for $callName (id: $callId): $status")
+                }
 
                 when (result) {
                     is ToolResult.Success -> consecutiveFailures.set(0)

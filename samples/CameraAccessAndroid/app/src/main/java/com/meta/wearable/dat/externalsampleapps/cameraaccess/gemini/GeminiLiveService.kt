@@ -3,6 +3,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 import android.graphics.Bitmap
 import android.util.Base64
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCall
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCallCancellation
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolDeclarations
@@ -346,7 +347,9 @@ class GeminiLiveService {
                                     }
                                 }
                             } else if (part.has("text")) {
-                                Log.d(TAG, part.getString("text"))
+                                if (BuildConfig.DEBUG) {
+                                    Log.d(TAG, part.getString("text"))
+                                }
                             }
                         }
                     }
@@ -362,7 +365,7 @@ class GeminiLiveService {
                     val transcription = serverContent.getJSONObject("inputTranscription")
                     val transcriptText = transcription.optString("text", "")
                     if (transcriptText.isNotEmpty()) {
-                        Log.d(TAG, "You: $transcriptText")
+                        if (BuildConfig.DEBUG) Log.d(TAG, "You: $transcriptText")
                         lastUserSpeechEnd = System.currentTimeMillis()
                         responseLatencyLogged = false
                         onInputTranscription?.invoke(transcriptText)
@@ -373,7 +376,7 @@ class GeminiLiveService {
                     val transcription = serverContent.getJSONObject("outputTranscription")
                     val transcriptText = transcription.optString("text", "")
                     if (transcriptText.isNotEmpty()) {
-                        Log.d(TAG, "AI: $transcriptText")
+                        if (BuildConfig.DEBUG) Log.d(TAG, "AI: $transcriptText")
                         onOutputTranscription?.invoke(transcriptText)
                     }
                 }
