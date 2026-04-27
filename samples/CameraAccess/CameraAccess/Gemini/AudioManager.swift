@@ -25,12 +25,17 @@ class AudioManager {
   private var foregroundObserver: NSObjectProtocol?
 
   init() {
-    self.outputFormat = AVAudioFormat(
+    guard let format = AVAudioFormat(
       commonFormat: .pcmFormatInt16,
       sampleRate: GeminiConfig.outputAudioSampleRate,
       channels: GeminiConfig.audioChannels,
       interleaved: true
-    )!
+    ) else {
+      preconditionFailure(
+        "AVAudioFormat init failed for outputFormat (sampleRate=\(GeminiConfig.outputAudioSampleRate), channels=\(GeminiConfig.audioChannels)). Check GeminiConfig values."
+      )
+    }
+    self.outputFormat = format
   }
 
   func setupAudioSession(useIPhoneMode: Bool = false) throws {
@@ -70,12 +75,16 @@ class AudioManager {
     guard !isCapturing else { return }
 
     audioEngine.attach(playerNode)
-    let playerFormat = AVAudioFormat(
+    guard let playerFormat = AVAudioFormat(
       commonFormat: .pcmFormatFloat32,
       sampleRate: GeminiConfig.outputAudioSampleRate,
       channels: GeminiConfig.audioChannels,
       interleaved: false
-    )!
+    ) else {
+      throw NSError(domain: "AudioManager", code: 1, userInfo: [
+        NSLocalizedDescriptionKey: "Failed to create player AVAudioFormat (output sampleRate=\(GeminiConfig.outputAudioSampleRate))"
+      ])
+    }
     audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: playerFormat)
 
     let inputNode = audioEngine.inputNode
@@ -96,14 +105,20 @@ class AudioManager {
     sendQueue.async { self.accumulatedData = Data() }
 
     var converter: AVAudioConverter?
+    var resampleFormat: AVAudioFormat?
     if needsResample {
-      let resampleFormat = AVAudioFormat(
+      guard let format = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
         sampleRate: GeminiConfig.inputAudioSampleRate,
         channels: GeminiConfig.audioChannels,
         interleaved: false
-      )!
-      converter = AVAudioConverter(from: inputNativeFormat, to: resampleFormat)
+      ) else {
+        throw NSError(domain: "AudioManager", code: 2, userInfo: [
+          NSLocalizedDescriptionKey: "Failed to create resample AVAudioFormat (input sampleRate=\(GeminiConfig.inputAudioSampleRate))"
+        ])
+      }
+      resampleFormat = format
+      converter = AVAudioConverter(from: inputNativeFormat, to: format)
     }
 
     var tapCount = 0
@@ -113,13 +128,7 @@ class AudioManager {
       tapCount += 1
       let pcmData: Data
 
-      if let converter {
-        let resampleFormat = AVAudioFormat(
-          commonFormat: .pcmFormatFloat32,
-          sampleRate: GeminiConfig.inputAudioSampleRate,
-          channels: GeminiConfig.audioChannels,
-          interleaved: false
-        )!
+      if let converter, let resampleFormat {
         guard let resampled = self.convertBuffer(buffer, using: converter, targetFormat: resampleFormat) else {
           if tapCount <= 3 { NSLog("[Audio] Resample failed for tap #%d", tapCount) }
           return
@@ -152,12 +161,15 @@ class AudioManager {
   func playAudio(data: Data) {
     guard isCapturing, !data.isEmpty else { return }
 
-    let playerFormat = AVAudioFormat(
+    guard let playerFormat = AVAudioFormat(
       commonFormat: .pcmFormatFloat32,
       sampleRate: GeminiConfig.outputAudioSampleRate,
       channels: GeminiConfig.audioChannels,
       interleaved: false
-    )!
+    ) else {
+      NSLog("[Audio] Failed to create player AVAudioFormat in playAudio; dropping chunk")
+      return
+    }
 
     let frameCount = UInt32(data.count) / (GeminiConfig.audioBitsPerSample / 8 * GeminiConfig.audioChannels)
     guard frameCount > 0 else { return }
