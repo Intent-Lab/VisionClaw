@@ -28,6 +28,28 @@ if (!EXPRESSTURN_USER || !EXPRESSTURN_PASS) {
   process.exit(1);
 }
 
+// CORS: comma-separated allowlist of origins permitted to call /api/turn.
+// Empty string means deny all cross-origin requests; "*" preserves the
+// previous wide-open behavior (only acceptable for local dev).
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+function corsHeadersFor(reqOrigin) {
+  if (ALLOWED_ORIGINS.length === 0) return {};
+  if (ALLOWED_ORIGINS.includes("*")) {
+    return { "Access-Control-Allow-Origin": "*" };
+  }
+  if (reqOrigin && ALLOWED_ORIGINS.includes(reqOrigin)) {
+    return {
+      "Access-Control-Allow-Origin": reqOrigin,
+      Vary: "Origin",
+    };
+  }
+  return {};
+}
+
 function getTurnCredentials() {
   return {
     iceServers: [
@@ -50,10 +72,21 @@ function getTurnCredentials() {
 const httpServer = http.createServer((req, res) => {
   // TURN credentials API endpoint
   if (req.url === "/api/turn") {
+    const cors = corsHeadersFor(req.headers.origin);
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        ...cors,
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "600",
+      });
+      res.end();
+      return;
+    }
     const creds = getTurnCredentials();
     res.writeHead(200, {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
+      ...cors,
     });
     res.end(JSON.stringify(creds));
     return;
