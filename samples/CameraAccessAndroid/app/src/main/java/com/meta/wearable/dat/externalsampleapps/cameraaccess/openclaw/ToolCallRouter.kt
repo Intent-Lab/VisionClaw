@@ -1,6 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
 import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -17,7 +18,9 @@ class ToolCallRouter(
     }
 
     private val inFlightJobs = mutableMapOf<String, Job>()
-    private var consecutiveFailures = 0
+    // Concurrent tool calls update this from independent coroutines;
+    // a plain Int can lose updates under contention.
+    private val consecutiveFailures = AtomicInteger(0)
 
     fun handleToolCall(
         call: GeminiFunctionCall,
@@ -29,10 +32,11 @@ class ToolCallRouter(
         Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
 
         // Circuit breaker: stop sending tool calls after repeated failures
-        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            Log.d(TAG, "Circuit breaker open ($consecutiveFailures consecutive failures), rejecting $callId")
+        val failureCount = consecutiveFailures.get()
+        if (failureCount >= MAX_CONSECUTIVE_FAILURES) {
+            Log.d(TAG, "Circuit breaker open ($failureCount consecutive failures), rejecting $callId")
             val errorResult = ToolResult.Failure(
-                "Tool execution is temporarily unavailable after $consecutiveFailures consecutive failures. " +
+                "Tool execution is temporarily unavailable after $failureCount consecutive failures. " +
                 "Please tell the user you cannot complete this action right now and suggest they check their OpenClaw gateway connection."
             )
             sendResponse(buildToolResponse(callId, callName, errorResult))
@@ -47,8 +51,8 @@ class ToolCallRouter(
                 Log.d(TAG, "Result for $callName (id: $callId): $result")
 
                 when (result) {
-                    is ToolResult.Success -> consecutiveFailures = 0
-                    is ToolResult.Failure -> consecutiveFailures++
+                    is ToolResult.Success -> consecutiveFailures.set(0)
+                    is ToolResult.Failure -> consecutiveFailures.incrementAndGet()
                 }
 
                 val response = buildToolResponse(callId, callName, result)
@@ -80,7 +84,7 @@ class ToolCallRouter(
             job.cancel()
         }
         inFlightJobs.clear()
-        consecutiveFailures = 0
+        consecutiveFailures.set(0)
     }
 
     private fun buildToolResponse(
