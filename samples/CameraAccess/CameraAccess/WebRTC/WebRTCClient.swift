@@ -75,7 +75,17 @@ class WebRTCClient: NSObject {
 
   // MARK: - SDP Negotiation
 
-  func createOffer(completion: @escaping (RTCSessionDescription) -> Void) {
+  enum WebRTCError: Error {
+    case noPeerConnection
+    case offerFailed(Error?)
+    case setLocalDescriptionFailed(Error)
+  }
+
+  func createOffer(completion: @escaping (Result<RTCSessionDescription, Error>) -> Void) {
+    guard let peerConnection else {
+      completion(.failure(WebRTCError.noPeerConnection))
+      return
+    }
     let constraints = RTCMediaConstraints(
       mandatoryConstraints: [
         "OfferToReceiveAudio": "true",
@@ -83,17 +93,22 @@ class WebRTCClient: NSObject {
       ],
       optionalConstraints: nil
     )
-    peerConnection?.offer(for: constraints) { [weak self] sdp, error in
+    peerConnection.offer(for: constraints) { [weak self] sdp, error in
       guard let sdp else {
         NSLog("[WebRTC] Failed to create offer: %@", error?.localizedDescription ?? "unknown")
+        completion(.failure(WebRTCError.offerFailed(error)))
         return
       }
-      self?.peerConnection?.setLocalDescription(sdp) { error in
+      guard let pc = self?.peerConnection else {
+        completion(.failure(WebRTCError.noPeerConnection))
+        return
+      }
+      pc.setLocalDescription(sdp) { error in
         if let error {
-          NSLog(
-            "[WebRTC] Failed to set local description: %@", error.localizedDescription)
+          NSLog("[WebRTC] Failed to set local description: %@", error.localizedDescription)
+          completion(.failure(WebRTCError.setLocalDescriptionFailed(error)))
         } else {
-          completion(sdp)
+          completion(.success(sdp))
         }
       }
     }

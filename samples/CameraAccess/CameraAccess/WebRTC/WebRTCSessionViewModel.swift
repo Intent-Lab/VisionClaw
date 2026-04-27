@@ -191,8 +191,13 @@ class WebRTCSessionViewModel: ObservableObject {
 
     case .peerJoined:
       NSLog("[WebRTC] Peer joined, creating offer")
-      webRTCClient?.createOffer { [weak self] sdp in
-        self?.signalingClient?.send(sdp: sdp)
+      webRTCClient?.createOffer { [weak self] result in
+        switch result {
+        case .success(let sdp):
+          self?.signalingClient?.send(sdp: sdp)
+        case .failure(let error):
+          NSLog("[WebRTC] createOffer failed: %@", error.localizedDescription)
+        }
       }
 
     case .answer(let sdp):
