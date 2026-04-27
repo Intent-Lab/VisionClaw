@@ -50,6 +50,47 @@ function corsHeadersFor(reqOrigin) {
   return {};
 }
 
+// In-memory token-bucket rate limiter, keyed by IP. Bounded so that an
+// attacker cannot grow the map without bound; oldest entries are
+// evicted when MAX_KEYS is reached.
+function createRateLimiter({ capacity, refillPerSec, maxKeys = 10_000 }) {
+  const buckets = new Map();
+  return function tryConsume(key) {
+    const now = Date.now();
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      if (buckets.size >= maxKeys) {
+        // Drop the oldest bucket. Map iteration order is insertion order.
+        const firstKey = buckets.keys().next().value;
+        if (firstKey !== undefined) buckets.delete(firstKey);
+      }
+      bucket = { tokens: capacity, lastMs: now };
+      buckets.set(key, bucket);
+    }
+    const elapsedSec = (now - bucket.lastMs) / 1000;
+    bucket.tokens = Math.min(capacity, bucket.tokens + elapsedSec * refillPerSec);
+    bucket.lastMs = now;
+    if (bucket.tokens < 1) return false;
+    bucket.tokens -= 1;
+    return true;
+  };
+}
+
+// /api/turn: 30 requests/min per IP, burst of 30.
+const turnLimiter = createRateLimiter({ capacity: 30, refillPerSec: 0.5 });
+// WS connections: 20 new connections/min per IP, burst of 20.
+const wsConnectLimiter = createRateLimiter({ capacity: 20, refillPerSec: 20 / 60 });
+// WS messages: 200 msgs/min per IP, burst of 50.
+const wsMessageLimiter = createRateLimiter({ capacity: 50, refillPerSec: 200 / 60 });
+
+function clientIPFrom(req) {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length > 0) {
+    return xff.split(",")[0].trim();
+  }
+  return req.socket.remoteAddress || "unknown";
+}
+
 function getTurnCredentials() {
   return {
     iceServers: [
@@ -81,6 +122,15 @@ const httpServer = http.createServer((req, res) => {
         "Access-Control-Max-Age": "600",
       });
       res.end();
+      return;
+    }
+    if (!turnLimiter(clientIPFrom(req))) {
+      res.writeHead(429, {
+        "Content-Type": "application/json",
+        "Retry-After": "60",
+        ...cors,
+      });
+      res.end(JSON.stringify({ error: "rate_limited" }));
       return;
     }
     const creds = getTurnCredentials();
@@ -119,7 +169,18 @@ const httpServer = http.createServer((req, res) => {
 });
 
 // WebSocket signaling server
-const wss = new WebSocketServer({ server: httpServer });
+const wss = new WebSocketServer({
+  server: httpServer,
+  verifyClient: (info, done) => {
+    const ip = clientIPFrom(info.req);
+    if (!wsConnectLimiter(ip)) {
+      console.log(`[WS] Rejected connection from ${ip}: rate limit`);
+      done(false, 429, "Too Many Requests");
+      return;
+    }
+    done(true);
+  },
+});
 
 function generateRoomCode() {
   // No ambiguous chars (0/O, 1/I/L)
@@ -134,10 +195,15 @@ function generateRoomCode() {
 wss.on("connection", (ws, req) => {
   let currentRoom = null;
   let role = null; // 'creator' or 'viewer'
-  const clientIP = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  const clientIP = clientIPFrom(req);
   console.log(`[WS] New connection from ${clientIP}`);
 
   ws.on("message", (data) => {
+    if (!wsMessageLimiter(clientIP)) {
+      console.log(`[WS] Rate-limited message from ${clientIP}, closing`);
+      ws.close(1008, "rate limit");
+      return;
+    }
     let msg;
     try {
       msg = JSON.parse(data);
