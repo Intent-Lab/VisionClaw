@@ -33,6 +33,9 @@ android {
     release {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+      // Release reuses the debug signing config so `assembleRelease`
+      // works out of the box for sample evaluation. Replace this with
+      // a real release signing config before distributing builds.
       signingConfig = signingConfigs.getByName("debug")
     }
   }
@@ -44,14 +47,10 @@ android {
   buildFeatures { compose = true }
   composeOptions { kotlinCompilerExtensionVersion = "1.5.1" }
   packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
-  signingConfigs {
-    getByName("debug") {
-      storeFile = file("sample.keystore")
-      storePassword = "sample"
-      keyAlias = "sample"
-      keyPassword = "sample"
-    }
-  }
+  // No explicit `signingConfigs.debug` block: AGP auto-generates a
+  // per-developer debug keystore at ~/.android/debug.keystore. The
+  // previous shared `app/sample.keystore` was removed because
+  // committing a signing key to source is unsafe.
 }
 
 dependencies {

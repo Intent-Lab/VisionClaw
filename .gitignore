@@ -6,3 +6,6 @@ samples/CameraAccessAndroid/local.properties
 samples/CameraAccessAndroid/.gradle/
 samples/CameraAccessAndroid/build/
 samples/CameraAccessAndroid/app/build/
+# Never commit signing keys
+*.keystore
+*.jks

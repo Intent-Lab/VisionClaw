@@ -27,6 +27,17 @@ A sample Android application demonstrating integration with Meta Wearables Devic
 1. Click **File** > **Sync Project with Gradle Files**
 1. Click **Run** > **Run...** > **app**
 
+### Signing keys
+
+This sample no longer ships a checked-in `app/sample.keystore`. AGP
+auto-generates a per-developer debug keystore at
+`~/.android/debug.keystore` on first build, which is what `assembleDebug`
+and (for sample evaluation) `assembleRelease` will use. **Do not commit
+keystores or `.jks` files** — they are signing keys and have been added
+to `.gitignore`. To distribute real release builds, replace the release
+`signingConfig` in `app/build.gradle.kts` with credentials sourced from
+your CI's secret store.
+
 ## Running the app
 
 1. Turn 'Developer Mode' on in the Meta AI app.
