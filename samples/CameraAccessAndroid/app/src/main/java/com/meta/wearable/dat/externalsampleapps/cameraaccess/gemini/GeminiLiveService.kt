@@ -9,7 +9,9 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolDeclar
 import java.io.ByteArrayOutputStream
 import java.util.Timer
 import java.util.TimerTask
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,7 +58,10 @@ class GeminiLiveService {
     private var responseLatencyLogged = false
 
     private var webSocket: WebSocket? = null
-    private val sendExecutor = Executors.newSingleThreadExecutor()
+    // Recreated on each connect because disconnect() shuts the
+    // previous executor down (otherwise the worker thread leaks
+    // across reconnects).
+    private var sendExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var connectCallback: ((Boolean) -> Unit)? = null
     private var timeoutTimer: Timer? = null
 
@@ -75,6 +80,11 @@ class GeminiLiveService {
 
         _connectionState.value = GeminiConnectionState.Connecting
         connectCallback = callback
+
+        // If a previous session shut the executor down, replace it.
+        if (sendExecutor.isShutdown) {
+            sendExecutor = Executors.newSingleThreadExecutor()
+        }
 
         val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -141,11 +151,23 @@ class GeminiLiveService {
         _connectionState.value = GeminiConnectionState.Disconnected
         _isModelSpeaking.value = false
         resolveConnect(false)
+        // Drop in-flight queued sends and let the worker thread exit.
+        // connect() will create a fresh executor on the next session.
+        sendExecutor.shutdownNow()
+    }
+
+    private fun safeExecute(task: Runnable) {
+        try {
+            sendExecutor.execute(task)
+        } catch (e: RejectedExecutionException) {
+            // Race with disconnect()'s shutdownNow(); the message is
+            // simply dropped, which matches the connectionState check.
+        }
     }
 
     fun sendAudio(data: ByteArray) {
         if (_connectionState.value != GeminiConnectionState.Ready) return
-        sendExecutor.execute {
+        safeExecute {
             val base64 = Base64.encodeToString(data, Base64.NO_WRAP)
             val json = JSONObject().apply {
                 put("realtimeInput", JSONObject().apply {
@@ -161,7 +183,7 @@ class GeminiLiveService {
 
     fun sendVideoFrame(bitmap: Bitmap) {
         if (_connectionState.value != GeminiConnectionState.Ready) return
-        sendExecutor.execute {
+        safeExecute {
             val baos = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, GeminiConfig.VIDEO_JPEG_QUALITY, baos)
             val base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
@@ -178,14 +200,14 @@ class GeminiLiveService {
     }
 
     fun sendToolResponse(response: JSONObject) {
-        sendExecutor.execute {
+        safeExecute {
             webSocket?.send(response.toString())
         }
     }
 
     fun sendTextMessage(text: String) {
         if (_connectionState.value != GeminiConnectionState.Ready) return
-        sendExecutor.execute {
+        safeExecute {
             val json = JSONObject().apply {
                 put("clientContent", JSONObject().apply {
                     put("turns", JSONArray().put(JSONObject().apply {
