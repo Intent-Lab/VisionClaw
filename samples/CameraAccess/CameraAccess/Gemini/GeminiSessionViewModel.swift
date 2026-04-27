@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 
@@ -17,7 +18,7 @@ class GeminiSessionViewModel: ObservableObject {
   private let audioManager = AudioManager()
   private let eventClient = OpenClawEventClient()
   private var lastVideoFrameTime: Date = .distantPast
-  private var stateObservation: Task<Void, Never>?
+  private var stateSubscriptions = Set<AnyCancellable>()
 
   var streamingMode: StreamingMode = .glasses
 
@@ -109,18 +110,25 @@ class GeminiSessionViewModel: ObservableObject {
       }
     }
 
-    // Observe service state
-    stateObservation = Task { [weak self] in
-      guard let self else { return }
-      while !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-        guard !Task.isCancelled else { break }
-        self.connectionState = self.geminiService.connectionState
-        self.isModelSpeaking = self.geminiService.isModelSpeaking
-        self.toolCallStatus = self.openClawBridge.lastToolCallStatus
-        self.openClawConnectionState = self.openClawBridge.connectionState
-      }
-    }
+    // Observe service state via Combine. Replaces a 100ms polling
+    // loop -- the source @Published properties already drive change
+    // notifications, so we just forward them.
+    geminiService.$connectionState
+      .receive(on: DispatchQueue.main)
+      .assign(to: \.connectionState, on: self)
+      .store(in: &stateSubscriptions)
+    geminiService.$isModelSpeaking
+      .receive(on: DispatchQueue.main)
+      .assign(to: \.isModelSpeaking, on: self)
+      .store(in: &stateSubscriptions)
+    openClawBridge.$lastToolCallStatus
+      .receive(on: DispatchQueue.main)
+      .assign(to: \.toolCallStatus, on: self)
+      .store(in: &stateSubscriptions)
+    openClawBridge.$connectionState
+      .receive(on: DispatchQueue.main)
+      .assign(to: \.openClawConnectionState, on: self)
+      .store(in: &stateSubscriptions)
 
     // Setup audio
     do {
@@ -143,8 +151,7 @@ class GeminiSessionViewModel: ObservableObject {
       }
       errorMessage = msg
       geminiService.disconnect()
-      stateObservation?.cancel()
-      stateObservation = nil
+      stateSubscriptions.removeAll()
       isGeminiActive = false
       connectionState = .disconnected
       return
@@ -156,8 +163,7 @@ class GeminiSessionViewModel: ObservableObject {
     } catch {
       errorMessage = "Mic capture failed: \(error.localizedDescription)"
       geminiService.disconnect()
-      stateObservation?.cancel()
-      stateObservation = nil
+      stateSubscriptions.removeAll()
       isGeminiActive = false
       connectionState = .disconnected
       return
@@ -197,8 +203,7 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.onToolCall = nil
     geminiService.onToolCallCancellation = nil
     geminiService.disconnect()
-    stateObservation?.cancel()
-    stateObservation = nil
+    stateSubscriptions.removeAll()
     isGeminiActive = false
     connectionState = .disconnected
     isModelSpeaking = false
