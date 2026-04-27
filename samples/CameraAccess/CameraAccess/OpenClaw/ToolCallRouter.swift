@@ -20,8 +20,12 @@ class ToolCallRouter {
     let callId = call.id
     let callName = call.name
 
+    #if DEBUG
     NSLog("[ToolCall] Received: %@ (id: %@) args: %@",
           callName, callId, String(describing: call.args))
+    #else
+    NSLog("[ToolCall] Received: %@ (id: %@)", callName, callId)
+    #endif
 
     // Circuit breaker: stop sending tool calls after repeated failures
     if consecutiveFailures >= maxConsecutiveFailures {
@@ -52,8 +56,17 @@ class ToolCallRouter {
         self.consecutiveFailures += 1
       }
 
+      #if DEBUG
       NSLog("[ToolCall] Result for %@ (id: %@): %@",
             callName, callId, String(describing: result))
+      #else
+      switch result {
+      case .success:
+        NSLog("[ToolCall] Result for %@ (id: %@): success", callName, callId)
+      case .failure(let msg):
+        NSLog("[ToolCall] Result for %@ (id: %@): failure (%@)", callName, callId, msg)
+      }
+      #endif
 
       let response = self.buildToolResponse(callId: callId, name: callName, result: result)
       sendResponse(response)

@@ -335,7 +335,11 @@ class GeminiLiveService: ObservableObject {
             }
             onAudioReceived?(audioData)
           } else if let text = part["text"] as? String {
+            #if DEBUG
             NSLog("[Gemini] %@", text)
+            #else
+            _ = text
+            #endif
           }
         }
       }
@@ -348,14 +352,18 @@ class GeminiLiveService: ObservableObject {
 
       if let inputTranscription = serverContent["inputTranscription"] as? [String: Any],
          let text = inputTranscription["text"] as? String, !text.isEmpty {
+        #if DEBUG
         NSLog("[Gemini] You: %@", text)
+        #endif
         lastUserSpeechEnd = Date()
         responseLatencyLogged = false
         onInputTranscription?(text)
       }
       if let outputTranscription = serverContent["outputTranscription"] as? [String: Any],
          let text = outputTranscription["text"] as? String, !text.isEmpty {
+        #if DEBUG
         NSLog("[Gemini] AI: %@", text)
+        #endif
         onOutputTranscription?(text)
       }
     }
