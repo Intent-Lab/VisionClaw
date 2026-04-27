@@ -177,10 +177,25 @@ class GeminiSessionViewModel: ObservableObject {
   }
 
   func stopSession() {
+    eventClient.onNotification = nil
     eventClient.disconnect()
     toolCallRouter?.cancelAll()
     toolCallRouter = nil
+    audioManager.onAudioCaptured = nil
     audioManager.stopCapture()
+    // GeminiLiveService.disconnect() clears its own internal delegate
+    // callbacks but does not own the closures *we* set on it. Clear
+    // them here so a stale closure can't fire on this view model after
+    // the session has stopped (or onto a fresh session that hasn't
+    // wired its closures yet).
+    geminiService.onAudioReceived = nil
+    geminiService.onTurnComplete = nil
+    geminiService.onInterrupted = nil
+    geminiService.onDisconnected = nil
+    geminiService.onInputTranscription = nil
+    geminiService.onOutputTranscription = nil
+    geminiService.onToolCall = nil
+    geminiService.onToolCallCancellation = nil
     geminiService.disconnect()
     stateObservation?.cancel()
     stateObservation = nil
