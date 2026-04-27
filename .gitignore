@@ -9,3 +9,16 @@ samples/CameraAccessAndroid/app/build/
 # Never commit signing keys
 *.keystore
 *.jks
+
+# iOS / Xcode
+samples/CameraAccess/CameraAccess/Secrets.swift
+xcuserdata/
+DerivedData/
+*.xcworkspace/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+build/
+.swiftpm/
