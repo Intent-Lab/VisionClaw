@@ -46,8 +46,11 @@ class MainActivity : ComponentActivity() {
   private val permissionsResultLauncher =
       registerForActivityResult(Wearables.RequestPermissionContract()) { result ->
         val permissionStatus = result.getOrDefault(PermissionStatus.Denied)
-        permissionContinuation?.resume(permissionStatus)
+        // Snapshot then null out before resuming so a re-entrant call
+        // from inside resume() can't observe a stale continuation.
+        val cont = permissionContinuation
         permissionContinuation = null
+        cont?.resume(permissionStatus)
       }
 
   suspend fun requestWearablesPermission(permission: Permission): PermissionStatus {
@@ -59,6 +62,18 @@ class MainActivity : ComponentActivity() {
       }
     }
   }
+
+  // System-permissions flow. The launcher is registered once at field
+  // init time (per AndroidX rules) and the granted callback is stored
+  // here so checkPermissions() can be called more than once safely.
+  private var onSystemPermissionsResult: ((Boolean) -> Unit)? = null
+  private val systemPermissionsResultLauncher =
+      registerForActivityResult(RequestMultiplePermissions()) { result ->
+        val cb = onSystemPermissionsResult
+        onSystemPermissionsResult = null
+        val granted = result.entries.all { it.value }
+        cb?.invoke(granted)
+      }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -88,16 +103,21 @@ class MainActivity : ComponentActivity() {
   }
 
   fun checkPermissions(onPermissionsGranted: () -> Unit) {
-    registerForActivityResult(RequestMultiplePermissions()) { permissionsResult ->
-          val granted = permissionsResult.entries.all { it.value }
-          if (granted) {
-            onPermissionsGranted()
-          } else {
-            viewModel.setRecentError(
-                "Allow All Permissions (Bluetooth, Bluetooth Connect, Internet, Microphone, Camera)"
-            )
-          }
-        }
-        .launch(PERMISSIONS)
+    // Reuse the once-registered launcher (registerForActivityResult
+    // must happen before the activity reaches STARTED, which the
+    // field-initializer registration above guarantees). If a request
+    // is already in flight, we drop the new one rather than
+    // overwriting the in-flight callback.
+    if (onSystemPermissionsResult != null) return
+    onSystemPermissionsResult = { granted ->
+      if (granted) {
+        onPermissionsGranted()
+      } else {
+        viewModel.setRecentError(
+            "Allow All Permissions (Bluetooth, Bluetooth Connect, Internet, Microphone, Camera)"
+        )
+      }
+    }
+    systemPermissionsResultLauncher.launch(PERMISSIONS)
   }
 }
