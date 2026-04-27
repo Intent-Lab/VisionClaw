@@ -30,6 +30,7 @@ class GeminiLiveService: ObservableObject {
   private var webSocketTask: URLSessionWebSocketTask?
   private var receiveTask: Task<Void, Never>?
   private var connectContinuation: CheckedContinuation<Bool, Never>?
+  private var connectTimeoutTask: Task<Void, Never>?
   private let delegate = WebSocketDelegate()
   private var urlSession: URLSession!
   private let sendQueue = DispatchQueue(label: "gemini.send", qos: .userInitiated)
@@ -85,14 +86,21 @@ class GeminiLiveService: ObservableObject {
       self.webSocketTask = self.urlSession.webSocketTask(with: url)
       self.webSocketTask?.resume()
 
-      // Timeout after 15 seconds
-      Task {
+      // Timeout after 15 seconds. The task is stored so it can be
+      // cancelled by resolveConnect; without that, a stale timeout
+      // from a prior connect() can fire onto a *new* connect()'s
+      // continuation if the user disconnects and reconnects within
+      // 15s, racing it to a spurious failure.
+      self.connectTimeoutTask = Task { [weak self] in
         try? await Task.sleep(nanoseconds: 15_000_000_000)
+        guard !Task.isCancelled else { return }
         await MainActor.run {
-          self.resolveConnect(success: false)
+          guard let self else { return }
+          guard self.connectContinuation != nil else { return }
           if self.connectionState == .connecting || self.connectionState == .settingUp {
             self.connectionState = .error("Connection timed out")
           }
+          self.resolveConnect(success: false)
         }
       }
     }
@@ -171,6 +179,8 @@ class GeminiLiveService: ObservableObject {
   // MARK: - Private
 
   private func resolveConnect(success: Bool) {
+    connectTimeoutTask?.cancel()
+    connectTimeoutTask = nil
     if let cont = connectContinuation {
       connectContinuation = nil
       cont.resume(returning: success)
