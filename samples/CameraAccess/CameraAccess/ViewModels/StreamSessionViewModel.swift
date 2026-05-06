@@ -33,6 +33,20 @@ enum StreamingMode {
   case iPhone
 }
 
+enum CameraCapturePolicy {
+  static func shouldStartLocalCameraCapture(
+    streamingMode: StreamingMode,
+    videoStreamingEnabled: Bool
+  ) -> Bool {
+    switch streamingMode {
+    case .glasses:
+      return true
+    case .iPhone:
+      return videoStreamingEnabled
+    }
+  }
+}
+
 @MainActor
 class StreamSessionViewModel: ObservableObject {
   @Published var currentVideoFrame: UIImage?
@@ -46,6 +60,10 @@ class StreamSessionViewModel: ObservableObject {
 
   var isStreaming: Bool {
     streamingStatus != .stopped
+  }
+
+  var isVoiceOnlyIPhoneMode: Bool {
+    streamingMode == .iPhone && !SettingsManager.shared.videoStreamingEnabled
   }
 
   var resolutionLabel: String {
@@ -286,6 +304,18 @@ class StreamSessionViewModel: ObservableObject {
 
   private func startIPhoneSession() {
     streamingMode = .iPhone
+    guard CameraCapturePolicy.shouldStartLocalCameraCapture(
+      streamingMode: streamingMode,
+      videoStreamingEnabled: SettingsManager.shared.videoStreamingEnabled
+    ) else {
+      currentVideoFrame = nil
+      hasReceivedFirstFrame = false
+      iPhoneCameraManager = nil
+      streamingStatus = .streaming
+      NSLog("[Stream] iPhone voice-only mode started; local camera capture disabled")
+      return
+    }
+
     let camera = IPhoneCameraManager()
     camera.onFrameCaptured = { [weak self] image in
       Task { @MainActor [weak self] in

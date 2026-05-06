@@ -7,13 +7,74 @@
  */
 
 import Foundation
+import AppIntents
 import MWDATCore
+#if canImport(MWDATMockDevice)
 import MWDATMockDevice
+#endif
 import SwiftUI
 import XCTest
 
 @testable import CameraAccess
 
+class CameraCapturePolicyTests: XCTestCase {
+  func testIPhoneModeDoesNotStartLocalCameraCaptureWhenVideoStreamingDisabled() {
+    XCTAssertFalse(
+      CameraCapturePolicy.shouldStartLocalCameraCapture(
+        streamingMode: .iPhone,
+        videoStreamingEnabled: false
+      )
+    )
+  }
+
+  func testIPhoneModeStartsLocalCameraCaptureWhenVideoStreamingEnabled() {
+    XCTAssertTrue(
+      CameraCapturePolicy.shouldStartLocalCameraCapture(
+        streamingMode: .iPhone,
+        videoStreamingEnabled: true
+      )
+    )
+  }
+}
+
+@MainActor
+class ShortcutLaunchTests: XCTestCase {
+  func testShortcutLaunchCoordinatorEnqueuesIPhoneStreamingRequest() {
+    let coordinator = ShortcutLaunchCoordinator()
+
+    coordinator.requestStartIPhoneStreaming(startAISession: true)
+
+    XCTAssertEqual(
+      coordinator.pendingRequest?.action,
+      .startIPhoneStreaming(startAISession: true)
+    )
+  }
+
+  func testConsumePendingRequestClearsPendingRequest() {
+    let coordinator = ShortcutLaunchCoordinator()
+    coordinator.requestStartIPhoneStreaming(startAISession: false)
+
+    let request = coordinator.consumePendingRequest()
+
+    XCTAssertEqual(request?.action, .startIPhoneStreaming(startAISession: false))
+    XCTAssertNil(coordinator.pendingRequest)
+  }
+
+  func testStartIPhoneStreamingIntentEnqueuesRequestWithAISessionPreference() {
+    let coordinator = ShortcutLaunchCoordinator()
+    var intent = StartIPhoneStreamingIntent()
+    intent.startAISession = true
+
+    intent.enqueueRequest(using: coordinator)
+
+    XCTAssertEqual(
+      coordinator.pendingRequest?.action,
+      .startIPhoneStreaming(startAISession: true)
+    )
+  }
+}
+
+#if canImport(MWDATMockDevice)
 @MainActor
 class ViewModelIntegrationTests: XCTestCase {
 
@@ -156,3 +217,4 @@ class ViewModelIntegrationTests: XCTestCase {
     XCTAssertTrue([.stopped, .waiting].contains(viewModel.streamingStatus))
   }
 }
+#endif

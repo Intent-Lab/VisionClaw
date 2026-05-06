@@ -20,18 +20,36 @@ import SwiftUI
 struct MainAppView: View {
   let wearables: WearablesInterface
   @ObservedObject private var viewModel: WearablesViewModel
+  @ObservedObject private var shortcutLaunchCoordinator: ShortcutLaunchCoordinator
 
-  init(wearables: WearablesInterface, viewModel: WearablesViewModel) {
+  init(
+    wearables: WearablesInterface,
+    viewModel: WearablesViewModel,
+    shortcutLaunchCoordinator: ShortcutLaunchCoordinator
+  ) {
     self.wearables = wearables
     self.viewModel = viewModel
+    self.shortcutLaunchCoordinator = shortcutLaunchCoordinator
   }
 
   var body: some View {
-    if viewModel.registrationState == .registered || viewModel.hasMockDevice || viewModel.skipToIPhoneMode {
-      StreamSessionView(wearables: wearables, wearablesVM: viewModel)
-    } else {
-      // User not registered - show registration/onboarding flow
-      HomeScreenView(viewModel: viewModel)
+    Group {
+      if viewModel.registrationState == .registered || viewModel.hasMockDevice || viewModel.skipToIPhoneMode {
+        StreamSessionView(
+          wearables: wearables,
+          wearablesVM: viewModel,
+          shortcutLaunchCoordinator: shortcutLaunchCoordinator
+        )
+      } else {
+        // User not registered - show registration/onboarding flow
+        HomeScreenView(viewModel: viewModel)
+      }
+    }
+    .task(id: shortcutLaunchCoordinator.pendingRequest?.id) {
+      guard let request = shortcutLaunchCoordinator.pendingRequest else { return }
+      if case .startIPhoneStreaming = request.action {
+        viewModel.skipToIPhoneMode = true
+      }
     }
   }
 }

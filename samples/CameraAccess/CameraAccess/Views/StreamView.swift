@@ -45,6 +45,8 @@ struct StreamView: View {
             .clipped()
         }
         .edgesIgnoringSafeArea(.all)
+      } else if viewModel.isVoiceOnlyIPhoneMode {
+        VoiceOnlyIPhoneView()
       } else {
         ProgressView()
           .scaleEffect(1.5)
@@ -143,6 +145,34 @@ struct StreamView: View {
     } message: {
       Text(webrtcVM.errorMessage ?? "")
     }
+  }
+}
+
+private struct VoiceOnlyIPhoneView: View {
+  var body: some View {
+    VStack(spacing: 14) {
+      Image(systemName: "mic.circle.fill")
+        .font(.system(size: 64, weight: .light))
+        .foregroundColor(.white.opacity(0.9))
+
+      Text("Voice-only mode")
+        .font(.system(size: 24, weight: .semibold))
+        .foregroundColor(.white)
+
+      Text("Video Streaming is disabled. The iPhone camera is not capturing frames.")
+        .font(.system(size: 15))
+        .foregroundColor(.white.opacity(0.72))
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 32)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(
+      LinearGradient(
+        colors: [Color.black, Color(red: 0.04, green: 0.08, blue: 0.10)],
+        startPoint: .top,
+        endPoint: .bottom
+      )
+    )
   }
 }
 

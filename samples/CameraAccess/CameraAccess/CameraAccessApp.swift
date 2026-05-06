@@ -29,6 +29,7 @@ struct CameraAccessApp: App {
   // Debug menu for simulating device connections during development
   @StateObject private var debugMenuViewModel = DebugMenuViewModel(mockDeviceKit: MockDeviceKit.shared)
   #endif
+  @StateObject private var shortcutLaunchCoordinator = ShortcutLaunchCoordinator.shared
   private let wearables: WearablesInterface
   @StateObject private var wearablesViewModel: WearablesViewModel
 
@@ -49,7 +50,11 @@ struct CameraAccessApp: App {
     WindowGroup {
       // Main app view with access to the shared Wearables SDK instance
       // The Wearables.shared singleton provides the core DAT API
-      MainAppView(wearables: Wearables.shared, viewModel: wearablesViewModel)
+      MainAppView(
+        wearables: Wearables.shared,
+        viewModel: wearablesViewModel,
+        shortcutLaunchCoordinator: shortcutLaunchCoordinator
+      )
         // Show error alerts for view model failures
         .alert("Error", isPresented: $wearablesViewModel.showError) {
           Button("OK") {
