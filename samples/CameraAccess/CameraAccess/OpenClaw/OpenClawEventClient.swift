@@ -10,6 +10,9 @@ class OpenClawEventClient {
   private var reconnectDelay: TimeInterval = 2
   private let maxReconnectDelay: TimeInterval = 30
 
+  /// Optional override base URL — set by GeminiSessionViewModel from the resolved gateway.
+  var overrideBaseURL: String?
+
   func connect() {
     guard GeminiConfig.isOpenClawConfigured else {
       NSLog("[OpenClawWS] Not configured, skipping")
@@ -34,12 +37,22 @@ class OpenClawEventClient {
   // MARK: - Private
 
   private func establishConnection() {
-    let host = GeminiConfig.openClawHost
-      .replacingOccurrences(of: "http://", with: "")
-      .replacingOccurrences(of: "https://", with: "")
-    let port = GeminiConfig.openClawPort
-    guard let url = URL(string: "ws://\(host):\(port)") else {
-      NSLog("[OpenClawWS] Invalid URL")
+    // Use resolved gateway URL if available (supports remote/Tailscale), else fall back to local config
+    let baseURL: String
+    if let override = overrideBaseURL, !override.isEmpty {
+      baseURL = override
+    } else {
+      baseURL = "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)"
+    }
+
+    let wsURL = baseURL
+      .replacingOccurrences(of: "https://", with: "wss://")
+      .replacingOccurrences(of: "http://", with: "ws://")
+    // If no scheme, prepend ws://
+    let finalURL = wsURL.hasPrefix("ws://") || wsURL.hasPrefix("wss://") ? wsURL : "ws://\(wsURL)"
+
+    guard let url = URL(string: finalURL) else {
+      NSLog("[OpenClawWS] Invalid URL: %@", finalURL)
       return
     }
 

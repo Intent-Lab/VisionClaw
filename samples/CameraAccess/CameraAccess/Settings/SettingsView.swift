@@ -7,6 +7,7 @@ struct SettingsView: View {
   @State private var geminiAPIKey: String = ""
   @State private var openClawHost: String = ""
   @State private var openClawPort: String = ""
+  @State private var openClawRemoteURL: String = ""
   @State private var openClawHookToken: String = ""
   @State private var openClawGatewayToken: String = ""
   @State private var geminiSystemPrompt: String = ""
@@ -55,6 +56,20 @@ struct SettingsView: View {
               .foregroundColor(.secondary)
             TextField("18789", text: $openClawPort)
               .keyboardType(.numberPad)
+              .font(.system(.body, design: .monospaced))
+          }
+
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Remote URL (Tailscale / Public)")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            Text("For use outside your home Wi-Fi. Tried first; falls back to local Host above.")
+              .font(.caption2)
+              .foregroundColor(.secondary)
+            TextField("http://100.x.x.x:18789", text: $openClawRemoteURL)
+              .autocapitalization(.none)
+              .disableAutocorrection(true)
+              .keyboardType(.URL)
               .font(.system(.body, design: .monospaced))
           }
 
@@ -147,6 +162,7 @@ struct SettingsView: View {
     geminiSystemPrompt = settings.geminiSystemPrompt
     openClawHost = settings.openClawHost
     openClawPort = String(settings.openClawPort)
+    openClawRemoteURL = settings.openClawRemoteURL
     openClawHookToken = settings.openClawHookToken
     openClawGatewayToken = settings.openClawGatewayToken
     webrtcSignalingURL = settings.webrtcSignalingURL
@@ -162,6 +178,7 @@ struct SettingsView: View {
     if let port = Int(openClawPort.trimmingCharacters(in: .whitespacesAndNewlines)) {
       settings.openClawPort = port
     }
+    settings.openClawRemoteURL = openClawRemoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.openClawHookToken = openClawHookToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.openClawGatewayToken = openClawGatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.webrtcSignalingURL = webrtcSignalingURL.trimmingCharacters(in: .whitespacesAndNewlines)

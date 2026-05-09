@@ -174,6 +174,8 @@ class GeminiSessionViewModel : ViewModel() {
                             geminiService.sendTextMessage(text)
                         }
                     }
+                    // Pass resolved gateway URL so EventClient works on remote networks too
+                    eventClient.overrideBaseURL = openClawBridge.resolvedBaseURL
                     eventClient.connect()
                 }
             }

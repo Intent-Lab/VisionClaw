@@ -46,6 +46,7 @@ fun SettingsScreen(
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
     var openClawHost by remember { mutableStateOf(SettingsManager.openClawHost) }
     var openClawPort by remember { mutableStateOf(SettingsManager.openClawPort.toString()) }
+    var openClawRemoteURL by remember { mutableStateOf(SettingsManager.openClawRemoteURL) }
     var openClawHookToken by remember { mutableStateOf(SettingsManager.openClawHookToken) }
     var openClawGatewayToken by remember { mutableStateOf(SettingsManager.openClawGatewayToken) }
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
@@ -58,6 +59,7 @@ fun SettingsScreen(
         SettingsManager.geminiSystemPrompt = systemPrompt.trim()
         SettingsManager.openClawHost = openClawHost.trim()
         openClawPort.trim().toIntOrNull()?.let { SettingsManager.openClawPort = it }
+        SettingsManager.openClawRemoteURL = openClawRemoteURL.trim()
         SettingsManager.openClawHookToken = openClawHookToken.trim()
         SettingsManager.openClawGatewayToken = openClawGatewayToken.trim()
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
@@ -70,6 +72,7 @@ fun SettingsScreen(
         systemPrompt = SettingsManager.geminiSystemPrompt
         openClawHost = SettingsManager.openClawHost
         openClawPort = SettingsManager.openClawPort.toString()
+        openClawRemoteURL = SettingsManager.openClawRemoteURL
         openClawHookToken = SettingsManager.openClawHookToken
         openClawGatewayToken = SettingsManager.openClawGatewayToken
         webrtcSignalingURL = SettingsManager.webrtcSignalingURL
@@ -131,6 +134,18 @@ fun SettingsScreen(
                 label = "Port",
                 placeholder = "18789",
                 keyboardType = KeyboardType.Number,
+            )
+            MonoTextField(
+                value = openClawRemoteURL,
+                onValueChange = { openClawRemoteURL = it },
+                label = "Remote URL (Tailscale / Public)",
+                placeholder = "http://100.x.x.x:18789",
+                keyboardType = KeyboardType.Uri,
+            )
+            Text(
+                "For use outside your home Wi-Fi. Tried first; falls back to local Host above.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             MonoTextField(
                 value = openClawHookToken,

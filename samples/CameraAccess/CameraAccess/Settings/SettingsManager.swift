@@ -9,6 +9,7 @@ final class SettingsManager {
     case geminiAPIKey
     case openClawHost
     case openClawPort
+    case openClawRemoteURL
     case openClawHookToken
     case openClawGatewayToken
     case geminiSystemPrompt
@@ -37,6 +38,12 @@ final class SettingsManager {
   var openClawHost: String {
     get { defaults.string(forKey: Key.openClawHost.rawValue) ?? Secrets.openClawHost }
     set { defaults.set(newValue, forKey: Key.openClawHost.rawValue) }
+  }
+
+  /// Remote gateway URL (Tailscale IP or public URL). When set, tried before local.
+  var openClawRemoteURL: String {
+    get { defaults.string(forKey: Key.openClawRemoteURL.rawValue) ?? "" }
+    set { defaults.set(newValue, forKey: Key.openClawRemoteURL.rawValue) }
   }
 
   var openClawPort: Int {
@@ -89,7 +96,7 @@ final class SettingsManager {
 
   func resetAll() {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
-                .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
+                .openClawRemoteURL, .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
                 .speakerOutputEnabled, .videoStreamingEnabled,
                 .proactiveNotificationsEnabled] {
       defaults.removeObject(forKey: key.rawValue)

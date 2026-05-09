@@ -25,6 +25,11 @@ object SettingsManager {
         get() = prefs.getString("openClawHost", null) ?: Secrets.openClawHost
         set(value) = prefs.edit().putString("openClawHost", value).apply()
 
+    /** Remote gateway URL (Tailscale IP or public URL). When set, tried before local. */
+    var openClawRemoteURL: String
+        get() = prefs.getString("openClawRemoteURL", null) ?: ""
+        set(value) = prefs.edit().putString("openClawRemoteURL", value).apply()
+
     var openClawPort: Int
         get() {
             val stored = prefs.getInt("openClawPort", 0)

@@ -22,6 +22,9 @@ class OpenClawEventClient {
 
     var onNotification: ((String) -> Unit)? = null
 
+    /** Set from GeminiSessionViewModel with the resolved gateway URL for remote support */
+    var overrideBaseURL: String? = null
+
     private var webSocket: WebSocket? = null
     private var isConnected = false
     private var shouldReconnect = false
@@ -53,11 +56,16 @@ class OpenClawEventClient {
     }
 
     private fun establishConnection() {
-        val host = GeminiConfig.openClawHost
-            .replace("http://", "")
-            .replace("https://", "")
-        val port = GeminiConfig.openClawPort
-        val url = "ws://$host:$port"
+        // Use resolved gateway URL if available (supports remote/Tailscale), else fall back to local
+        val baseURL = if (!overrideBaseURL.isNullOrEmpty()) {
+            overrideBaseURL!!
+        } else {
+            "${GeminiConfig.openClawHost}:${GeminiConfig.openClawPort}"
+        }
+        val url = baseURL
+            .replace("https://", "wss://")
+            .replace("http://", "ws://")
+            .let { if (it.startsWith("ws://") || it.startsWith("wss://")) it else "ws://$it" }
 
         Log.d(TAG, "Connecting to $url")
 
