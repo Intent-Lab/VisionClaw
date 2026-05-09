@@ -42,6 +42,10 @@ struct StreamSessionView: View {
       viewModel.geminiSessionVM = geminiVM
       viewModel.webrtcSessionVM = webrtcVM
       geminiVM.streamingMode = viewModel.streamingMode
+      geminiVM.webrtcVM = webrtcVM
+      geminiVM.frameProvider = { [weak viewModel] in
+        viewModel?.currentVideoFrame
+      }
     }
     .onChange(of: viewModel.streamingMode) { newMode in
       geminiVM.streamingMode = newMode

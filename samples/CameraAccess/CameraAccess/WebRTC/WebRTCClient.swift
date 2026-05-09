@@ -15,8 +15,8 @@ class WebRTCClient: NSObject {
 
   private let factory: RTCPeerConnectionFactory
   private var peerConnection: RTCPeerConnection?
-  private var videoSource: RTCVideoSource!
-  private var videoCapturer: CustomVideoCapturer!
+  private var videoSource: RTCVideoSource?
+  private var videoCapturer: CustomVideoCapturer?
   private var localVideoTrack: RTCVideoTrack?
   private var localAudioTrack: RTCAudioTrack?
   private(set) var remoteVideoTrack: RTCVideoTrack?
@@ -52,11 +52,14 @@ class WebRTCClient: NSObject {
 
   private func createMediaTracks() {
     // Video track — custom source fed by DAT SDK frames
-    videoSource = factory.videoSource()
-    videoCapturer = CustomVideoCapturer(delegate: videoSource)
-    localVideoTrack = factory.videoTrack(with: videoSource, trackId: "video0")
+    let source = factory.videoSource()
+    videoSource = source
+    videoCapturer = CustomVideoCapturer(delegate: source)
+    localVideoTrack = factory.videoTrack(with: source, trackId: "video0")
     localVideoTrack?.isEnabled = true
-    peerConnection?.add(localVideoTrack!, streamIds: ["stream0"])
+    if let track = localVideoTrack {
+      peerConnection?.add(track, streamIds: ["stream0"])
+    }
 
     // Audio track — WebRTC native audio (handles mic capture, AEC, playback)
     let audioConstraints = RTCMediaConstraints(
@@ -65,7 +68,9 @@ class WebRTCClient: NSObject {
     let audioSource = factory.audioSource(with: audioConstraints)
     localAudioTrack = factory.audioTrack(with: audioSource, trackId: "audio0")
     localAudioTrack?.isEnabled = true
-    peerConnection?.add(localAudioTrack!, streamIds: ["stream0"])
+    if let track = localAudioTrack {
+      peerConnection?.add(track, streamIds: ["stream0"])
+    }
   }
 
   /// Called by ViewModel to push video frames from DAT SDK / iPhone camera.

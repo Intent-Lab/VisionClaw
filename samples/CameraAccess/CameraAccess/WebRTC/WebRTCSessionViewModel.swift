@@ -22,6 +22,7 @@ class WebRTCSessionViewModel: ObservableObject {
   @Published var errorMessage: String?
   @Published var remoteVideoTrack: RTCVideoTrack?
   @Published var hasRemoteVideo: Bool = false
+  @Published var isCollaborativeMode: Bool = false
 
   private var webRTCClient: WebRTCClient?
   private var signalingClient: SignalingClient?
@@ -64,6 +65,7 @@ class WebRTCSessionViewModel: ObservableObject {
     isMuted = false
     remoteVideoTrack = nil
     hasRemoteVideo = false
+    isCollaborativeMode = false
   }
 
   func toggleMute() {
@@ -75,6 +77,17 @@ class WebRTCSessionViewModel: ObservableObject {
   func pushVideoFrame(_ image: UIImage) {
     guard isActive, connectionState == .connected else { return }
     webRTCClient?.pushVideoFrame(image)
+  }
+
+  func enterCollaborativeMode() {
+    guard isActive else { return }
+    isCollaborativeMode = true
+    NSLog("[WebRTC] Collaborative mode enabled (AI + Live)")
+  }
+
+  func broadcastTranscript(speaker: String, text: String) {
+    guard isActive, isCollaborativeMode else { return }
+    signalingClient?.sendTranscript(speaker: speaker, text: text)
   }
 
   // MARK: - WebRTC + Signaling Setup
