@@ -24,6 +24,13 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Prepare Secrets.swift for CI
+        working-directory: samples/CameraAccess
+        run: |
+          if [ ! -f CameraAccess/Secrets.swift ]; then
+            cp CameraAccess/Secrets.swift.example CameraAccess/Secrets.swift
+          fi
+
       - name: Resolve Swift packages
         working-directory: samples/CameraAccess
         run: xcodebuild -resolvePackageDependencies -project CameraAccess.xcodeproj -scheme CameraAccess
