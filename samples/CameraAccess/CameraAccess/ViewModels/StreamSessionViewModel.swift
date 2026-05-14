@@ -238,6 +238,11 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func handleStartStreaming() async {
+    if !SettingsManager.shared.videoStreamingEnabled {
+      startAudioOnlyGlassesSession()
+      return
+    }
+
     let permission = Permission.camera
     do {
       let status = try await wearables.checkPermissionStatus(permission)
@@ -250,7 +255,7 @@ class StreamSessionViewModel: ObservableObject {
         await startSession()
         return
       }
-      showError("Permission denied")
+      showError("Camera permission denied")
     } catch {
       showError("Permission error: \(error.description)")
     }
@@ -268,6 +273,10 @@ class StreamSessionViewModel: ObservableObject {
   func stopSession() async {
     if streamingMode == .iPhone {
       stopIPhoneSession()
+      return
+    }
+    if !SettingsManager.shared.videoStreamingEnabled {
+      stopAudioOnlyGlassesSession()
       return
     }
     await streamSession.stop()
@@ -329,6 +338,8 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   private func updateStatusFromState(_ state: StreamSessionState) {
+    guard SettingsManager.shared.videoStreamingEnabled else { return }
+
     switch state {
     case .stopped:
       currentVideoFrame = nil
@@ -338,6 +349,26 @@ class StreamSessionViewModel: ObservableObject {
     case .streaming:
       streamingStatus = .streaming
     }
+  }
+
+  private func startAudioOnlyGlassesSession() {
+    guard hasActiveDevice else {
+      showError("No active glasses found. Connect the glasses first.")
+      return
+    }
+
+    streamingMode = .glasses
+    currentVideoFrame = nil
+    hasReceivedFirstFrame = false
+    streamingStatus = .streaming
+    NSLog("[Stream] Audio-only glasses mode started")
+  }
+
+  private func stopAudioOnlyGlassesSession() {
+    currentVideoFrame = nil
+    hasReceivedFirstFrame = false
+    streamingStatus = .stopped
+    NSLog("[Stream] Audio-only glasses mode stopped")
   }
 
   private func formatStreamingError(_ error: StreamSessionError) -> String {

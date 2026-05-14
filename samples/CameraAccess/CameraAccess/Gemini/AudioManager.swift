@@ -50,16 +50,13 @@ class AudioManager {
       try session.setCategory(
         .playAndRecord,
         mode: .videoChat,
-        options: [.allowBluetoothHFP, .mixWithOthers, .defaultToSpeaker]
+        options: [.allowBluetooth, .allowBluetoothHFP, .mixWithOthers]
       )
     }
     try session.setPreferredSampleRate(GeminiConfig.inputAudioSampleRate)
     try session.setPreferredIOBufferDuration(0.064)
     try session.setActive(true)
-    if SettingsManager.shared.speakerOutputEnabled {
-      try session.overrideOutputAudioPort(.speaker)
-      NSLog("[Audio] Speaker output override: ON (iPhone speaker)")
-    }
+    try routeAudio(session: session, forceSpeaker: forceSpeaker)
     NSLog("[Audio] Session mode: %@", useIPhoneMode ? "voiceChat (iPhone)" : "videoChat (glasses)")
 
     setupInterruptionHandling()
@@ -348,6 +345,23 @@ class AudioManager {
     if let observer = foregroundObserver {
       NotificationCenter.default.removeObserver(observer)
       foregroundObserver = nil
+    }
+  }
+
+  private func routeAudio(session: AVAudioSession, forceSpeaker: Bool) throws {
+    if forceSpeaker {
+      try session.overrideOutputAudioPort(.speaker)
+      NSLog("[Audio] Speaker output override: ON (iPhone speaker)")
+      return
+    }
+
+    try session.overrideOutputAudioPort(.none)
+
+    if let bluetoothInput = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
+      try session.setPreferredInput(bluetoothInput)
+      NSLog("[Audio] Preferred HFP input: %@", bluetoothInput.portName)
+    } else {
+      NSLog("[Audio] No bluetooth HFP input currently available; using default route")
     }
   }
 

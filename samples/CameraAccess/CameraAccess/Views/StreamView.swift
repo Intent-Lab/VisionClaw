@@ -29,8 +29,26 @@ struct StreamView: View {
       Color.black
         .edgesIgnoringSafeArea(.all)
 
-      // Video backdrop: PiP when WebRTC connected, otherwise single local feed
-      if webrtcVM.isActive && webrtcVM.connectionState == .connected {
+      // Video backdrop: only show live video when video mode is enabled.
+      if !SettingsManager.shared.videoStreamingEnabled {
+        VStack(spacing: 16) {
+          Image(systemName: geminiVM.isGeminiActive ? "waveform.circle.fill" : "waveform.circle")
+            .resizable()
+            .scaledToFit()
+            .frame(width: 96, height: 96)
+            .foregroundColor(.white)
+
+          Text(geminiVM.isGeminiActive ? "Audio assistant live" : "Audio assistant ready")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundColor(.white)
+
+          Text("Voice runs through Gemini and OpenClaw. Video context is currently disabled.")
+            .font(.system(size: 15))
+            .multilineTextAlignment(.center)
+            .foregroundColor(.white.opacity(0.75))
+            .padding(.horizontal, 28)
+        }
+      } else if webrtcVM.isActive && webrtcVM.connectionState == .connected {
         PiPVideoView(
           localFrame: viewModel.currentVideoFrame,
           remoteVideoTrack: webrtcVM.remoteVideoTrack,
@@ -156,7 +174,7 @@ struct ControlsView: View {
     // Controls row
     HStack(spacing: 8) {
       CustomButton(
-        title: "Stop streaming",
+        title: SettingsManager.shared.videoStreamingEnabled ? "Stop streaming" : "Stop assistant",
         style: .destructive,
         isDisabled: false
       ) {
@@ -165,8 +183,8 @@ struct ControlsView: View {
         }
       }
 
-      // Photo button (glasses mode only -- DAT SDK capture)
-      if viewModel.streamingMode == .glasses {
+      // Photo button (only when video mode is enabled)
+      if viewModel.streamingMode == .glasses && SettingsManager.shared.videoStreamingEnabled {
         CircleButton(icon: "camera.fill", text: nil) {
           viewModel.capturePhoto()
         }
@@ -188,23 +206,25 @@ struct ControlsView: View {
       .opacity(webrtcVM.isActive ? 0.4 : 1.0)
       .disabled(webrtcVM.isActive)
 
-      // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
-      CircleButton(
-        icon: webrtcVM.isActive
-          ? "antenna.radiowaves.left.and.right.circle.fill"
-          : "antenna.radiowaves.left.and.right.circle",
-        text: "Live"
-      ) {
-        Task {
-          if webrtcVM.isActive {
-            webrtcVM.stopSession()
-          } else {
-            await webrtcVM.startSession()
+      // WebRTC Live Stream button (video mode only; disabled when Gemini is active — audio conflict)
+      if SettingsManager.shared.videoStreamingEnabled {
+        CircleButton(
+          icon: webrtcVM.isActive
+            ? "antenna.radiowaves.left.and.right.circle.fill"
+            : "antenna.radiowaves.left.and.right.circle",
+          text: "Live"
+        ) {
+          Task {
+            if webrtcVM.isActive {
+              webrtcVM.stopSession()
+            } else {
+              await webrtcVM.startSession()
+            }
           }
         }
+        .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
+        .disabled(geminiVM.isGeminiActive)
       }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
     }
   }
 }

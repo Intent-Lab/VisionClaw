@@ -19,7 +19,7 @@ Put on your glasses, tap the AI button, and talk:
 - **"Send a message to John saying I'll be late"** -- routes through OpenClaw to WhatsApp/Telegram/iMessage
 - **"Search for the best coffee shops nearby"** -- web search via OpenClaw, results spoken back
 
-The glasses camera streams at ~1fps to Gemini for visual context, while audio flows bidirectionally in real-time.
+The glasses camera can stream at ~1fps to Gemini for visual context, while audio flows bidirectionally in real-time. The current iOS default is now audio-first: video is off unless you explicitly enable it in Settings.
 
 ## How It Works
 
@@ -102,8 +102,9 @@ First, enable Developer Mode in the Meta AI app:
 ![How to enable Developer Mode](assets/dev_mode.png)
 
 Then in VisionClaw:
-1. Tap **"Start Streaming"** in the app
-2. Tap the **AI button** for voice + vision conversation
+1. By default, leave **Video Streaming** off in Settings for the audio-only assistant
+2. Tap **"Start Assistant"** in the app (or let Auto-Start Assistant bring Gemini up once the glasses session starts)
+3. Speak normally through the glasses; enable video later when you want Gemini to see too
 
 ---
 

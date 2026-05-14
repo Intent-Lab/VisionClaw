@@ -57,11 +57,13 @@ struct NonStreamView: View {
             .aspectRatio(contentMode: .fit)
             .frame(width: 120)
 
-          Text("Stream Your Glasses Camera")
+          Text(SettingsManager.shared.videoStreamingEnabled ? "Start Your Glasses Assistant" : "Start Audio Assistant")
             .font(.system(size: 20, weight: .semibold))
             .foregroundColor(.white)
 
-          Text("Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.")
+          Text(SettingsManager.shared.videoStreamingEnabled
+            ? "Start the glasses session, then Omen can talk through Gemini and OpenClaw with optional camera context."
+            : "Start the glasses session, then Omen can talk through Gemini and OpenClaw using audio only for now.")
             .font(.system(size: 15))
             .multilineTextAlignment(.center)
             .foregroundColor(.white)
@@ -84,28 +86,30 @@ struct NonStreamView: View {
         .padding(.bottom, 12)
         .opacity(viewModel.hasActiveDevice ? 0 : 1)
 
-        // Resolution picker (glasses mode only)
-        VStack(spacing: 4) {
-          Text("Resolution")
-            .font(.system(size: 13))
-            .foregroundColor(.white.opacity(0.6))
-          Picker("Resolution", selection: Binding(
-            get: { viewModel.selectedResolution },
-            set: { viewModel.updateResolution($0) }
-          )) {
-            Text("Low").tag(StreamingResolution.low)
-            Text("Med").tag(StreamingResolution.medium)
-            Text("High").tag(StreamingResolution.high)
+        // Resolution picker (only relevant when video mode is enabled)
+        if SettingsManager.shared.videoStreamingEnabled {
+          VStack(spacing: 4) {
+            Text("Resolution")
+              .font(.system(size: 13))
+              .foregroundColor(.white.opacity(0.6))
+            Picker("Resolution", selection: Binding(
+              get: { viewModel.selectedResolution },
+              set: { viewModel.updateResolution($0) }
+            )) {
+              Text("Low").tag(StreamingResolution.low)
+              Text("Med").tag(StreamingResolution.medium)
+              Text("High").tag(StreamingResolution.high)
+            }
+            .pickerStyle(.segmented)
+            Text(viewModel.resolutionLabel)
+              .font(.system(size: 12, design: .monospaced))
+              .foregroundColor(.white.opacity(0.4))
           }
-          .pickerStyle(.segmented)
-          Text(viewModel.resolutionLabel)
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundColor(.white.opacity(0.4))
+          .padding(.bottom, 12)
         }
-        .padding(.bottom, 12)
 
         CustomButton(
-          title: "Start on iPhone",
+          title: SettingsManager.shared.videoStreamingEnabled ? "Start on iPhone" : "Start audio test on iPhone",
           style: .secondary,
           isDisabled: false
         ) {
@@ -115,7 +119,7 @@ struct NonStreamView: View {
         }
 
         CustomButton(
-          title: "Start streaming",
+          title: SettingsManager.shared.autoStartAssistantEnabled ? "Start assistant" : "Start glasses session",
           style: .primary,
           isDisabled: !viewModel.hasActiveDevice
         ) {

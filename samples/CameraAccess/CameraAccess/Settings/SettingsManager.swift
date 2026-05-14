@@ -16,6 +16,7 @@ final class SettingsManager {
     case speakerOutputEnabled
     case videoStreamingEnabled
     case proactiveNotificationsEnabled
+    case autoStartAssistantEnabled
   }
 
   private init() {}
@@ -74,8 +75,13 @@ final class SettingsManager {
   // MARK: - Video
 
   var videoStreamingEnabled: Bool {
-    get { defaults.object(forKey: Key.videoStreamingEnabled.rawValue) as? Bool ?? true }
+    get { defaults.object(forKey: Key.videoStreamingEnabled.rawValue) as? Bool ?? false }
     set { defaults.set(newValue, forKey: Key.videoStreamingEnabled.rawValue) }
+  }
+
+  var autoStartAssistantEnabled: Bool {
+    get { defaults.object(forKey: Key.autoStartAssistantEnabled.rawValue) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Key.autoStartAssistantEnabled.rawValue) }
   }
 
   // MARK: - Notifications
@@ -91,7 +97,7 @@ final class SettingsManager {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
                 .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
                 .speakerOutputEnabled, .videoStreamingEnabled,
-                .proactiveNotificationsEnabled] {
+                .proactiveNotificationsEnabled, .autoStartAssistantEnabled] {
       defaults.removeObject(forKey: key.rawValue)
     }
   }

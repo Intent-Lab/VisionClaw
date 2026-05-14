@@ -12,7 +12,8 @@ struct SettingsView: View {
   @State private var geminiSystemPrompt: String = ""
   @State private var webrtcSignalingURL: String = ""
   @State private var speakerOutputEnabled: Bool = false
-  @State private var videoStreamingEnabled: Bool = true
+  @State private var videoStreamingEnabled: Bool = false
+  @State private var autoStartAssistantEnabled: Bool = true
   @State private var proactiveNotificationsEnabled: Bool = true
   @State private var showResetConfirmation = false
 
@@ -96,7 +97,11 @@ struct SettingsView: View {
           Toggle("Speaker Output", isOn: $speakerOutputEnabled)
         }
 
-        Section(header: Text("Video"), footer: Text("Disable video streaming to save battery. Audio remains active for voice-only interaction.")) {
+        Section(header: Text("Assistant"), footer: Text("Auto-start Gemini as soon as the glasses session starts. This is the closest hands-free flow DAT currently allows.")) {
+          Toggle("Auto-Start Assistant", isOn: $autoStartAssistantEnabled)
+        }
+
+        Section(header: Text("Video"), footer: Text("Leave this off for the audio-only glasses assistant. Turn it on later when you want Gemini to see through the camera.")) {
           Toggle("Video Streaming", isOn: $videoStreamingEnabled)
         }
 
@@ -152,6 +157,7 @@ struct SettingsView: View {
     webrtcSignalingURL = settings.webrtcSignalingURL
     speakerOutputEnabled = settings.speakerOutputEnabled
     videoStreamingEnabled = settings.videoStreamingEnabled
+    autoStartAssistantEnabled = settings.autoStartAssistantEnabled
     proactiveNotificationsEnabled = settings.proactiveNotificationsEnabled
   }
 
@@ -167,6 +173,7 @@ struct SettingsView: View {
     settings.webrtcSignalingURL = webrtcSignalingURL.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.speakerOutputEnabled = speakerOutputEnabled
     settings.videoStreamingEnabled = videoStreamingEnabled
+    settings.autoStartAssistantEnabled = autoStartAssistantEnabled
     settings.proactiveNotificationsEnabled = proactiveNotificationsEnabled
   }
 }
