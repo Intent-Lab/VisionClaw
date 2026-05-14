@@ -14,6 +14,7 @@
 // video frame handling, photo capture, and error handling.
 //
 
+import Combine
 import CoreImage
 import CoreMedia
 import CoreVideo
@@ -34,6 +35,123 @@ enum StreamingMode {
 }
 
 @MainActor
+final class DeviceSessionManager: ObservableObject {
+  @Published private(set) var isReady: Bool = false
+  @Published private(set) var hasActiveDevice: Bool = false
+  @Published private(set) var currentState: DeviceSessionState = .stopped
+
+  private let wearables: WearablesInterface
+  private let deviceSelector: AutoDeviceSelector
+  private var deviceSession: DeviceSession?
+  private var deviceMonitorTask: Task<Void, Never>?
+  private var stateObserverTask: Task<Void, Never>?
+
+  init(wearables: WearablesInterface) {
+    self.wearables = wearables
+    self.deviceSelector = AutoDeviceSelector(wearables: wearables)
+    startDeviceMonitoring()
+  }
+
+  deinit {
+    deviceMonitorTask?.cancel()
+    stateObserverTask?.cancel()
+  }
+
+  func getSession() async -> DeviceSession? {
+    if let session = deviceSession, session.state == .started {
+      isReady = true
+      currentState = session.state
+      return session
+    }
+
+    if let session = deviceSession {
+      currentState = session.state
+      if session.state == .stopped {
+        deviceSession = nil
+      } else {
+        return nil
+      }
+    }
+
+    guard deviceSession == nil else { return nil }
+
+    do {
+      let session = try wearables.createSession(deviceSelector: deviceSelector)
+      deviceSession = session
+      currentState = session.state
+
+      let stateStream = session.stateStream()
+      try session.start()
+
+      for await state in stateStream {
+        currentState = state
+        if state == .started {
+          isReady = true
+          startStateObserver(for: session)
+          return session
+        }
+        if state == .stopped {
+          isReady = false
+          deviceSession = nil
+          return nil
+        }
+      }
+    } catch {
+      isReady = false
+      currentState = .stopped
+      deviceSession = nil
+    }
+
+    return nil
+  }
+
+  func stopSession() {
+    stateObserverTask?.cancel()
+    stateObserverTask = nil
+    deviceSession?.stop()
+    deviceSession = nil
+    isReady = false
+    currentState = .stopped
+  }
+
+  private func startDeviceMonitoring() {
+    deviceMonitorTask = Task { [weak self] in
+      guard let self else { return }
+      for await device in deviceSelector.activeDeviceStream() {
+        hasActiveDevice = device != nil
+        if device == nil {
+          handleDeviceLost()
+        }
+      }
+    }
+  }
+
+  private func startStateObserver(for session: DeviceSession) {
+    stateObserverTask?.cancel()
+    stateObserverTask = Task { [weak self] in
+      guard let self else { return }
+      for await state in session.stateStream() {
+        currentState = state
+        isReady = state == .started
+        if state == .stopped {
+          deviceSession = nil
+          return
+        }
+      }
+    }
+  }
+
+  private func handleDeviceLost() {
+    stateObserverTask?.cancel()
+    stateObserverTask = nil
+    deviceSession?.stop()
+    deviceSession = nil
+    isReady = false
+    currentState = .stopped
+  }
+}
+
+@MainActor
 class StreamSessionViewModel: ObservableObject {
   @Published var currentVideoFrame: UIImage?
   @Published var hasReceivedFirstFrame: Bool = false
@@ -43,6 +161,8 @@ class StreamSessionViewModel: ObservableObject {
   @Published var hasActiveDevice: Bool = false
   @Published var streamingMode: StreamingMode = .glasses
   @Published var selectedResolution: StreamingResolution = .low
+  @Published var deviceSessionStateDescription: String = "stopped"
+  @Published var isDeviceSessionReady: Bool = false
 
   var isStreaming: Bool {
     streamingStatus != .stopped
@@ -67,16 +187,16 @@ class StreamSessionViewModel: ObservableObject {
   // WebRTC Live streaming integration
   var webrtcSessionVM: WebRTCSessionViewModel?
 
-  // The core DAT SDK StreamSession - handles all streaming operations
-  private var streamSession: StreamSession
+  // The core DAT SDK StreamSession - attached to a DeviceSession when video mode is active
+  private var streamSession: StreamSession?
   // Listener tokens are used to manage DAT SDK event subscriptions
   private var stateListenerToken: AnyListenerToken?
   private var videoFrameListenerToken: AnyListenerToken?
   private var errorListenerToken: AnyListenerToken?
   private var photoDataListenerToken: AnyListenerToken?
   private let wearables: WearablesInterface
-  private let deviceSelector: AutoDeviceSelector
-  private var deviceMonitorTask: Task<Void, Never>?
+  private let sessionManager: DeviceSessionManager
+  private var cancellables = Set<AnyCancellable>()
   private var iPhoneCameraManager: IPhoneCameraManager?
 
   // CPU-based CIContext for rendering decoded pixel buffers in background
@@ -88,23 +208,24 @@ class StreamSessionViewModel: ObservableObject {
 
   init(wearables: WearablesInterface) {
     self.wearables = wearables
-    // Let the SDK auto-select from available devices
-    self.deviceSelector = AutoDeviceSelector(wearables: wearables)
-    let config = StreamSessionConfig(
-      videoCodec: VideoCodec.raw,
-      resolution: StreamingResolution.low,
-      frameRate: 24)
-    streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
+    self.sessionManager = DeviceSessionManager(wearables: wearables)
 
-    // Monitor device availability
-    deviceMonitorTask = Task { @MainActor in
-      for await device in deviceSelector.activeDeviceStream() {
-        self.hasActiveDevice = device != nil
+    sessionManager.$hasActiveDevice
+      .receive(on: DispatchQueue.main)
+      .assign(to: &$hasActiveDevice)
+
+    sessionManager.$isReady
+      .receive(on: DispatchQueue.main)
+      .assign(to: &$isDeviceSessionReady)
+
+    sessionManager.$currentState
+      .receive(on: DispatchQueue.main)
+      .sink { [weak self] state in
+        self?.handleDeviceSessionStateChange(state)
       }
-    }
+      .store(in: &cancellables)
 
     setupVideoDecoder()
-    attachListeners()
   }
 
   private func setupVideoDecoder() {
@@ -134,16 +255,12 @@ class StreamSessionViewModel: ObservableObject {
   func updateResolution(_ resolution: StreamingResolution) {
     guard !isStreaming else { return }
     selectedResolution = resolution
-    let config = StreamSessionConfig(
-      videoCodec: VideoCodec.raw,
-      resolution: resolution,
-      frameRate: 24)
-    streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
-    attachListeners()
     NSLog("[Stream] Resolution changed to %@", resolutionLabel)
   }
 
-  private func attachListeners() {
+  private func attachListeners(to streamSession: StreamSession) {
+    clearListeners()
+
     // Subscribe to session state changes using the DAT SDK listener pattern
     stateListenerToken = streamSession.statePublisher.listen { [weak self] state in
       Task { @MainActor [weak self] in
@@ -237,9 +354,16 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
+  private func clearListeners() {
+    stateListenerToken = nil
+    videoFrameListenerToken = nil
+    errorListenerToken = nil
+    photoDataListenerToken = nil
+  }
+
   func handleStartStreaming() async {
     if !SettingsManager.shared.videoStreamingEnabled {
-      startAudioOnlyGlassesSession()
+      await startAudioOnlyGlassesSession()
       return
     }
 
@@ -262,7 +386,29 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func startSession() async {
-    await streamSession.start()
+    guard let deviceSession = await sessionManager.getSession() else {
+      showError("Could not start a device session with the glasses.")
+      return
+    }
+
+    guard deviceSession.state == .started else {
+      showError("Device session is not ready yet.")
+      return
+    }
+
+    let config = StreamSessionConfig(
+      videoCodec: VideoCodec.raw,
+      resolution: selectedResolution,
+      frameRate: 24)
+
+    guard let stream = try? deviceSession.addStream(config: config) else {
+      showError("Failed to attach camera streaming to the device session.")
+      return
+    }
+
+    streamSession = stream
+    attachListeners(to: stream)
+    await stream.start()
   }
 
   private func showError(_ message: String) {
@@ -279,7 +425,11 @@ class StreamSessionViewModel: ObservableObject {
       stopAudioOnlyGlassesSession()
       return
     }
+    guard let streamSession else { return }
+    self.streamSession = nil
+    clearListeners()
     await streamSession.stop()
+    sessionManager.stopSession()
   }
 
   // MARK: - iPhone Camera Mode
@@ -329,7 +479,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func capturePhoto() {
-    streamSession.capturePhoto(format: .jpeg)
+    streamSession?.capturePhoto(format: .jpeg)
   }
 
   func dismissPhotoPreview() {
@@ -351,16 +501,59 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  private func startAudioOnlyGlassesSession() {
+  private func handleDeviceSessionStateChange(_ state: DeviceSessionState) {
+    deviceSessionStateDescription = describeDeviceSessionState(state)
+
+    guard streamingMode == .glasses else { return }
+
+    if !SettingsManager.shared.videoStreamingEnabled {
+      switch state {
+      case .started:
+        streamingStatus = .streaming
+      case .starting, .paused, .stopping, .idle:
+        streamingStatus = .waiting
+      case .stopped:
+        streamingStatus = .stopped
+      @unknown default:
+        streamingStatus = .waiting
+      }
+      return
+    }
+
+    if state == .stopped {
+      currentVideoFrame = nil
+      hasReceivedFirstFrame = false
+      streamingStatus = .stopped
+    }
+  }
+
+  private func describeDeviceSessionState(_ state: DeviceSessionState) -> String {
+    switch state {
+    case .idle: return "idle"
+    case .starting: return "starting"
+    case .started: return "started"
+    case .paused: return "paused"
+    case .stopping: return "stopping"
+    case .stopped: return "stopped"
+    @unknown default: return "unknown"
+    }
+  }
+
+  private func startAudioOnlyGlassesSession() async {
     guard hasActiveDevice else {
       showError("No active glasses found. Connect the glasses first.")
+      return
+    }
+
+    guard await sessionManager.getSession() != nil else {
+      showError("Could not start an audio-only device session.")
       return
     }
 
     streamingMode = .glasses
     currentVideoFrame = nil
     hasReceivedFirstFrame = false
-    streamingStatus = .streaming
+    streamingStatus = isDeviceSessionReady ? .streaming : .waiting
     NSLog("[Stream] Audio-only glasses mode started")
   }
 
@@ -368,6 +561,7 @@ class StreamSessionViewModel: ObservableObject {
     currentVideoFrame = nil
     hasReceivedFirstFrame = false
     streamingStatus = .stopped
+    sessionManager.stopSession()
     NSLog("[Stream] Audio-only glasses mode stopped")
   }
 

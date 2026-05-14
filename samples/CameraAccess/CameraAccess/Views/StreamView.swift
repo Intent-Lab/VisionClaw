@@ -115,6 +115,10 @@ struct StreamView: View {
       // Bottom controls layer
       VStack {
         Spacer()
+        Text("Device session: \(viewModel.deviceSessionStateDescription)")
+          .font(.system(size: 12, design: .monospaced))
+          .foregroundColor(.white.opacity(0.8))
+          .padding(.bottom, 8)
         ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
       }
       .padding(.all, 24)

@@ -86,6 +86,16 @@ struct NonStreamView: View {
         .padding(.bottom, 12)
         .opacity(viewModel.hasActiveDevice ? 0 : 1)
 
+        VStack(spacing: 4) {
+          Text("Device session")
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.5))
+          Text(viewModel.deviceSessionStateDescription)
+            .font(.system(size: 13, design: .monospaced))
+            .foregroundColor(.white.opacity(0.85))
+        }
+        .padding(.bottom, 12)
+
         // Resolution picker (only relevant when video mode is enabled)
         if SettingsManager.shared.videoStreamingEnabled {
           VStack(spacing: 4) {
