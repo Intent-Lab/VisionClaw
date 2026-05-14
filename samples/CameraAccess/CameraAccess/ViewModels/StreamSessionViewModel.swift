@@ -66,9 +66,18 @@ final class DeviceSessionManager: ObservableObject {
 
     if let session = deviceSession {
       currentState = session.state
-      if session.state == .stopped {
+      switch session.state {
+      case .stopped:
         deviceSession = nil
-      } else {
+      case .paused, .stopping:
+        isReady = false
+        return nil
+      case .idle, .starting:
+        return await waitForReadySession(session)
+      case .started:
+        isReady = true
+        return session
+      @unknown default:
         return nil
       }
     }
@@ -79,23 +88,8 @@ final class DeviceSessionManager: ObservableObject {
       let session = try wearables.createSession(deviceSelector: deviceSelector)
       deviceSession = session
       currentState = session.state
-
-      let stateStream = session.stateStream()
       try session.start()
-
-      for await state in stateStream {
-        currentState = state
-        if state == .started {
-          isReady = true
-          startStateObserver(for: session)
-          return session
-        }
-        if state == .stopped {
-          isReady = false
-          deviceSession = nil
-          return nil
-        }
-      }
+      return await waitForReadySession(session)
     } catch {
       isReady = false
       currentState = .stopped
@@ -119,7 +113,9 @@ final class DeviceSessionManager: ObservableObject {
       guard let self else { return }
       for await device in deviceSelector.activeDeviceStream() {
         hasActiveDevice = device != nil
-        if device == nil {
+        if device != nil {
+          _ = await getSession()
+        } else {
           handleDeviceLost()
         }
       }
@@ -139,6 +135,38 @@ final class DeviceSessionManager: ObservableObject {
         }
       }
     }
+  }
+
+  private func waitForReadySession(_ session: DeviceSession) async -> DeviceSession? {
+    currentState = session.state
+
+    if session.state == .started {
+      isReady = true
+      startStateObserver(for: session)
+      return session
+    }
+
+    for await state in session.stateStream() {
+      currentState = state
+      switch state {
+      case .started:
+        isReady = true
+        startStateObserver(for: session)
+        return session
+      case .paused, .stopped:
+        isReady = false
+        if state == .stopped {
+          deviceSession = nil
+        }
+        return nil
+      case .idle, .starting, .stopping:
+        continue
+      @unknown default:
+        continue
+      }
+    }
+
+    return nil
   }
 
   private func handleDeviceLost() {
@@ -386,6 +414,9 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func startSession() async {
+    streamingMode = .glasses
+    streamingStatus = .waiting
+
     guard let deviceSession = await sessionManager.getSession() else {
       showError("Could not start a device session with the glasses.")
       return
@@ -425,9 +456,12 @@ class StreamSessionViewModel: ObservableObject {
       stopAudioOnlyGlassesSession()
       return
     }
-    guard let streamSession else { return }
-    self.streamSession = nil
-    clearListeners()
+    guard let streamSession else {
+      clearActiveGlassesStreamingState()
+      sessionManager.stopSession()
+      return
+    }
+    clearActiveGlassesStreamingState()
     await streamSession.stop()
     sessionManager.stopSession()
   }
@@ -506,25 +540,34 @@ class StreamSessionViewModel: ObservableObject {
 
     guard streamingMode == .glasses else { return }
 
-    if !SettingsManager.shared.videoStreamingEnabled {
-      switch state {
-      case .started:
+    switch state {
+    case .started:
+      if !SettingsManager.shared.videoStreamingEnabled {
         streamingStatus = .streaming
-      case .starting, .paused, .stopping, .idle:
-        streamingStatus = .waiting
-      case .stopped:
+      } else if streamSession == nil {
         streamingStatus = .stopped
-      @unknown default:
+      } else if streamingStatus == .stopped {
         streamingStatus = .waiting
       }
-      return
+    case .idle, .starting, .paused, .stopping:
+      if streamSession != nil || streamingStatus != .stopped {
+        streamingStatus = .waiting
+      }
+    case .stopped:
+      clearActiveGlassesStreamingState()
+    @unknown default:
+      if streamSession != nil || streamingStatus != .stopped {
+        streamingStatus = .waiting
+      }
     }
+  }
 
-    if state == .stopped {
-      currentVideoFrame = nil
-      hasReceivedFirstFrame = false
-      streamingStatus = .stopped
-    }
+  private func clearActiveGlassesStreamingState() {
+    clearListeners()
+    streamSession = nil
+    currentVideoFrame = nil
+    hasReceivedFirstFrame = false
+    streamingStatus = .stopped
   }
 
   private func describeDeviceSessionState(_ state: DeviceSessionState) -> String {
@@ -558,9 +601,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   private func stopAudioOnlyGlassesSession() {
-    currentVideoFrame = nil
-    hasReceivedFirstFrame = false
-    streamingStatus = .stopped
+    clearActiveGlassesStreamingState()
     sessionManager.stopSession()
     NSLog("[Stream] Audio-only glasses mode stopped")
   }
