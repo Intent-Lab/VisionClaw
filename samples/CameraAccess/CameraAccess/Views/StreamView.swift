@@ -115,9 +115,17 @@ struct StreamView: View {
       // Bottom controls layer
       VStack {
         Spacer()
-        Text("Device session: \(viewModel.deviceSessionStateDescription)")
-          .font(.system(size: 12, design: .monospaced))
-          .foregroundColor(.white.opacity(0.8))
+        VStack(spacing: 4) {
+          Text("Device session: \(viewModel.deviceSessionStateDescription)")
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundColor(.white.opacity(0.8))
+          if geminiVM.isGeminiActive {
+            Text("Gemini audio: \(geminiVM.isAudioSuspendedByDeviceSession ? "suspended" : "live") · \(geminiVM.activeAudioRoute)")
+              .font(.system(size: 11, design: .monospaced))
+              .foregroundColor(.white.opacity(0.75))
+              .multilineTextAlignment(.center)
+          }
+        }
           .padding(.bottom, 8)
         ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
       }

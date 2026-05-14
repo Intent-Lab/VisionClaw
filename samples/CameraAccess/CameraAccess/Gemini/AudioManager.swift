@@ -5,6 +5,16 @@ import UIKit
 class AudioManager {
   var onAudioCaptured: ((Data) -> Void)?
 
+  var isCaptureRunning: Bool {
+    isCapturing
+  }
+
+  var activeInputRouteDescription: String {
+    let inputs = AVAudioSession.sharedInstance().currentRoute.inputs
+    guard !inputs.isEmpty else { return "none" }
+    return inputs.map { "\($0.portName) [\($0.portType.rawValue)]" }.joined(separator: ", ")
+  }
+
   private let audioEngine = AVAudioEngine()
   private let playerNode = AVAudioPlayerNode()
   private var isCapturing = false
@@ -179,6 +189,15 @@ class AudioManager {
   func stopPlayback() {
     playerNode.stop()
     playerNode.play()
+  }
+
+  func suspendCapture() {
+    stopCapture()
+  }
+
+  func resumeCapture() throws {
+    try setupAudioSession(useIPhoneMode: useIPhoneMode)
+    try startCapture()
   }
 
   func stopCapture() {

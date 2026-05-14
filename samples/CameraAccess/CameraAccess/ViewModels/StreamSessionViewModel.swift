@@ -542,6 +542,7 @@ class StreamSessionViewModel: ObservableObject {
 
     switch state {
     case .started:
+      geminiSessionVM?.resumeAfterDeviceSessionPauseIfNeeded()
       if !SettingsManager.shared.videoStreamingEnabled {
         streamingStatus = .streaming
       } else if streamSession == nil {
@@ -550,12 +551,15 @@ class StreamSessionViewModel: ObservableObject {
         streamingStatus = .waiting
       }
     case .idle, .starting, .paused, .stopping:
+      geminiSessionVM?.suspendForDeviceSessionPause()
       if streamSession != nil || streamingStatus != .stopped {
         streamingStatus = .waiting
       }
     case .stopped:
+      geminiSessionVM?.suspendForDeviceSessionPause()
       clearActiveGlassesStreamingState()
     @unknown default:
+      geminiSessionVM?.suspendForDeviceSessionPause()
       if streamSession != nil || streamingStatus != .stopped {
         streamingStatus = .waiting
       }

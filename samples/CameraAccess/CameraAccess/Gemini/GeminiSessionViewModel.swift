@@ -11,6 +11,8 @@ class GeminiSessionViewModel: ObservableObject {
   @Published var aiTranscript: String = ""
   @Published var toolCallStatus: ToolCallStatus = .idle
   @Published var openClawConnectionState: OpenClawConnectionState = .notConfigured
+  @Published var isAudioSuspendedByDeviceSession: Bool = false
+  @Published var activeAudioRoute: String = "unknown"
   private let geminiService = GeminiLiveService()
   private let openClawBridge = OpenClawBridge()
   private var toolCallRouter: ToolCallRouter?
@@ -23,6 +25,7 @@ class GeminiSessionViewModel: ObservableObject {
 
   func startSession() async {
     guard !isGeminiActive else { return }
+    isAudioSuspendedByDeviceSession = false
 
     guard GeminiConfig.isConfigured else {
       errorMessage = "Gemini API key not configured. Open GeminiConfig.swift and replace YOUR_GEMINI_API_KEY with your key from https://aistudio.google.com/apikey"
@@ -44,7 +47,9 @@ class GeminiSessionViewModel: ObservableObject {
     }
 
     geminiService.onAudioReceived = { [weak self] data in
-      self?.audioManager.playAudio(data: data)
+      guard let self else { return }
+      guard !self.isAudioSuspendedByDeviceSession else { return }
+      self.audioManager.playAudio(data: data)
     }
 
     geminiService.onInterrupted = { [weak self] in
@@ -125,6 +130,7 @@ class GeminiSessionViewModel: ObservableObject {
     // Setup audio
     do {
       try audioManager.setupAudioSession(useIPhoneMode: streamingMode == .iPhone)
+      activeAudioRoute = audioManager.activeInputRouteDescription
     } catch {
       errorMessage = "Audio setup failed: \(error.localizedDescription)"
       isGeminiActive = false
@@ -153,6 +159,7 @@ class GeminiSessionViewModel: ObservableObject {
     // Start mic capture
     do {
       try audioManager.startCapture()
+      activeAudioRoute = audioManager.activeInputRouteDescription
     } catch {
       errorMessage = "Mic capture failed: \(error.localizedDescription)"
       geminiService.disconnect()
@@ -187,6 +194,8 @@ class GeminiSessionViewModel: ObservableObject {
     isGeminiActive = false
     connectionState = .disconnected
     isModelSpeaking = false
+    isAudioSuspendedByDeviceSession = false
+    activeAudioRoute = "inactive"
     userTranscript = ""
     aiTranscript = ""
     toolCallStatus = .idle
@@ -195,10 +204,36 @@ class GeminiSessionViewModel: ObservableObject {
   func sendVideoFrameIfThrottled(image: UIImage) {
     guard SettingsManager.shared.videoStreamingEnabled else { return }
     guard isGeminiActive, connectionState == .ready else { return }
+    guard !isAudioSuspendedByDeviceSession else { return }
     let now = Date()
     guard now.timeIntervalSince(lastVideoFrameTime) >= GeminiConfig.videoFrameInterval else { return }
     lastVideoFrameTime = now
     geminiService.sendVideoFrame(image: image)
+  }
+
+  func suspendForDeviceSessionPause() {
+    guard isGeminiActive else { return }
+    guard streamingMode == .glasses else { return }
+    guard !isAudioSuspendedByDeviceSession else { return }
+
+    isAudioSuspendedByDeviceSession = true
+    audioManager.stopPlayback()
+    audioManager.suspendCapture()
+    activeAudioRoute = "suspended: \(audioManager.activeInputRouteDescription)"
+  }
+
+  func resumeAfterDeviceSessionPauseIfNeeded() {
+    guard isGeminiActive else { return }
+    guard streamingMode == .glasses else { return }
+    guard isAudioSuspendedByDeviceSession else { return }
+
+    do {
+      try audioManager.resumeCapture()
+      activeAudioRoute = audioManager.activeInputRouteDescription
+      isAudioSuspendedByDeviceSession = false
+    } catch {
+      errorMessage = "Audio resume failed after device-session pause: \(error.localizedDescription)"
+    }
   }
 
 }
