@@ -31,23 +31,8 @@ jobs:
 
       - name: Create Secrets.swift for CI Build
         run: |
-          if [ -f samples/CameraAccess/CameraAccess/Secrets.swift.example ]; then
-            cp samples/CameraAccess/CameraAccess/Secrets.swift.example \
-              samples/CameraAccess/CameraAccess/Secrets.swift
-          else
-            cat > samples/CameraAccess/CameraAccess/Secrets.swift << 'EOF'
-            import Foundation
-
-            enum Secrets {
-              static let geminiAPIKey = "YOUR_GEMINI_API_KEY"
-              static let openClawHost = "http://YOUR_MAC_HOSTNAME.local"
-              static let openClawPort = 18789
-              static let openClawHookToken = "YOUR_OPENCLAW_HOOK_TOKEN"
-              static let openClawGatewayToken = "YOUR_OPENCLAW_GATEWAY_TOKEN"
-              static let webrtcSignalingURL = "ws://localhost:8080"
-            }
-            EOF
-          fi
+          cp samples/CameraAccess/CameraAccess/Secrets.swift.example \
+            samples/CameraAccess/CameraAccess/Secrets.swift
           echo "✅ Created Secrets.swift for CI"
 
       - name: Cache Swift Package Manager
