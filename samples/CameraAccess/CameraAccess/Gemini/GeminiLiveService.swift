@@ -127,7 +127,9 @@ class GeminiLiveService: ObservableObject {
           ]
         ]
       ]
-      self?.sendJSON(json)
+      Task { @MainActor [weak self] in
+        self?.sendJSON(json)
+      }
     }
   }
 
@@ -144,13 +146,17 @@ class GeminiLiveService: ObservableObject {
           ]
         ]
       ]
-      self?.sendJSON(json)
+      Task { @MainActor [weak self] in
+        self?.sendJSON(json)
+      }
     }
   }
 
   func sendToolResponse(_ response: [String: Any]) {
     sendQueue.async { [weak self] in
-      self?.sendJSON(response)
+      Task { @MainActor [weak self] in
+        self?.sendJSON(response)
+      }
     }
   }
 
@@ -164,7 +170,9 @@ class GeminiLiveService: ObservableObject {
           ]
         ]
       ]
-      self?.sendJSON(msg)
+      Task { @MainActor [weak self] in
+        self?.sendJSON(msg)
+      }
     }
   }
 
