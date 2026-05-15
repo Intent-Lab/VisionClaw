@@ -131,6 +131,8 @@ class GeminiSessionViewModel: ObservableObject {
         for call in toolCall.functionCalls {
           self.toolCallRouter?.handleToolCall(call) { [weak self] response in
             self?.geminiService.sendToolResponse(response)
+          } sendFollowUp: { [weak self] text in
+            self?.geminiService.sendTextMessage(text)
           }
         }
       }

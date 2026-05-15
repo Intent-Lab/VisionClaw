@@ -4,8 +4,10 @@ import Foundation
 class ToolCallRouter {
   private let bridge: OpenClawBridge
   private var inFlightTasks: [String: Task<Void, Never>] = [:]
+  private var timedOutCalls = Set<String>()
   private var consecutiveFailures = 0
   private let maxConsecutiveFailures = 3
+  private let geminiToolResponseBudgetNs: UInt64 = 20_000_000_000
 
   init(bridge: OpenClawBridge) {
     self.bridge = bridge
@@ -15,7 +17,8 @@ class ToolCallRouter {
   /// JSON dictionary to send back as a toolResponse message.
   func handleToolCall(
     _ call: GeminiFunctionCall,
-    sendResponse: @escaping ([String: Any]) -> Void
+    sendResponse: @escaping ([String: Any]) -> Void,
+    sendFollowUp: ((String) -> Void)? = nil
   ) {
     let callId = call.id
     let callName = call.name
@@ -36,9 +39,24 @@ class ToolCallRouter {
       return
     }
 
+    let taskDesc = call.args["task"] as? String ?? String(describing: call.args)
+
+    let watchdog = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: geminiToolResponseBudgetNs)
+      guard !Task.isCancelled, self.inFlightTasks[callId] != nil else { return }
+
+      self.timedOutCalls.insert(callId)
+      NSLog("[ToolCall] %@ exceeded Gemini response budget; sending interim response", callId)
+      let interim: ToolResult = .success(
+        "OpenClaw is still working on this. Tell the user it is taking longer than expected, " +
+        "and that you will speak the final result when it comes back."
+      )
+      sendResponse(self.buildToolResponse(callId: callId, name: callName, result: interim))
+    }
+
     let task = Task { @MainActor in
-      let taskDesc = call.args["task"] as? String ?? String(describing: call.args)
       let result = await bridge.delegateTask(task: taskDesc, toolName: callName)
+      watchdog.cancel()
 
       guard !Task.isCancelled else {
         NSLog("[ToolCall] Task %@ was cancelled, skipping response", callId)
@@ -55,8 +73,14 @@ class ToolCallRouter {
       NSLog("[ToolCall] Result for %@ (id: %@): %@",
             callName, callId, String(describing: result))
 
-      let response = self.buildToolResponse(callId: callId, name: callName, result: result)
-      sendResponse(response)
+      if self.timedOutCalls.remove(callId) != nil {
+        if let sendFollowUp {
+          sendFollowUp(self.followUpText(for: result))
+        }
+      } else {
+        let response = self.buildToolResponse(callId: callId, name: callName, result: result)
+        sendResponse(response)
+      }
 
       self.inFlightTasks.removeValue(forKey: callId)
     }
@@ -83,6 +107,7 @@ class ToolCallRouter {
       task.cancel()
     }
     inFlightTasks.removeAll()
+    timedOutCalls.removeAll()
     consecutiveFailures = 0
   }
 
@@ -104,5 +129,14 @@ class ToolCallRouter {
         ]
       ]
     ]
+  }
+
+  private func followUpText(for result: ToolResult) -> String {
+    switch result {
+    case .success(let text):
+      return "[OpenClaw finished the execute request. Speak this result to the user.]\n\n\(text)"
+    case .failure(let error):
+      return "[OpenClaw execute failed after the user was told it was still working. Explain this briefly.]\n\n\(error)"
+    }
   }
 }
