@@ -226,6 +226,8 @@ class StreamSessionViewModel: ObservableObject {
   private let sessionManager: DeviceSessionManager
   private var cancellables = Set<AnyCancellable>()
   private var iPhoneCameraManager: IPhoneCameraManager?
+  private var wantsGlassesSessionActive = false
+  private var isStartingGlassesSession = false
 
   // CPU-based CIContext for rendering decoded pixel buffers in background
   private let cpuCIContext = CIContext(options: [.useSoftwareRenderer: true])
@@ -390,6 +392,8 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func handleStartStreaming() async {
+    wantsGlassesSessionActive = true
+
     if !SettingsManager.shared.videoStreamingEnabled {
       await startAudioOnlyGlassesSession()
       return
@@ -414,8 +418,13 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func startSession() async {
+    guard !isStartingGlassesSession else { return }
+    isStartingGlassesSession = true
+    defer { isStartingGlassesSession = false }
+
     streamingMode = .glasses
     streamingStatus = .waiting
+    wantsGlassesSessionActive = true
 
     guard let deviceSession = await sessionManager.getSession() else {
       showError("Could not start a device session with the glasses.")
@@ -448,6 +457,8 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func stopSession() async {
+    wantsGlassesSessionActive = false
+
     if streamingMode == .iPhone {
       stopIPhoneSession()
       return
@@ -478,6 +489,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   private func startIPhoneSession() {
+    wantsGlassesSessionActive = false
     streamingMode = .iPhone
     let camera = IPhoneCameraManager()
     camera.onFrameCaptured = { [weak self] image in
@@ -546,7 +558,14 @@ class StreamSessionViewModel: ObservableObject {
       if !SettingsManager.shared.videoStreamingEnabled {
         streamingStatus = .streaming
       } else if streamSession == nil {
-        streamingStatus = .stopped
+        if wantsGlassesSessionActive && !isStartingGlassesSession {
+          streamingStatus = .waiting
+          Task { @MainActor [weak self] in
+            await self?.startSession()
+          }
+        } else {
+          streamingStatus = .stopped
+        }
       } else if streamingStatus == .stopped {
         streamingStatus = .waiting
       }
@@ -587,6 +606,8 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   private func startAudioOnlyGlassesSession() async {
+    wantsGlassesSessionActive = true
+
     guard hasActiveDevice else {
       showError("No active glasses found. Connect the glasses first.")
       return
