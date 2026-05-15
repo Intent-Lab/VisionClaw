@@ -14,11 +14,8 @@ class OpenClawBridge: ObservableObject {
 
   private let session: URLSession
   private let pingSession: URLSession
-  private var sessionKey: String
   private var conversationHistory: [[String: String]] = []
   private let maxHistoryTurns = 10
-
-  private static let stableSessionKey = "agent:main:glass"
 
   init() {
     let config = URLSessionConfiguration.default
@@ -28,8 +25,6 @@ class OpenClawBridge: ObservableObject {
     let pingConfig = URLSessionConfiguration.default
     pingConfig.timeoutIntervalForRequest = 5
     self.pingSession = URLSession(configuration: pingConfig)
-
-    self.sessionKey = OpenClawBridge.stableSessionKey
   }
 
   func checkConnection() async {
@@ -62,10 +57,10 @@ class OpenClawBridge: ObservableObject {
 
   func resetSession() {
     conversationHistory = []
-    NSLog("[OpenClaw] Session reset (key retained: %@)", sessionKey)
+    NSLog("[OpenClaw] Session reset")
   }
 
-  // MARK: - Agent Chat (session continuity via x-openclaw-session-key header)
+  // MARK: - Agent Chat
 
   func delegateTask(
     task: String,
@@ -90,7 +85,6 @@ class OpenClawBridge: ObservableObject {
     request.httpMethod = "POST"
     request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue(sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
     request.setValue("glass", forHTTPHeaderField: "x-openclaw-message-channel")
 
     let body: [String: Any] = [
