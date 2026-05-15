@@ -20,6 +20,7 @@ class GeminiSessionViewModel: ObservableObject {
   private let eventClient = OpenClawEventClient()
   private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
+  private var deviceSessionResumeTask: Task<Void, Never>?
 
   var streamingMode: StreamingMode = .glasses
 
@@ -191,6 +192,8 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.disconnect()
     stateObservation?.cancel()
     stateObservation = nil
+    deviceSessionResumeTask?.cancel()
+    deviceSessionResumeTask = nil
     isGeminiActive = false
     connectionState = .disconnected
     isModelSpeaking = false
@@ -216,6 +219,8 @@ class GeminiSessionViewModel: ObservableObject {
     guard streamingMode == .glasses else { return }
     guard !isAudioSuspendedByDeviceSession else { return }
 
+    deviceSessionResumeTask?.cancel()
+    deviceSessionResumeTask = nil
     isAudioSuspendedByDeviceSession = true
     audioManager.stopPlayback()
     audioManager.suspendCapture()
@@ -227,12 +232,34 @@ class GeminiSessionViewModel: ObservableObject {
     guard streamingMode == .glasses else { return }
     guard isAudioSuspendedByDeviceSession else { return }
 
-    do {
-      try audioManager.resumeCapture()
-      activeAudioRoute = audioManager.activeInputRouteDescription
-      isAudioSuspendedByDeviceSession = false
-    } catch {
-      errorMessage = "Audio resume failed after device-session pause: \(error.localizedDescription)"
+    deviceSessionResumeTask?.cancel()
+    deviceSessionResumeTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+
+      var lastError: Error?
+
+      for attempt in 1...4 {
+        guard !Task.isCancelled else { return }
+
+        do {
+          try self.audioManager.resumeCapture()
+          self.activeAudioRoute = self.audioManager.activeInputRouteDescription
+          self.isAudioSuspendedByDeviceSession = false
+          self.deviceSessionResumeTask = nil
+          return
+        } catch {
+          lastError = error
+          self.audioManager.stopCapture()
+
+          if attempt < 4 {
+            let delayNs = UInt64(attempt) * 300_000_000
+            try? await Task.sleep(nanoseconds: delayNs)
+          }
+        }
+      }
+
+      self.errorMessage = "Audio resume failed after device-session pause: \(lastError?.localizedDescription ?? \"unknown error\")"
+      self.deviceSessionResumeTask = nil
     }
   }
 
