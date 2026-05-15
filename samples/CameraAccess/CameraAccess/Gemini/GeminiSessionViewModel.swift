@@ -258,7 +258,7 @@ class GeminiSessionViewModel: ObservableObject {
         }
       }
 
-      self.errorMessage = "Audio resume failed after device-session pause: \(lastError?.localizedDescription ?? \"unknown error\")"
+      self.errorMessage = "Audio resume failed after device-session pause: \(lastError?.localizedDescription ?? "unknown error")"
       self.deviceSessionResumeTask = nil
     }
   }
