@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 @MainActor
 class GeminiSessionViewModel: ObservableObject {
@@ -21,8 +22,34 @@ class GeminiSessionViewModel: ObservableObject {
   private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
   private var deviceSessionResumeTask: Task<Void, Never>?
+  private var pendingForegroundResume = false
+  private var didBecomeActiveObserver: NSObjectProtocol?
 
   var streamingMode: StreamingMode = .glasses
+
+  init() {
+    didBecomeActiveObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self else { return }
+      guard self.pendingForegroundResume else { return }
+      guard self.isGeminiActive else {
+        self.pendingForegroundResume = false
+        return
+      }
+
+      self.pendingForegroundResume = false
+      self.resumeAfterDeviceSessionPauseIfNeeded()
+    }
+  }
+
+  deinit {
+    if let didBecomeActiveObserver {
+      NotificationCenter.default.removeObserver(didBecomeActiveObserver)
+    }
+  }
 
   func startSession() async {
     guard !isGeminiActive else { return }
@@ -194,6 +221,7 @@ class GeminiSessionViewModel: ObservableObject {
     stateObservation = nil
     deviceSessionResumeTask?.cancel()
     deviceSessionResumeTask = nil
+    pendingForegroundResume = false
     isGeminiActive = false
     connectionState = .disconnected
     isModelSpeaking = false
@@ -221,6 +249,7 @@ class GeminiSessionViewModel: ObservableObject {
 
     deviceSessionResumeTask?.cancel()
     deviceSessionResumeTask = nil
+    pendingForegroundResume = false
     isAudioSuspendedByDeviceSession = true
     audioManager.stopPlayback()
     audioManager.suspendCapture()
@@ -232,11 +261,16 @@ class GeminiSessionViewModel: ObservableObject {
     guard streamingMode == .glasses else { return }
     guard isAudioSuspendedByDeviceSession else { return }
 
+    if UIApplication.shared.applicationState != .active {
+      pendingForegroundResume = true
+      activeAudioRoute = "resume pending until foreground"
+      return
+    }
+
+    pendingForegroundResume = false
     deviceSessionResumeTask?.cancel()
     deviceSessionResumeTask = Task { @MainActor [weak self] in
       guard let self else { return }
-
-      var lastError: Error?
 
       for attempt in 1...4 {
         guard !Task.isCancelled else { return }
@@ -248,7 +282,6 @@ class GeminiSessionViewModel: ObservableObject {
           self.deviceSessionResumeTask = nil
           return
         } catch {
-          lastError = error
           self.audioManager.stopCapture()
 
           if attempt < 4 {
@@ -258,7 +291,9 @@ class GeminiSessionViewModel: ObservableObject {
         }
       }
 
-      self.errorMessage = "Audio resume failed after device-session pause: \(lastError?.localizedDescription ?? "unknown error")"
+      self.pendingForegroundResume = true
+      self.activeAudioRoute = "resume pending until foreground"
+      self.errorMessage = "Audio resume deferred until the app is active again"
       self.deviceSessionResumeTask = nil
     }
   }
