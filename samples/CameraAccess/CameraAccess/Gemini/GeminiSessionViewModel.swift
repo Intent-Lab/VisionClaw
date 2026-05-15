@@ -66,6 +66,7 @@ class GeminiSessionViewModel: ObservableObject {
     audioManager.onAudioCaptured = { [weak self] data in
       guard let self else { return }
       Task { @MainActor in
+        guard !self.isAudioSuspendedByDeviceSession else { return }
         // Mute mic while model speaks when speaker is on the phone
         // (loudspeaker + co-located mic overwhelms iOS echo cancellation)
         let speakerOnPhone = self.streamingMode == .iPhone || SettingsManager.shared.speakerOutputEnabled
@@ -252,14 +253,26 @@ class GeminiSessionViewModel: ObservableObject {
     pendingForegroundResume = false
     isAudioSuspendedByDeviceSession = true
     audioManager.stopPlayback()
-    audioManager.suspendCapture()
-    activeAudioRoute = "suspended: \(audioManager.activeInputRouteDescription)"
+
+    if UIApplication.shared.applicationState == .active {
+      audioManager.suspendCapture()
+      activeAudioRoute = "suspended: \(audioManager.activeInputRouteDescription)"
+    } else {
+      activeAudioRoute = "background-suspended: \(audioManager.activeInputRouteDescription)"
+    }
   }
 
   func resumeAfterDeviceSessionPauseIfNeeded() {
     guard isGeminiActive else { return }
     guard streamingMode == .glasses else { return }
     guard isAudioSuspendedByDeviceSession else { return }
+
+    if audioManager.isCaptureRunning {
+      pendingForegroundResume = false
+      activeAudioRoute = audioManager.activeInputRouteDescription
+      isAudioSuspendedByDeviceSession = false
+      return
+    }
 
     if UIApplication.shared.applicationState != .active {
       pendingForegroundResume = true
