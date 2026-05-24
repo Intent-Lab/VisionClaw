@@ -54,6 +54,7 @@ fun SettingsScreen(
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
     var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
+    var demoSpeakerModeEnabled by remember { mutableStateOf(SettingsManager.demoSpeakerModeEnabled) }
     var showResetDialog by remember { mutableStateOf(false) }
 
     fun save() {
@@ -66,6 +67,7 @@ fun SettingsScreen(
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
         SettingsManager.videoStreamingEnabled = videoStreamingEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
+        SettingsManager.demoSpeakerModeEnabled = demoSpeakerModeEnabled
     }
 
     fun reload() {
@@ -78,6 +80,7 @@ fun SettingsScreen(
         webrtcSignalingURL = SettingsManager.webrtcSignalingURL
         videoStreamingEnabled = SettingsManager.videoStreamingEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
+        demoSpeakerModeEnabled = SettingsManager.demoSpeakerModeEnabled
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -126,6 +129,28 @@ fun SettingsScreen(
                 Switch(
                     checked = videoStreamingEnabled,
                     onCheckedChange = { videoStreamingEnabled = it },
+                )
+            }
+
+            SectionHeader("Audio")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Demo speaker mode")
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Routes Gemini audio as normal media to the phone speaker so scrcpy can mirror it to the Mac.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Switch(
+                    checked = demoSpeakerModeEnabled,
+                    onCheckedChange = { demoSpeakerModeEnabled = it },
                 )
             }
 

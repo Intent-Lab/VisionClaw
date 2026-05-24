@@ -52,6 +52,10 @@ object SettingsManager {
         get() = prefs.getBoolean("proactiveNotificationsEnabled", true)
         set(value) = prefs.edit().putBoolean("proactiveNotificationsEnabled", value).apply()
 
+    var demoSpeakerModeEnabled: Boolean
+        get() = prefs.getBoolean("demoSpeakerModeEnabled", false)
+        set(value) = prefs.edit().putBoolean("demoSpeakerModeEnabled", value).apply()
+
     fun resetAll() {
         prefs.edit().clear().apply()
     }
