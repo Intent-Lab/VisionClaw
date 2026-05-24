@@ -6,50 +6,15 @@
     android:viewportHeight="108">
 
     <group
-        android:pivotX="54"
-        android:pivotY="54"
-        android:scaleX="0.86"
-        android:scaleY="0.86">
+        android:translateX="24"
+        android:translateY="24"
+        android:scaleX="2.5"
+        android:scaleY="2.5">
 
     <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M27,57 C27,51 32,46 38,46 C44,46 49,51 49,57 C49,63 44,68 38,68 C32,68 27,63 27,57 Z"
-        android:strokeColor="#0B0C0F"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="5" />
-
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M59,57 C59,51 64,46 70,46 C76,46 81,51 81,57 C81,63 76,68 70,68 C64,68 59,63 59,57 Z"
-        android:strokeColor="#0B0C0F"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="5" />
-
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M49,55 C52,53 56,53 59,55"
-        android:strokeColor="#0B0C0F"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="5" />
-
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M27,55 L21,51"
-        android:strokeColor="#0B0C0F"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="5" />
-
-    <path
-        android:fillColor="@android:color/transparent"
-        android:pathData="M81,55 L87,51"
-        android:strokeColor="#0B0C0F"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeWidth="5" />
+        android:fillColor="#0B0C0F"
+        android:fillType="evenOdd"
+        android:pathData="M9.8,8q-2.6,-0.8 -5.4,-0.6l-3.5,0.3a1,1 0,0 0,-0.9 1v1.1q0,0.8 0.7,1l0.9,3.4a4,4 0,0 0,3.1 2.3l0.4,0.1a5,5 0,0 0,5.4 -3.5l0.5,-2a1,1 0,0 1,2 0l0.6,2a5,5 0,0 0,5.3 3.5h0.4c1.3,-0.2 2.6,-1 3.1,-2.4a14,14 0,0 0,1 -3.4q0.5,-0.2 0.6,-1v-1q0,-1 -1,-1l-3.4,-0.4q-2.8,-0.2 -5.4,0.5l-0.4,0.1A7,7 0,0 1,10 8zM2.8,10.7a1,1 0,0 1,0.9 -1.2h0.8q2,-0.2 3.7,0 1,0.4 0.8,1.4l-0.5,1.6a3,3 0,0 1,-3.1 2.1L5,14.6q-1.1,-0.2 -1.5,-1.2l-0.4,-1zM21.3,10.7a1,1 0,0 0,-1 -1.2h-0.8q-2,-0.2 -3.7,0A1,1 0,0 0,15 11l0.5,1.6a3,3 0,0 0,3.1 2.1h0.4q1.1,-0.2 1.5,-1.2l0.4,-1z" />
 
     </group>
 </vector>
