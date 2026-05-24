@@ -8,6 +8,9 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
@@ -23,6 +26,9 @@ class AudioManager(private val appContext: Context) {
 
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var automaticGainControl: AutomaticGainControl? = null
     private var captureThread: Thread? = null
 
     @Volatile
@@ -63,11 +69,11 @@ class AudioManager(private val appContext: Context) {
         val demoSpeakerMode = SettingsManager.demoSpeakerModeEnabled
 
         if (demoSpeakerMode) {
-            sysAm.mode = android.media.AudioManager.MODE_NORMAL
+            sysAm.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
             commDeviceSet = false
             scoStarted = false
             preferredBtDevice = null
-            Log.d(TAG, "Demo speaker mode enabled -> use phone mic/media speaker route")
+            Log.d(TAG, "Demo speaker mode enabled -> use phone-style communication input without BT SCO")
         } else {
             // ✅ BT 마이크가 있으면 그걸 우선 사용, 없으면 폰 마이크로 폴백
             preferredBtDevice = findBluetoothInputDeviceOrNull()
@@ -112,7 +118,7 @@ class AudioManager(private val appContext: Context) {
         )
 
         audioRecord = AudioRecord(
-            if (demoSpeakerMode) MediaRecorder.AudioSource.MIC else MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             GeminiConfig.INPUT_AUDIO_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -131,6 +137,10 @@ class AudioManager(private val appContext: Context) {
 
         val routed = audioRecord?.routedDevice
         Log.d(TAG, "AudioRecord routedDevice: type=${routed?.type} name=${routed?.productName}")
+
+        if (demoSpeakerMode) {
+            enableVoiceProcessing(audioRecord?.audioSessionId ?: 0)
+        }
 
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
@@ -161,17 +171,6 @@ class AudioManager(private val appContext: Context) {
                 ) * 2
             )
             .build()
-
-        if (demoSpeakerMode) {
-            findBuiltInSpeakerOrNull()?.let { dev ->
-                try {
-                    val ok = audioTrack?.setPreferredDevice(dev) == true
-                    Log.d(TAG, "AudioTrack.setPreferredDevice(speaker) ok=$ok dev=${dev.productName}")
-                } catch (t: Throwable) {
-                    Log.w(TAG, "setPreferredDevice(speaker) failed: ${t.message}")
-                }
-            }
-        }
 
         audioRecord?.startRecording()
         audioTrack?.play()
@@ -246,6 +245,46 @@ class AudioManager(private val appContext: Context) {
         return outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
     }
 
+    private fun enableVoiceProcessing(audioSessionId: Int) {
+        if (audioSessionId == 0) return
+
+        if (AcousticEchoCanceler.isAvailable()) {
+            try {
+                echoCanceler = AcousticEchoCanceler.create(audioSessionId)?.apply { enabled = true }
+                Log.d(TAG, "AcousticEchoCanceler enabled=${echoCanceler?.enabled}")
+            } catch (t: Throwable) {
+                Log.w(TAG, "AcousticEchoCanceler failed: ${t.message}")
+            }
+        }
+
+        if (NoiseSuppressor.isAvailable()) {
+            try {
+                noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.apply { enabled = true }
+                Log.d(TAG, "NoiseSuppressor enabled=${noiseSuppressor?.enabled}")
+            } catch (t: Throwable) {
+                Log.w(TAG, "NoiseSuppressor failed: ${t.message}")
+            }
+        }
+
+        if (AutomaticGainControl.isAvailable()) {
+            try {
+                automaticGainControl = AutomaticGainControl.create(audioSessionId)?.apply { enabled = true }
+                Log.d(TAG, "AutomaticGainControl enabled=${automaticGainControl?.enabled}")
+            } catch (t: Throwable) {
+                Log.w(TAG, "AutomaticGainControl failed: ${t.message}")
+            }
+        }
+    }
+
+    private fun releaseVoiceProcessing() {
+        echoCanceler?.release()
+        echoCanceler = null
+        noiseSuppressor?.release()
+        noiseSuppressor = null
+        automaticGainControl?.release()
+        automaticGainControl = null
+    }
+
     fun playAudio(data: ByteArray) {
         if (!isCapturing || data.isEmpty()) return
         audioTrack?.write(data, 0, data.size)
@@ -276,6 +315,7 @@ class AudioManager(private val appContext: Context) {
         }
 
         audioRecord?.stop()
+        releaseVoiceProcessing()
         audioRecord?.release()
         audioRecord = null
 
