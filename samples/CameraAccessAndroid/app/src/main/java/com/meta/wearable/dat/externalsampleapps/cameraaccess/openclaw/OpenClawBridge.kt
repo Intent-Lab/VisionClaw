@@ -40,11 +40,18 @@ class OpenClawBridge {
         MutableStateFlow<OpenClawConnectionState>(OpenClawConnectionState.NotConfigured)
     val connectionState: StateFlow<OpenClawConnectionState> = _connectionState.asStateFlow()
 
-    /** Set by GeminiSessionViewModel so we can send image tasks via WebSocket */
+    /** Set by GeminiSessionViewModel so we can send tasks via WebSocket chat.send */
     var eventClient: OpenClawEventClient? = null
 
     fun setToolCallStatus(status: ToolCallStatus) {
         _lastToolCallStatus.value = status
+    }
+
+    fun setToolCallProgress(progressText: String) {
+        val current = _lastToolCallStatus.value
+        if (current is ToolCallStatus.Executing) {
+            _lastToolCallStatus.value = current.copy(progressText = progressText)
+        }
     }
 
     private val client = OkHttpClient.Builder()
@@ -86,6 +93,7 @@ class OpenClawBridge {
                 .get()
                 .addHeader("Authorization", "Bearer ${GeminiConfig.openClawGatewayToken}")
                 .addHeader("x-openclaw-message-channel", "glass")
+                .addHeader("x-openclaw-scopes", "operator.write")
                 .build()
 
             val response = pingClient.newCall(request).execute()
@@ -107,6 +115,85 @@ class OpenClawBridge {
     fun resetSession() {
         conversationHistory.clear()
         Log.d(TAG, "Session reset (key retained: $sessionKey)")
+    }
+
+    suspend fun sendSessionCommand(command: String): ToolResult = withContext(Dispatchers.IO) {
+        val normalized = command.trim()
+        if (normalized != "/new" && normalized != "/compact") {
+            return@withContext ToolResult.Failure("Unsupported OpenClaw command: $normalized")
+        }
+
+        _lastToolCallStatus.value = ToolCallStatus.Executing("OpenClaw", "Sending $normalized")
+
+        val ec = eventClient
+        if (ec != null) {
+            val wsResult = sendViaWebSocket(ec, normalized, imageBase64 = null, toolName = "OpenClaw")
+            if (wsResult is ToolResult.Success) {
+                if (normalized == "/new") resetSession()
+                return@withContext wsResult
+            }
+            _lastToolCallStatus.value = ToolCallStatus.Executing("OpenClaw", "Sending $normalized")
+        }
+
+        if (!GeminiConfig.isOpenClawConfigured) {
+            _lastToolCallStatus.value = ToolCallStatus.Failed("OpenClaw", "Not configured")
+            return@withContext ToolResult.Failure("OpenClaw is not configured")
+        }
+
+        val url = "${GeminiConfig.openClawHost}:${GeminiConfig.openClawPort}/v1/chat/completions"
+        val messagesArray = JSONArray().put(JSONObject().apply {
+            put("role", "user")
+            put("content", normalized)
+        })
+        val body = JSONObject().apply {
+            put("model", "openclaw")
+            put("messages", messagesArray)
+            put("stream", false)
+        }
+        val request = Request.Builder()
+            .url(url)
+            .post(body.toString().toRequestBody("application/json".toMediaType()))
+            .addHeader("Authorization", "Bearer ${GeminiConfig.openClawGatewayToken}")
+            .addHeader("Content-Type", "application/json")
+            .addHeader("x-openclaw-session-key", sessionKey)
+            .addHeader("x-openclaw-message-channel", "glass")
+            .addHeader("x-openclaw-scopes", "operator.write")
+            .build()
+
+        val call = client.newCall(request)
+        inFlightCallRef.set(call)
+        try {
+            val response = call.execute()
+            val responseBody = response.body?.string() ?: ""
+            val statusCode = response.code
+            response.close()
+
+            if (statusCode !in 200..299) {
+                _lastToolCallStatus.value = ToolCallStatus.Failed("OpenClaw", "HTTP $statusCode")
+                return@withContext ToolResult.Failure("OpenClaw command returned HTTP $statusCode")
+            }
+
+            if (normalized == "/new") resetSession()
+
+            val content = try {
+                JSONObject(responseBody).optJSONArray("choices")
+                    ?.optJSONObject(0)
+                    ?.optJSONObject("message")
+                    ?.optString("content", "")
+                    ?.takeIf { it.isNotBlank() }
+            } catch (_: Exception) {
+                responseBody.takeIf { it.isNotBlank() }
+            }
+
+            _lastToolCallStatus.value = ToolCallStatus.Completed("OpenClaw")
+            ToolResult.Success(content ?: "OpenClaw command completed.")
+        } catch (e: Exception) {
+            Log.e(TAG, "OpenClaw command error: ${e::class.java.name}: ${e.message}")
+            _lastToolCallStatus.value = ToolCallStatus.Failed("OpenClaw", e.message ?: "Unknown")
+            ToolResult.Failure("OpenClaw command failed: ${e.message}")
+        } finally {
+            inFlightCallRef.compareAndSet(call, null)
+        }
     }
 
     /**
@@ -180,17 +267,20 @@ class OpenClawBridge {
         toolName: String = "execute",
         imageBase64: String? = null
     ): ToolResult = withContext(Dispatchers.IO) {
-        _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
+        _lastToolCallStatus.value = ToolCallStatus.Executing(toolName, "OpenClaw is working")
 
-        // If image is provided, route through WebSocket chat.send (only working method)
-        if (imageBase64 != null) {
-            val ec = eventClient
-            if (ec == null) {
-                Log.w(TAG, "Image task but no event client, falling back to text-only HTTP")
-            } else {
-                Log.d(TAG, "Sending image task via WebSocket chat.send (${imageBase64.length / 1024} KB)")
-                return@withContext sendViaWebSocket(ec, task, imageBase64, toolName)
+        val ec = eventClient
+        if (ec != null) {
+            val imageSize = imageBase64?.let { "${it.length / 1024} KB" } ?: "none"
+            Log.d(TAG, "Sending task via WebSocket chat.send (image=$imageSize)")
+            val wsResult = sendViaWebSocket(ec, task, imageBase64, toolName)
+            if (wsResult is ToolResult.Success || imageBase64 != null) {
+                return@withContext wsResult
             }
+            Log.w(TAG, "WebSocket chat.send failed for text task; falling back to HTTP")
+            _lastToolCallStatus.value = ToolCallStatus.Executing(toolName, "OpenClaw is working")
+        } else if (imageBase64 != null) {
+            Log.w(TAG, "Image task but no event client, falling back to text-only HTTP")
         }
 
         val url = "${GeminiConfig.openClawHost}:${GeminiConfig.openClawPort}/v1/chat/completions"
@@ -224,6 +314,7 @@ class OpenClawBridge {
             .addHeader("Content-Type", "application/json")
             .addHeader("x-openclaw-session-key", sessionKey)
             .addHeader("x-openclaw-message-channel", "glass")
+            .addHeader("x-openclaw-scopes", "operator.write")
             .build()
 
         val call = client.newCall(request)
@@ -308,20 +399,25 @@ class OpenClawBridge {
     }
 
     /**
-     * Send a task with image via WebSocket chat.send RPC.
-     * Also uploads the image file to disk so the agent can access it.
+     * Send a task via WebSocket chat.send RPC.
+     * Also uploads the image file to disk when present so the agent can access it.
      */
     private suspend fun sendViaWebSocket(
         eventClient: OpenClawEventClient,
         task: String,
-        imageBase64: String,
+        imageBase64: String?,
         toolName: String
     ): ToolResult = suspendCancellableCoroutine { continuation ->
-        // Upload image to disk so agent can read/copy/save the file
-        val filePath = uploadImageFile(imageBase64)
-        val taskWithPath = if (filePath != null) {
-            "$task\n\n[image_file_path]\n$filePath"
-        } else task
+        val taskWithPath = if (imageBase64 != null) {
+            val filePath = uploadImageFile(imageBase64)
+            if (filePath != null) {
+                "$task\n\n[image_file_path]\n$filePath"
+            } else {
+                task
+            }
+        } else {
+            task
+        }
 
         eventClient.sendChatMessage(
             sessionKey = sessionKey,

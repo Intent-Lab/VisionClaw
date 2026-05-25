@@ -31,6 +31,14 @@ class ToolCallRouter(
     var onAutoSaveFrame: ((Bitmap, String?) -> Unit)? = null
 
     private val inFlightJobs = mutableMapOf<String, Job>()
+    private val pendingDuplicateExecuteResponses = mutableListOf<PendingDuplicateExecute>()
+    private var activeExecuteCallId: String? = null
+
+    private data class PendingDuplicateExecute(
+        val callId: String,
+        val callName: String,
+        val sendResponse: (JSONObject) -> Unit
+    )
 
     fun handleToolCall(
         call: GeminiFunctionCall,
@@ -53,6 +61,22 @@ class ToolCallRouter(
                 sendResponse(response)
             }
             return
+        }
+
+        if (callName == "execute" && activeExecuteCallId != null) {
+            Log.w(TAG, "Coalescing duplicate execute call $callId into active call $activeExecuteCallId")
+            pendingDuplicateExecuteResponses.add(
+                PendingDuplicateExecute(
+                    callId = callId,
+                    callName = callName,
+                    sendResponse = sendResponse
+                )
+            )
+            return
+        }
+
+        if (callName == "execute") {
+            activeExecuteCallId = callId
         }
 
         val job = scope.launch {
@@ -105,6 +129,21 @@ class ToolCallRouter(
 
             val response = buildToolResponse(callId, callName, result)
             sendResponse(response)
+
+            if (callName == "execute") {
+                val duplicates = pendingDuplicateExecuteResponses.toList()
+                pendingDuplicateExecuteResponses.clear()
+                activeExecuteCallId = null
+                for (duplicate in duplicates) {
+                    duplicate.sendResponse(
+                        buildToolResponse(
+                            callId = duplicate.callId,
+                            name = duplicate.callName,
+                            result = result
+                        )
+                    )
+                }
+            }
             inFlightJobs.remove(callId)
         }
 
@@ -121,6 +160,11 @@ class ToolCallRouter(
         }
         bridge.cancelInFlight("tool cancellation ids=$ids")
         bridge.setToolCallStatus(ToolCallStatus.Cancelled(ids.firstOrNull() ?: "unknown"))
+        pendingDuplicateExecuteResponses.removeAll { it.callId in ids }
+        if (activeExecuteCallId in ids) {
+            activeExecuteCallId = null
+            pendingDuplicateExecuteResponses.clear()
+        }
     }
 
     fun cancelAll() {
@@ -129,6 +173,8 @@ class ToolCallRouter(
             job.cancel()
         }
         inFlightJobs.clear()
+        activeExecuteCallId = null
+        pendingDuplicateExecuteResponses.clear()
         bridge.cancelInFlight("cancelAll")
     }
 

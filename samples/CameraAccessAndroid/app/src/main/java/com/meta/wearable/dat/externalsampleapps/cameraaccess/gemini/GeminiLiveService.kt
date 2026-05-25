@@ -209,8 +209,9 @@ class GeminiLiveService {
 
     fun sendToolResponse(response: JSONObject) {
         sendExecutor.execute {
-            Log.d("GeminiWS", "SEND_TOOL: " + response.toString().take(300))
-            webSocket?.send(response.toString())
+            val payload = response.toString()
+            val sent = webSocket?.send(payload) ?: false
+            Log.d("GeminiWS", "SEND_TOOL sent=$sent bytes=${payload.length}: ${payload.take(300)}")
         }
     }
 
@@ -225,6 +226,7 @@ class GeminiLiveService {
                             put("text", text)
                         }))
                     }))
+                    put("turnComplete", true)
                 })
             }
             webSocket?.send(json.toString())
@@ -337,6 +339,7 @@ class GeminiLiveService {
                 val serverContent = json.getJSONObject("serverContent")
 
                 if (serverContent.optBoolean("interrupted", false)) {
+                    Log.d(TAG, "serverContent interrupted")
                     _isModelSpeaking.value = false
                     onInterrupted?.invoke()
                     return
@@ -374,6 +377,7 @@ class GeminiLiveService {
                 }
 
                 if (serverContent.optBoolean("turnComplete", false)) {
+                    Log.d(TAG, "serverContent turnComplete")
                     _isModelSpeaking.value = false
                     responseLatencyLogged = false
                     onTurnComplete?.invoke()

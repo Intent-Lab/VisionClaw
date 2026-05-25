@@ -3,6 +3,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.chat.ChatMessage
@@ -13,6 +14,8 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.net.NetworkTypeMoni
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawBridge
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawEventClient
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawProgress
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawProgressKind
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallRouter
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
@@ -55,6 +58,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
     val captureEvent: StateFlow<CapturedPhoto?> = _captureEvent.asStateFlow()
 
     private val geminiService = GeminiLiveService()
+    private val progressSpeechService = GeminiProgressSpeechService()
     private val openClawBridge = OpenClawBridge()
     private val eventClient = OpenClawEventClient()
     private var toolCallRouter: ToolCallRouter? = null
@@ -85,6 +89,8 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
     private var activeAIBubbleId: String? = null
     private var lastUserText: String = ""
     private var lastAIText: String = ""
+    private var lastSpokenProgressKind: OpenClawProgressKind? = null
+    private var lastSpokenProgressAtMs: Long = 0
 
     // execute 시작 시 mic 상태를 저장해뒀다가 끝나면 복원
     private var micStateBeforeExecution: Boolean? = null
@@ -126,7 +132,6 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleMic() {
         if (!_uiState.value.isGeminiActive) return
-        if (isToolExecuting(_uiState.value.toolCallStatus)) return
 
         val newEnabled = !_uiState.value.isMicEnabled
         _uiState.value = _uiState.value.copy(isMicEnabled = newEnabled)
@@ -135,7 +140,6 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setMicEnabled(enabled: Boolean) {
         if (!_uiState.value.isGeminiActive) return
-        if (isToolExecuting(_uiState.value.toolCallStatus)) return
 
         _uiState.value = _uiState.value.copy(isMicEnabled = enabled)
         audioManager.setMicEnabled(enabled)
@@ -157,6 +161,8 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         reconnectJob = null
         micStateBeforeExecution = null
         micAutoMutedForExecution = false
+        lastSpokenProgressKind = null
+        lastSpokenProgressAtMs = 0
 
         // Insert session divider if there are previous messages
         val currentMessages = _uiState.value.messages.toMutableList()
@@ -192,6 +198,9 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         geminiService.onAudioReceived = { data ->
             audioManager.playAudio(data)
         }
+        progressSpeechService.onAudioReceived = { data ->
+            audioManager.playAudio(data)
+        }
 
         geminiService.onInterrupted = {
             audioManager.stopPlayback()
@@ -223,7 +232,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
             updateUserBubble(newTranscript)
         }
 
-        geminiService.onOutputTranscription = { text ->
+        geminiService.onOutputTranscription = output@{ text ->
             val newAI = _uiState.value.aiTranscript + text
             _uiState.value = _uiState.value.copy(aiTranscript = newAI)
             updateAIBubble(newAI)
@@ -237,6 +246,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
                 scheduleReconnect(reason)
             }
         }
+        progressSpeechService.connect()
 
         viewModelScope.launch {
             openClawBridge.checkConnection()
@@ -295,6 +305,11 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
                 for (call in toolCall.functionCalls) {
                     val taskDesc = (call.args["task"] as? String) ?: ""
                     RemoteLogger.log("voice:tool_call", mapOf("tool" to call.name, "task" to taskDesc))
+                    if (call.name == "execute") {
+                        lastSpokenProgressKind = null
+                        lastSpokenProgressAtMs = 0
+                        eventClient.resetProgressState()
+                    }
 
                     finalizeCurrentBubbles()
                     val toolMsg = ChatMessage(
@@ -459,6 +474,7 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
         openClawBridge.cancelInFlight("user stopSession")
 
         audioManager.stopCapture()
+        progressSpeechService.disconnect()
         geminiService.disconnect()
 
         stateObservationJob?.cancel()
@@ -479,6 +495,10 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun syncProactiveNotifications() {
         // Always connect event client — needed for image sending via chat.send
+        eventClient.onProgress = { progress ->
+            openClawBridge.setToolCallProgress(progress.displayText)
+            maybeSpeakProgress(progress)
+        }
         if (SettingsManager.proactiveNotificationsEnabled) {
             eventClient.onNotification = { text ->
                 val state = _uiState.value
@@ -490,6 +510,36 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
             eventClient.onNotification = null
         }
         eventClient.connect()
+    }
+
+    private fun maybeSpeakProgress(progress: OpenClawProgress) {
+        val status = openClawBridge.lastToolCallStatus.value
+        if (status !is ToolCallStatus.Executing) {
+            Log.d("GeminiProgress", "Skip speech: not executing kind=${progress.kind} tool=${progress.toolName}")
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (lastSpokenProgressAtMs != 0L && now - lastSpokenProgressAtMs < 8_000) {
+            Log.d("GeminiProgress", "Skip speech: throttle kind=${progress.kind} tool=${progress.toolName}")
+            return
+        }
+
+        lastSpokenProgressKind = progress.kind
+        lastSpokenProgressAtMs = now
+        val languageName = progressLanguageName()
+        Log.d("GeminiProgress", "Send speech hint: ${progress.speechHint} language=$languageName kind=${progress.kind} tool=${progress.toolName}")
+        progressSpeechService.speakProgress(progress.speechHint, languageName)
+    }
+
+    private fun progressLanguageName(): String {
+        return if (containsJapanese(lastUserOriginalInstruction.orEmpty())) "Japanese" else "English"
+    }
+
+    private fun containsJapanese(text: String): Boolean {
+        return text.any { ch ->
+            (ch in '\u3040'..'\u30ff') || (ch in '\u3400'..'\u9fff')
+        }
     }
 
     fun sendVideoFrameIfThrottled(bitmap: Bitmap) {
@@ -518,6 +568,36 @@ class GeminiSessionViewModel(app: Application) : AndroidViewModel(app) {
     fun clearCachedVideoFrame() {
         latestFrameForToolCall = null
         lastVideoFrameTime = 0
+    }
+
+    suspend fun runOpenClawDeveloperCommand(command: String): String {
+        val result = openClawBridge.sendSessionCommand(command)
+        return when (result) {
+            is ToolResult.Success -> {
+                if (command.trim() == "/new") {
+                    finalizeCurrentBubbles()
+                    val msgs = _uiState.value.messages.toMutableList()
+                    if (msgs.isNotEmpty()) {
+                        msgs.add(ChatMessage(role = ChatMessageRole.SessionDivider, text = ""))
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        userTranscript = "",
+                        aiTranscript = "",
+                        messages = msgs,
+                    )
+                    persistMessages()
+                    lastUserOriginalInstruction = null
+                    lastSpokenProgressKind = null
+                    lastSpokenProgressAtMs = 0
+                }
+                result.result.ifBlank { "OpenClaw command completed." }
+            }
+            is ToolResult.Failure -> {
+                val message = result.error
+                _uiState.value = _uiState.value.copy(errorMessage = message)
+                message
+            }
+        }
     }
 
     fun clearError() {

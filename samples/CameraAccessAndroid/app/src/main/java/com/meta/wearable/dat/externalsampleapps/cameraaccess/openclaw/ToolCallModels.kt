@@ -72,7 +72,7 @@ sealed class ToolResult {
 
 sealed class ToolCallStatus {
     data object Idle : ToolCallStatus()
-    data class Executing(val name: String) : ToolCallStatus()
+    data class Executing(val name: String, val progressText: String? = null) : ToolCallStatus()
     data class Completed(val name: String) : ToolCallStatus()
     data class Failed(val name: String, val error: String) : ToolCallStatus()
     data class Cancelled(val name: String) : ToolCallStatus()
@@ -80,7 +80,7 @@ sealed class ToolCallStatus {
     val displayText: String
         get() = when (this) {
             is Idle -> ""
-            is Executing -> "Running: $name..."
+            is Executing -> progressText ?: "OpenClaw is working"
             is Completed -> "Done: $name"
             is Failed -> "Failed: $name - $error"
             is Cancelled -> "Cancelled: $name"
@@ -129,6 +129,7 @@ object ToolDeclarations {
     private fun executeJSON(): JSONObject {
         return JSONObject().apply {
             put("name", "execute")
+            put("behavior", "NON_BLOCKING")
             put("description", "Your only way to take action. You have no memory, storage, or ability to do anything on your own -- use this tool for everything: sending messages, searching the web, adding to lists, setting reminders, creating notes, research, drafts, scheduling, smart home control, app interactions, or any request that goes beyond answering a question. When in doubt, use this tool.")
             put("parameters", JSONObject().apply {
                 put("type", "object")
@@ -144,7 +145,6 @@ object ToolDeclarations {
                 })
                 put("required", JSONArray().put("task"))
             })
-            put("behavior", "NON_BLOCKING")
         }
     }
 }

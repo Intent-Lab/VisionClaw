@@ -54,9 +54,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +69,7 @@ fun CameraAccessScaffold(
     modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val geminiViewModel: GeminiSessionViewModel = composeViewModel()
   val snackbarHostState = remember { SnackbarHostState() }
   val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -85,11 +88,18 @@ fun CameraAccessScaffold(
             SettingsScreen(
                 onBack = { viewModel.hideSettings() },
                 onDebugMenu = if (BuildConfig.DEBUG) {{ viewModel.showDebugMenu() }} else null,
+                onOpenClawNewSession = if (BuildConfig.DEBUG) {
+                    { geminiViewModel.runOpenClawDeveloperCommand("/new") }
+                } else null,
+                onOpenClawCompactSession = if (BuildConfig.DEBUG) {
+                    { geminiViewModel.runOpenClawDeveloperCommand("/compact") }
+                } else null,
             )
         uiState.isStreaming ->
             StreamScreen(
                 wearablesViewModel = viewModel,
                 isPhoneMode = uiState.isPhoneMode,
+                geminiViewModel = geminiViewModel,
             )
         uiState.isRegistered ->
             NonStreamScreen(

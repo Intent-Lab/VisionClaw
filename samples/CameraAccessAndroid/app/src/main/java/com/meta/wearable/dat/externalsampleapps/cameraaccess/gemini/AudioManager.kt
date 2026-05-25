@@ -15,6 +15,8 @@ import android.os.Build
 import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 class AudioManager(private val appContext: Context) {
     companion object {
@@ -30,9 +32,16 @@ class AudioManager(private val appContext: Context) {
     private var noiseSuppressor: NoiseSuppressor? = null
     private var automaticGainControl: AutomaticGainControl? = null
     private var captureThread: Thread? = null
+    private val playbackExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "audio-playback").apply { isDaemon = true }
+    }
+    private val playbackLock = Any()
 
     @Volatile
     private var isCapturing = false
+
+    @Volatile
+    private var playbackGeneration = 0
 
     @Volatile
     private var micEnabled = true
@@ -142,7 +151,7 @@ class AudioManager(private val appContext: Context) {
             enableVoiceProcessing(audioRecord?.audioSessionId ?: 0)
         }
 
-        audioTrack = AudioTrack.Builder()
+        val newAudioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(
@@ -173,7 +182,15 @@ class AudioManager(private val appContext: Context) {
             .build()
 
         audioRecord?.startRecording()
-        audioTrack?.play()
+        synchronized(playbackLock) {
+            playbackGeneration++
+            audioTrack = newAudioTrack
+            try {
+                newAudioTrack.play()
+            } catch (t: Throwable) {
+                Log.w(TAG, "AudioTrack.play failed: ${t.message}")
+            }
+        }
         isCapturing = true
 
         synchronized(accumulateLock) {
@@ -287,13 +304,48 @@ class AudioManager(private val appContext: Context) {
 
     fun playAudio(data: ByteArray) {
         if (!isCapturing || data.isEmpty()) return
-        audioTrack?.write(data, 0, data.size)
+        val generation = playbackGeneration
+        val chunk = data.copyOf()
+        try {
+            playbackExecutor.execute {
+                if (!isCapturing || generation != playbackGeneration) return@execute
+                synchronized(playbackLock) {
+                    if (!isCapturing || generation != playbackGeneration) return@synchronized
+                    val track = audioTrack ?: return@synchronized
+                    try {
+                        val written = track.write(chunk, 0, chunk.size)
+                        if (written < 0) {
+                            Log.w(TAG, "AudioTrack.write failed: $written")
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "AudioTrack.write threw: ${t.message}")
+                    }
+                }
+            }
+        } catch (t: RejectedExecutionException) {
+            Log.w(TAG, "Playback executor rejected audio: ${t.message}")
+        }
     }
 
     fun stopPlayback() {
-        audioTrack?.pause()
-        audioTrack?.flush()
-        audioTrack?.play()
+        val generation = playbackGeneration
+        try {
+            playbackExecutor.execute {
+                synchronized(playbackLock) {
+                    if (generation != playbackGeneration) return@synchronized
+                    val track = audioTrack ?: return@synchronized
+                    try {
+                        track.pause()
+                        track.flush()
+                        track.play()
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "stopPlayback failed: ${t.message}")
+                    }
+                }
+            }
+        } catch (t: RejectedExecutionException) {
+            Log.w(TAG, "Playback executor rejected stopPlayback: ${t.message}")
+        }
     }
 
     fun stopCapture() {
@@ -319,9 +371,21 @@ class AudioManager(private val appContext: Context) {
         audioRecord?.release()
         audioRecord = null
 
-        audioTrack?.stop()
-        audioTrack?.release()
-        audioTrack = null
+        synchronized(playbackLock) {
+            playbackGeneration++
+            val track = audioTrack
+            audioTrack = null
+            try {
+                track?.stop()
+            } catch (t: Throwable) {
+                Log.w(TAG, "AudioTrack.stop failed: ${t.message}")
+            }
+            try {
+                track?.release()
+            } catch (t: Throwable) {
+                Log.w(TAG, "AudioTrack.release failed: ${t.message}")
+            }
+        }
 
         val sysAm = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
 
