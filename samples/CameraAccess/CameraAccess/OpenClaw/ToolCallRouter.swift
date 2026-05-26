@@ -5,6 +5,8 @@ import UIKit
 class ToolCallRouter {
   private let bridge: OpenClawBridge
   private var inFlightTasks: [String: Task<Void, Never>] = [:]
+  private var consecutiveFailures = 0
+  private let maxConsecutiveFailures = 3
 
   /// Callback for local capture_photo handling. Called with (description, completion).
   var onCapturePhoto: ((_ description: String?, _ completion: @escaping (ToolResult) -> Void) -> Void)?
@@ -31,15 +33,37 @@ class ToolCallRouter {
     NSLog("[ToolCall] Received: %@ (id: %@) args: %@",
           callName, callId, String(describing: call.args))
 
-    // Local tool: capture_photo — handle on-device, don't send to OpenClaw
+    // Local tool: capture_photo; handle on-device and do not send to OpenClaw.
     if callName == "capture_photo" {
       let description = call.args["description"] as? String
-      onCapturePhoto?(description) { [weak self] result in
-        guard let self else { return }
-        NSLog("[ToolCall] capture_photo result: %@", String(describing: result))
-        let response = self.buildToolResponse(callId: callId, name: callName, result: result)
+      if let onCapturePhoto {
+        onCapturePhoto(description) { [weak self] result in
+          guard let self else { return }
+          NSLog("[ToolCall] capture_photo result: %@", String(describing: result))
+          let response = self.buildToolResponse(callId: callId, name: callName, result: result)
+          sendResponse(response)
+        }
+      } else {
+        let response = buildToolResponse(
+          callId: callId,
+          name: callName,
+          result: .failure("capture_photo handler not configured")
+        )
         sendResponse(response)
       }
+      return
+    }
+
+    // Circuit breaker: stop sending tool calls after repeated failures
+    if consecutiveFailures >= maxConsecutiveFailures {
+      NSLog("[ToolCall] Circuit breaker open (%d consecutive failures), rejecting %@",
+            consecutiveFailures, callId)
+      let errorResult: ToolResult = .failure(
+        "Tool execution is temporarily unavailable after \(consecutiveFailures) consecutive failures. " +
+        "Please tell the user you cannot complete this action right now and suggest they check their OpenClaw gateway connection."
+      )
+      let response = buildToolResponse(callId: callId, name: callName, result: errorResult)
+      sendResponse(response)
       return
     }
 
@@ -57,6 +81,13 @@ class ToolCallRouter {
       guard !Task.isCancelled else {
         NSLog("[ToolCall] Task %@ was cancelled, skipping response", callId)
         return
+      }
+
+      switch result {
+      case .success:
+        self.consecutiveFailures = 0
+      case .failure:
+        self.consecutiveFailures += 1
       }
 
       NSLog("[ToolCall] Result for %@ (id: %@): %@",
@@ -90,6 +121,7 @@ class ToolCallRouter {
       task.cancel()
     }
     inFlightTasks.removeAll()
+    consecutiveFailures = 0
   }
 
   // MARK: - Private

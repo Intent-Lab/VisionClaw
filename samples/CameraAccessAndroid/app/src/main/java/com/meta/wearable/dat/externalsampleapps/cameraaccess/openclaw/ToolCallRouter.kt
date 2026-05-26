@@ -22,6 +22,7 @@ class ToolCallRouter(
     companion object {
         private const val TAG = "ToolCallRouter"
         private const val JPEG_QUALITY_FOR_UPLOAD = 92
+        private const val MAX_CONSECUTIVE_FAILURES = 3
     }
 
     /** Callback for local capture_photo handling. */
@@ -33,6 +34,7 @@ class ToolCallRouter(
     private val inFlightJobs = mutableMapOf<String, Job>()
     private val pendingDuplicateExecuteResponses = mutableListOf<PendingDuplicateExecute>()
     private var activeExecuteCallId: String? = null
+    private var consecutiveFailures = 0
 
     private data class PendingDuplicateExecute(
         val callId: String,
@@ -49,7 +51,7 @@ class ToolCallRouter(
 
         Log.d(TAG, "Received: $callName (id: $callId) args: ${call.args}")
 
-        // Local tool: capture_photo — handle on-device, don't send to OpenClaw
+        // Local tool: capture_photo; handle on-device and do not send to OpenClaw.
         if (callName == "capture_photo") {
             val description = call.args["description"]?.toString()
             onCapturePhoto?.invoke(description) { result ->
@@ -60,6 +62,17 @@ class ToolCallRouter(
                 val response = buildToolResponse(callId, callName, ToolResult.Failure("capture_photo handler not configured"))
                 sendResponse(response)
             }
+            return
+        }
+
+        // Circuit breaker: stop sending tool calls after repeated failures
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            Log.d(TAG, "Circuit breaker open ($consecutiveFailures consecutive failures), rejecting $callId")
+            val errorResult = ToolResult.Failure(
+                "Tool execution is temporarily unavailable after $consecutiveFailures consecutive failures. " +
+                "Please tell the user you cannot complete this action right now and suggest they check their OpenClaw gateway connection."
+            )
+            sendResponse(buildToolResponse(callId, callName, errorResult))
             return
         }
 
@@ -80,10 +93,10 @@ class ToolCallRouter(
         }
 
         val job = scope.launch {
-            // Gemini가 tool-call args로 준 "정리된" task (이미 rewriting 된 텍스트)
+            // Gemini-provided task text after tool-call argument rewriting.
             val rewrittenTask = call.args["task"]?.toString() ?: call.args.toString()
 
-            // 원본 발화(전사) — 우리가 따로 저장해둔 걸 가져옴
+            // Original transcript captured before Gemini rewrote the tool arguments.
             val original = originalInstructionProvider()
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
@@ -121,10 +134,15 @@ class ToolCallRouter(
 
             val result = bridge.delegateTask(task = taskPayload, toolName = callName, imageBase64 = imageBase64)
 
-            // 취소된 경우 응답 보내지 않음
+            // Do not send a tool response for cancelled calls.
             if (!isActive) {
                 Log.d(TAG, "Task $callId cancelled; skipping response")
                 return@launch
+            }
+
+            when (result) {
+                is ToolResult.Success -> consecutiveFailures = 0
+                is ToolResult.Failure -> consecutiveFailures++
             }
 
             val response = buildToolResponse(callId, callName, result)
@@ -176,6 +194,7 @@ class ToolCallRouter(
         activeExecuteCallId = null
         pendingDuplicateExecuteResponses.clear()
         bridge.cancelInFlight("cancelAll")
+        consecutiveFailures = 0
     }
 
     private fun buildToolResponse(

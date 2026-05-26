@@ -363,6 +363,19 @@ For full details, see [`samples/CameraAccess/CameraAccess/WebRTC/README.md`](sam
 
 For DAT SDK issues, see the [developer documentation](https://wearables.developer.meta.com/docs/develop/) or the [discussions forum](https://github.com/facebook/meta-wearables-dat-ios/discussions).
 
+## Citation
+
+If you use VisionClaw in your research, please cite our paper:
+
+```bibtex
+@article{liu2026visionclaw,
+  title={VisionClaw: Always-On AI Agents through Smart Glasses},
+  author={Liu, Xiaoan and Lee, DaeHo and Gonzalez, Eric J and Gonzalez-Franco, Mar and Suzuki, Ryo},
+  journal={arXiv preprint arXiv:2604.03486},
+  year={2026}
+}
+```
+
 ## License
 
 This source code is licensed under the license found in the [LICENSE](LICENSE) file in the root directory of this source tree.
