@@ -99,7 +99,7 @@ class StreamViewModel(
   }
 
   private fun stopActiveVideoSource(preserveMode: Boolean) {
-    Log.d(TAG, "BGTEST stopActiveVideoSource called preserveMode=$preserveMode")
+    Log.d(TAG, "Stopping active video source preserveMode=$preserveMode")
 
     StreamingService.stop(getApplication())
 
@@ -133,42 +133,65 @@ class StreamViewModel(
       return
     }
 
+    if (streamSession != null) {
+      Log.d(TAG, "Ignoring startStream because a stream session already exists")
+      return
+    }
+
     videoJob?.cancel()
     stateJob?.cancel()
 
     StreamingService.start(getApplication())
 
     val streamSession =
-      Wearables.startStreamSession(
-        getApplication(),
-        deviceSelector,
-        StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
-      ).also { streamSession = it }
+      try {
+        Wearables.startStreamSession(
+          getApplication(),
+          deviceSelector,
+          StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
+        ).also { streamSession = it }
+      } catch (t: Throwable) {
+        Log.e(TAG, "Failed to start stream session", t)
+        StreamingService.stop(getApplication())
+        _uiState.update { it.copy(streamSessionState = StreamSessionState.STOPPED) }
+        return
+      }
 
 
-    _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
+    _uiState.update {
+      it.copy(
+        streamingMode = StreamingMode.GLASSES,
+        streamSessionState = StreamSessionState.STARTING,
+      )
+    }
 
     videoJob =
       viewModelScope.launch {
-        streamSession.videoStream.collect { frame ->
-//          Log.d(
-//            TAG,
-//            "BGTEST frame received w=${frame.width} h=${frame.height} t=${System.currentTimeMillis()}"
-//          )
-          handleVideoFrame(frame)
-        }
+        streamSession.videoStream.collect { frame -> handleVideoFrame(frame) }
       }
 
     stateJob =
       viewModelScope.launch {
-        Log.d(TAG, "BGTEST stateJob launched")
+        Log.d(TAG, "Stream state collector launched")
+        var sawStartedState = false
         streamSession.state.collect { currentState ->
-          Log.d(TAG, "BGTEST stream state = $currentState")
+          Log.d(TAG, "Stream state = $currentState")
           val prevState = _uiState.value.streamSessionState
           _uiState.update { it.copy(streamSessionState = currentState) }
 
-          if (currentState != prevState && currentState == StreamSessionState.STOPPED) {
-            Log.d(TAG, "BGTEST state became STOPPED -> stopStream()")
+          if (
+            currentState == StreamSessionState.STARTING ||
+                currentState == StreamSessionState.STREAMING
+          ) {
+            sawStartedState = true
+          }
+
+          if (
+            sawStartedState &&
+                currentState != prevState &&
+                currentState == StreamSessionState.STOPPED
+          ) {
+            Log.d(TAG, "Stream state became STOPPED; stopping stream")
             stopStream()
             wearablesViewModel.navigateToDeviceSelection()
           }
@@ -206,7 +229,7 @@ class StreamViewModel(
   }
 
   fun stopStream() {
-    Log.d(TAG, "BGTEST stopStream called")
+    Log.d(TAG, "Stopping stream")
     stopActiveVideoSource(preserveMode = false)
   }
 
@@ -283,11 +306,6 @@ class StreamViewModel(
   }
 
   private fun handleVideoFrame(videoFrame: VideoFrame) {
-//    Log.d(
-//      TAG,
-//      "BGTEST handleVideoFrame entered w=${videoFrame.width} h=${videoFrame.height} t=${System.currentTimeMillis()}"
-//    )
-
     // VideoFrame contains raw I420 video data in a ByteBuffer
     val buffer = videoFrame.buffer
     val dataSize = buffer.remaining()

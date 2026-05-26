@@ -33,10 +33,15 @@ class StreamingService : Service() {
         private const val CHANNEL_NAME = "Camera Streaming"
         private const val NOTIFICATION_ID = 1001
         private const val WAKELOCK_TAG = "VisionClaw::StreamingWakeLock"
+        private const val ACTION_START = "com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.START"
+        private const val ACTION_STOP = "com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.STOP"
 
         fun start(context: Context) {
             val intent =
-                Intent(context, StreamingService::class.java).apply { `package` = context.packageName }
+                Intent(context, StreamingService::class.java).apply {
+                    `package` = context.packageName
+                    action = ACTION_START
+                }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -46,8 +51,16 @@ class StreamingService : Service() {
 
         fun stop(context: Context) {
             val intent =
-                Intent(context, StreamingService::class.java).apply { `package` = context.packageName }
-            context.stopService(intent)
+                Intent(context, StreamingService::class.java).apply {
+                    `package` = context.packageName
+                    action = ACTION_STOP
+                }
+            try {
+                context.startService(intent)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Unable to send stop command; stopping service directly", e)
+                context.stopService(intent)
+            }
         }
     }
 
@@ -63,25 +76,18 @@ class StreamingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Service started")
+        Log.d(TAG, "Service command: ${intent?.action ?: ACTION_START}")
 
-        val notification = createNotification()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        if (intent?.action == ACTION_STOP) {
+            stopSelf(startId)
+            return START_NOT_STICKY
         }
 
+        startInForeground()
         acquireWakeLock()
         acquireWifiLock()
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
@@ -106,6 +112,21 @@ class StreamingService : Service() {
 
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun startInForeground() {
+        val notification = createNotification()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
         }
     }
 

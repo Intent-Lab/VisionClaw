@@ -24,10 +24,9 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.types.DeviceIdentifier
-import com.meta.wearable.dat.core.types.Permission
-import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -124,37 +123,16 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     Wearables.startUnregistration(activity)
   }
 
-  fun navigateToStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
-    viewModelScope.launch {
-      val permission = Permission.CAMERA // Camera permission is required for streaming
-      val result = Wearables.checkPermissionStatus(permission)
-
-      // Handle the result
-      result.onFailure { error, _ ->
-        setRecentError("Permission check error: ${error.description}")
-        return@launch
-      }
-
-      val permissionStatus = result.getOrNull()
-      if (permissionStatus == PermissionStatus.Granted) {
-        _uiState.update { it.copy(isStreaming = true) }
-        return@launch
-      }
-
-      // Request permission
-      val requestedPermissionStatus = onRequestWearablesPermission(permission)
-      when (requestedPermissionStatus) {
-        PermissionStatus.Denied -> {
-          setRecentError("Permission denied")
-        }
-        PermissionStatus.Granted -> {
-          _uiState.update { it.copy(isStreaming = true) }
-        }
-      }
+  fun navigateToStreaming() {
+    if (_uiState.value.isStreaming) {
+      return
     }
+    SettingsManager.videoStreamingEnabled = true
+    _uiState.update { it.copy(isStreaming = true, isPhoneMode = false) }
   }
 
   fun navigateToPhoneMode() {
+    SettingsManager.videoStreamingEnabled = true
     _uiState.update { it.copy(isStreaming = true, isPhoneMode = true) }
   }
 

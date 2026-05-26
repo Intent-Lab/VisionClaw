@@ -219,8 +219,8 @@ fun StreamScreen(
                     ) {
                         IconButton(onClick = {
                             val newEnabled = !videoStreamingEnabled
+                            SettingsManager.videoStreamingEnabled = newEnabled
                             videoStreamingEnabled = newEnabled
-                            streamViewModel.setVideoStreamingEnabled(newEnabled, lifecycleOwner)
                         }) {
                             Icon(
                                 imageVector = if (videoStreamingEnabled) Icons.Default.Videocam else Icons.Default.VideocamOff,

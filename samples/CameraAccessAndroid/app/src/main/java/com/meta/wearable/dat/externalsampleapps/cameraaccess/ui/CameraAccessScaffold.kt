@@ -55,8 +55,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
-import com.meta.wearable.dat.core.types.Permission
-import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
@@ -65,7 +63,6 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.Wearables
 @Composable
 fun CameraAccessScaffold(
     viewModel: WearablesViewModel,
-    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
     modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -104,7 +101,6 @@ fun CameraAccessScaffold(
         uiState.isRegistered ->
             NonStreamScreen(
                 viewModel = viewModel,
-                onRequestWearablesPermission = onRequestWearablesPermission,
             )
         else ->
             HomeScreen(
