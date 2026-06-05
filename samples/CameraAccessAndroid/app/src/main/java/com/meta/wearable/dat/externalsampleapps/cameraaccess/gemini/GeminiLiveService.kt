@@ -358,6 +358,7 @@ class GeminiLiveService {
                                     val base64Data = inlineData.optString("data", "")
                                     if (base64Data.isNotEmpty()) {
                                         val audioData = Base64.decode(base64Data, Base64.DEFAULT)
+                                        Log.d(TAG, "Audio received bytes=${audioData.size}")
                                         if (!_isModelSpeaking.value) {
                                             _isModelSpeaking.value = true
                                             if (lastUserSpeechEnd > 0 && !responseLatencyLogged) {

@@ -52,6 +52,18 @@ class AudioManager(private val appContext: Context) {
     private var commDeviceSet = false
     private var scoStarted = false
     private var preferredBtDevice: AudioDeviceInfo? = null
+    private var preferredBtInputDevice: AudioDeviceInfo? = null
+    private var preferredBtOutputDevice: AudioDeviceInfo? = null
+    private var lastInputLevelLogMs = 0L
+    private var lastPlaybackLevelLogMs = 0L
+    private var silentInputLevelLogs = 0
+    private var fellBackToBuiltInMic = false
+
+    private data class BluetoothAudioRoute(
+        val communicationDevice: AudioDeviceInfo?,
+        val inputDevice: AudioDeviceInfo?,
+        val outputDevice: AudioDeviceInfo?,
+    )
 
     /**
      * "Mic mute" without tearing down the whole Gemini session.
@@ -76,48 +88,66 @@ class AudioManager(private val appContext: Context) {
 
         val sysAm = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
         val demoSpeakerMode = SettingsManager.demoSpeakerModeEnabled
+        var useBluetoothMediaOutputOnly = false
 
         if (demoSpeakerMode) {
             sysAm.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
             commDeviceSet = false
             scoStarted = false
             preferredBtDevice = null
+            preferredBtInputDevice = null
+            preferredBtOutputDevice = null
             Log.d(TAG, "Demo speaker mode enabled -> use phone-style communication input without BT SCO")
         } else {
-            // ✅ BT 마이크가 있으면 그걸 우선 사용, 없으면 폰 마이크로 폴백
-            preferredBtDevice = findBluetoothInputDeviceOrNull()
+            val bluetoothRoute = findBluetoothAudioRoute(sysAm)
+            preferredBtDevice = bluetoothRoute.communicationDevice
+            preferredBtInputDevice = bluetoothRoute.inputDevice
+            preferredBtOutputDevice = bluetoothRoute.outputDevice
 
-            if (preferredBtDevice != null) {
-                // 통화 모드로 전환 (SCO 입력 안정화에 도움)
+            if (bluetoothRoute.outputDevice != null && isBluetoothMediaOutput(bluetoothRoute.outputDevice)) {
+                useBluetoothMediaOutputOnly = true
+                preferredBtInputDevice = null
+                commDeviceSet = false
+                scoStarted = false
+                try {
+                    sysAm.mode = android.media.AudioManager.MODE_NORMAL
+                } catch (t: Throwable) {
+                    Log.w(TAG, "MODE_NORMAL for Bluetooth media output failed: ${t.message}")
+                }
+                Log.d(
+                    TAG,
+                    "Bluetooth media output detected -> use built-in mic with media output, " +
+                        "output=${describeDevice(bluetoothRoute.outputDevice)}"
+                )
+            } else if (bluetoothRoute.communicationDevice != null || bluetoothRoute.inputDevice != null) {
                 sysAm.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
 
-                // Android 12+ : communication device 선택 시도 (실패해도 폴백 가능)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && bluetoothRoute.communicationDevice != null) {
                     try {
-                        commDeviceSet = sysAm.setCommunicationDevice(preferredBtDevice!!)
-                        Log.d(TAG, "setCommunicationDevice(BT) = $commDeviceSet, dev=${preferredBtDevice?.productName}")
+                        commDeviceSet = sysAm.setCommunicationDevice(bluetoothRoute.communicationDevice)
+                        Log.d(TAG, "setCommunicationDevice(BT) = $commDeviceSet, dev=${describeDevice(bluetoothRoute.communicationDevice)}")
                     } catch (t: Throwable) {
                         commDeviceSet = false
                         Log.w(TAG, "setCommunicationDevice failed: ${t.message}")
                     }
                 }
 
-                // 구형/일부 기기 fallback: SCO 시작 (BT 없으면 시작하지 않음)
                 try {
                     sysAm.startBluetoothSco()
                     sysAm.isBluetoothScoOn = true
                     scoStarted = true
+                    waitForBluetoothSco(sysAm)
                     Log.d(TAG, "Bluetooth SCO started")
                 } catch (t: Throwable) {
                     scoStarted = false
                     Log.w(TAG, "startBluetoothSco failed: ${t.message}")
                 }
             } else {
-                // ✅ BT가 없으면 강제 라우팅/모드 변경 안 함 (그냥 폰 마이크)
                 commDeviceSet = false
                 scoStarted = false
                 Log.d(TAG, "No BT mic -> fallback to phone mic")
             }
+            logBluetoothRoute("selected", bluetoothRoute)
         }
 
         val bufferSize = AudioRecord.getMinBufferSize(
@@ -126,23 +156,9 @@ class AudioManager(private val appContext: Context) {
             AudioFormat.ENCODING_PCM_16BIT
         )
 
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            GeminiConfig.INPUT_AUDIO_SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize
-        )
-
-        val preferredInputDevice = if (demoSpeakerMode) findBuiltInMicOrNull() else preferredBtDevice
-        preferredInputDevice?.let { dev ->
-            try {
-                val ok = audioRecord?.setPreferredDevice(dev) == true
-                Log.d(TAG, "AudioRecord.setPreferredDevice ok=$ok dev=${dev.productName}")
-            } catch (t: Throwable) {
-                Log.w(TAG, "setPreferredDevice failed: ${t.message}")
-            }
-        }
+        val preferredInputDevice =
+            if (demoSpeakerMode || useBluetoothMediaOutputOnly) findBuiltInMicOrNull() else preferredBtInputDevice
+        audioRecord = buildAudioRecord(preferredInputDevice, bufferSize)
 
         val routed = audioRecord?.routedDevice
         Log.d(TAG, "AudioRecord routedDevice: type=${routed?.type} name=${routed?.productName}")
@@ -151,35 +167,10 @@ class AudioManager(private val appContext: Context) {
             enableVoiceProcessing(audioRecord?.audioSessionId ?: 0)
         }
 
-        val newAudioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(
-                        if (demoSpeakerMode) {
-                            AudioAttributes.USAGE_MEDIA
-                        } else {
-                            AudioAttributes.USAGE_VOICE_COMMUNICATION
-                        }
-                    )
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .build()
-            )
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(
-                AudioTrack.getMinBufferSize(
-                    GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE,
-                    AudioFormat.CHANNEL_OUT_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT
-                ) * 2
-            )
-            .build()
+        val newAudioTrack = buildAudioTrack(
+            useMediaOutput = demoSpeakerMode || useBluetoothMediaOutputOnly,
+            preferredOutputDevice = if (demoSpeakerMode) null else preferredBtOutputDevice,
+        )
 
         audioRecord?.startRecording()
         synchronized(playbackLock) {
@@ -196,6 +187,8 @@ class AudioManager(private val appContext: Context) {
         synchronized(accumulateLock) {
             accumulatedData.reset()
         }
+        silentInputLevelLogs = 0
+        fellBackToBuiltInMic = false
 
         captureThread = Thread(
             {
@@ -204,6 +197,8 @@ class AudioManager(private val appContext: Context) {
                 while (isCapturing) {
                     val read = audioRecord?.read(buffer, 0, buffer.size) ?: break
                     if (read > 0) {
+                        logInputLevelIfNeeded(buffer, read)
+
                         if (!micEnabled) {
                             // Mic muted: discard data and clear any partial buffer.
                             synchronized(accumulateLock) {
@@ -230,24 +225,325 @@ class AudioManager(private val appContext: Context) {
             "audio-capture"
         ).also { it.start() }
 
-        Log.d(TAG, "Audio capture started (16kHz mono PCM16, demoSpeakerMode=$demoSpeakerMode)")
+        Log.d(
+            TAG,
+            "Audio capture started (16kHz mono PCM16, demoSpeakerMode=$demoSpeakerMode, " +
+                "useBluetoothMediaOutputOnly=$useBluetoothMediaOutputOnly)"
+        )
     }
 
-    private fun findBluetoothInputDeviceOrNull(): AudioDeviceInfo? {
-        val sysAm = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+    private fun logInputLevelIfNeeded(buffer: ByteArray, byteCount: Int) {
+        val now = System.currentTimeMillis()
+        if (now - lastInputLevelLogMs < 1000) return
+        lastInputLevelLogMs = now
 
-        // 입력 디바이스 목록에서 BT 계열 우선 탐색
-        val inputs = sysAm.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+        var sumSquares = 0.0
+        var peak = 0
+        var i = 0
+        while (i + 1 < byteCount) {
+            val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xff)).toShort().toInt()
+            val abs = kotlin.math.abs(sample)
+            if (abs > peak) peak = abs
+            sumSquares += sample.toDouble() * sample.toDouble()
+            i += 2
+        }
+        val samples = byteCount / 2
+        if (samples == 0) return
 
-        // 1순위: SCO (통화용)
-        inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }?.let { return it }
+        val rms = kotlin.math.sqrt(sumSquares / samples)
+        Log.d(
+            TAG,
+            "Input level rms=${rms.toInt()} peak=$peak device=${describeDevice(audioRecord?.routedDevice)}"
+        )
 
-        // 2순위: BLE Headset (기기/OS에 따라 여기로 잡히는 경우가 있음)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }?.let { return it }
+        if (preferredBtInputDevice != null && !fellBackToBuiltInMic && rms < 1.0 && peak == 0) {
+            silentInputLevelLogs++
+            if (silentInputLevelLogs >= 3) {
+                switchToBuiltInMicAfterSilentBluetooth()
+            }
+        } else {
+            silentInputLevelLogs = 0
+        }
+    }
+
+    private fun switchToBuiltInMicAfterSilentBluetooth() {
+        val builtInMic = findBuiltInMicOrNull()
+        if (builtInMic == null) {
+            Log.w(TAG, "Bluetooth input is silent, but no built-in mic fallback was found")
+            return
         }
 
-        return null
+        try {
+            leaveBluetoothCommunicationRoute()
+            val ok = rebuildAudioRecord(builtInMic)
+            fellBackToBuiltInMic = true
+            silentInputLevelLogs = 0
+            Log.w(
+                TAG,
+                "Bluetooth input stayed silent; rebuilt capture for built-in mic " +
+                    "preferredOk=$ok dev=${describeDevice(builtInMic)} routed=${describeDevice(audioRecord?.routedDevice)}"
+            )
+            if (ok) {
+                switchPlaybackToMediaBluetoothAfterMicFallback()
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Built-in mic fallback failed: ${t.message}")
+        }
+    }
+
+    private fun switchPlaybackToMediaBluetoothAfterMicFallback() {
+        leaveBluetoothCommunicationRoute()
+
+        try {
+            Thread.sleep(150)
+            val mediaOutput = findBluetoothMediaOutputDeviceOrNull()
+            preferredBtOutputDevice = mediaOutput ?: preferredBtOutputDevice
+
+            val newTrack = buildAudioTrack(
+                useMediaOutput = true,
+                preferredOutputDevice = preferredBtOutputDevice,
+            )
+
+            synchronized(playbackLock) {
+                playbackGeneration++
+                val oldTrack = audioTrack
+                audioTrack = newTrack
+                try {
+                    newTrack.play()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Fallback AudioTrack.play failed: ${t.message}")
+                }
+                try {
+                    oldTrack?.stop()
+                } catch (_: Throwable) {
+                }
+                try {
+                    oldTrack?.release()
+                } catch (_: Throwable) {
+                }
+            }
+            Log.w(TAG, "Switched playback to media Bluetooth output dev=${describeDevice(preferredBtOutputDevice)}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "Media Bluetooth playback fallback failed: ${t.message}")
+        }
+    }
+
+    private fun leaveBluetoothCommunicationRoute() {
+        val sysAm = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+
+        try {
+            if (scoStarted) {
+                sysAm.stopBluetoothSco()
+                sysAm.isBluetoothScoOn = false
+                scoStarted = false
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "stopBluetoothSco during fallback failed: ${t.message}")
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && commDeviceSet) {
+            try {
+                sysAm.clearCommunicationDevice()
+                commDeviceSet = false
+            } catch (t: Throwable) {
+                Log.w(TAG, "clearCommunicationDevice during fallback failed: ${t.message}")
+            }
+        }
+
+        try {
+            sysAm.mode = android.media.AudioManager.MODE_NORMAL
+        } catch (t: Throwable) {
+            Log.w(TAG, "MODE_NORMAL during fallback failed: ${t.message}")
+        }
+    }
+
+    private fun buildAudioRecord(
+        preferredInputDevice: AudioDeviceInfo?,
+        bufferSize: Int,
+    ): AudioRecord {
+        val record = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            GeminiConfig.INPUT_AUDIO_SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT,
+            bufferSize
+        )
+
+        preferredInputDevice?.let { dev ->
+            try {
+                val ok = record.setPreferredDevice(dev)
+                Log.d(TAG, "AudioRecord.setPreferredDevice ok=$ok dev=${describeDevice(dev)}")
+            } catch (t: Throwable) {
+                Log.w(TAG, "setPreferredDevice failed: ${t.message}")
+            }
+        }
+
+        return record
+    }
+
+    private fun rebuildAudioRecord(preferredInputDevice: AudioDeviceInfo): Boolean {
+        val bufferSize = AudioRecord.getMinBufferSize(
+            GeminiConfig.INPUT_AUDIO_SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+
+        val oldRecord = audioRecord
+        audioRecord = null
+        try {
+            oldRecord?.stop()
+        } catch (_: Throwable) {
+        }
+        try {
+            oldRecord?.release()
+        } catch (_: Throwable) {
+        }
+
+        val newRecord = buildAudioRecord(preferredInputDevice, bufferSize)
+        audioRecord = newRecord
+        newRecord.startRecording()
+
+        synchronized(accumulateLock) {
+            accumulatedData.reset()
+        }
+
+        return newRecord.preferredDevice?.id == preferredInputDevice.id
+    }
+
+    private fun buildAudioTrack(
+        useMediaOutput: Boolean,
+        preferredOutputDevice: AudioDeviceInfo?,
+    ): AudioTrack {
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(
+                        if (useMediaOutput) {
+                            AudioAttributes.USAGE_MEDIA
+                        } else {
+                            AudioAttributes.USAGE_VOICE_COMMUNICATION
+                        }
+                    )
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .setBufferSizeInBytes(
+                AudioTrack.getMinBufferSize(
+                    GeminiConfig.OUTPUT_AUDIO_SAMPLE_RATE,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                ) * 2
+            )
+            .build()
+
+        preferredOutputDevice?.let { dev ->
+            try {
+                val ok = track.setPreferredDevice(dev)
+                Log.d(TAG, "AudioTrack.setPreferredDevice ok=$ok dev=${describeDevice(dev)} media=$useMediaOutput")
+            } catch (t: Throwable) {
+                Log.w(TAG, "AudioTrack.setPreferredDevice failed: ${t.message}")
+            }
+        }
+
+        return track
+    }
+
+    private fun waitForBluetoothSco(sysAm: android.media.AudioManager) {
+        repeat(12) {
+            if (sysAm.isBluetoothScoOn) return
+            Thread.sleep(100)
+        }
+    }
+
+    private fun findBluetoothAudioRoute(sysAm: android.media.AudioManager): BluetoothAudioRoute {
+        val inputs = sysAm.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)
+        val outputs = sysAm.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+
+        val communicationDevice =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                sysAm.availableCommunicationDevices.firstOrNull { isBluetoothDevice(it) }
+            } else {
+                null
+            }
+        val inputDevice =
+            inputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+                ?: inputs.firstOrNull { isBluetoothDevice(it) }
+                ?: communicationDevice?.takeIf { it.isSource }
+        val outputDevice =
+            outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
+                ?: outputs.firstOrNull {
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        (it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                            it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER)
+                }
+                ?: outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+                ?: communicationDevice?.takeIf { it.isSink }
+
+        logAudioDevices(sysAm, inputs, outputs)
+
+        return BluetoothAudioRoute(
+            communicationDevice = communicationDevice,
+            inputDevice = inputDevice,
+            outputDevice = outputDevice,
+        )
+    }
+
+    private fun isBluetoothDevice(device: AudioDeviceInfo): Boolean {
+        return when (device.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> true
+            else ->
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    (device.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER)
+        }
+    }
+
+    private fun isBluetoothMediaOutput(device: AudioDeviceInfo): Boolean {
+        return when (device.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> true
+            else ->
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    (device.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER)
+        }
+    }
+
+    private fun logAudioDevices(
+        sysAm: android.media.AudioManager,
+        inputs: Array<AudioDeviceInfo>,
+        outputs: Array<AudioDeviceInfo>,
+    ) {
+        Log.d(TAG, "Audio inputs: ${inputs.joinToString { describeDevice(it) }}")
+        Log.d(TAG, "Audio outputs: ${outputs.joinToString { describeDevice(it) }}")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            Log.d(
+                TAG,
+                "Communication devices: ${sysAm.availableCommunicationDevices.joinToString { describeDevice(it) }}"
+            )
+        }
+    }
+
+    private fun logBluetoothRoute(label: String, route: BluetoothAudioRoute) {
+        Log.d(
+            TAG,
+            "Bluetooth route $label: communication=${describeDevice(route.communicationDevice)}, " +
+                "input=${describeDevice(route.inputDevice)}, output=${describeDevice(route.outputDevice)}"
+        )
+    }
+
+    private fun describeDevice(device: AudioDeviceInfo?): String {
+        return device?.let {
+            "type=${it.type}, name=${it.productName}, source=${it.isSource}, sink=${it.isSink}"
+        } ?: "none"
     }
 
     private fun findBuiltInMicOrNull(): AudioDeviceInfo? {
@@ -260,6 +556,18 @@ class AudioManager(private val appContext: Context) {
         val sysAm = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
         val outputs = sysAm.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
         return outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+    }
+
+    private fun findBluetoothMediaOutputDeviceOrNull(): AudioDeviceInfo? {
+        val sysAm = appContext.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val outputs = sysAm.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)
+        return outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP }
+            ?: outputs.firstOrNull {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    (it.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                        it.type == AudioDeviceInfo.TYPE_BLE_SPEAKER)
+            }
+            ?: outputs.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
     }
 
     private fun enableVoiceProcessing(audioSessionId: Int) {
@@ -313,9 +621,12 @@ class AudioManager(private val appContext: Context) {
                     if (!isCapturing || generation != playbackGeneration) return@synchronized
                     val track = audioTrack ?: return@synchronized
                     try {
+                        ensurePreferredPlaybackDevice(track)
                         val written = track.write(chunk, 0, chunk.size)
                         if (written < 0) {
                             Log.w(TAG, "AudioTrack.write failed: $written")
+                        } else {
+                            logPlaybackLevelIfNeeded(track, chunk, written)
                         }
                     } catch (t: Throwable) {
                         Log.w(TAG, "AudioTrack.write threw: ${t.message}")
@@ -325,6 +636,53 @@ class AudioManager(private val appContext: Context) {
         } catch (t: RejectedExecutionException) {
             Log.w(TAG, "Playback executor rejected audio: ${t.message}")
         }
+    }
+
+    private fun ensurePreferredPlaybackDevice(track: AudioTrack) {
+        val routed = track.routedDevice
+        if (routed != null && isBluetoothMediaOutput(routed)) return
+
+        val mediaOutput = findBluetoothMediaOutputDeviceOrNull() ?: preferredBtOutputDevice ?: return
+        preferredBtOutputDevice = mediaOutput
+
+        try {
+            val ok = track.setPreferredDevice(mediaOutput)
+            Log.w(
+                TAG,
+                "Reassert playback Bluetooth output ok=$ok dev=${describeDevice(mediaOutput)} " +
+                    "previous=${describeDevice(routed)}"
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Reassert playback Bluetooth output threw: ${t.message}")
+        }
+    }
+
+    private fun logPlaybackLevelIfNeeded(track: AudioTrack, buffer: ByteArray, byteCount: Int) {
+        val now = System.currentTimeMillis()
+        if (now - lastPlaybackLevelLogMs < 1000) return
+        lastPlaybackLevelLogMs = now
+
+        val level = computePcmLevel(buffer, byteCount)
+        Log.d(
+            TAG,
+            "Playback write bytes=$byteCount rms=${level.first} peak=${level.second} device=${describeDevice(track.routedDevice)}"
+        )
+    }
+
+    private fun computePcmLevel(buffer: ByteArray, byteCount: Int): Pair<Int, Int> {
+        var sumSquares = 0.0
+        var peak = 0
+        var i = 0
+        while (i + 1 < byteCount) {
+            val sample = ((buffer[i + 1].toInt() shl 8) or (buffer[i].toInt() and 0xff)).toShort().toInt()
+            val abs = kotlin.math.abs(sample)
+            if (abs > peak) peak = abs
+            sumSquares += sample.toDouble() * sample.toDouble()
+            i += 2
+        }
+        val samples = byteCount / 2
+        if (samples == 0) return 0 to 0
+        return kotlin.math.sqrt(sumSquares / samples).toInt() to peak
     }
 
     fun stopPlayback() {
@@ -407,8 +765,9 @@ class AudioManager(private val appContext: Context) {
         }
 
         preferredBtDevice = null
+        preferredBtInputDevice = null
+        preferredBtOutputDevice = null
 
-        // 필요하면 모드 원복 (기기 따라 유지해도 되지만 안전하게 NORMAL 추천)
         sysAm.mode = android.media.AudioManager.MODE_NORMAL
 
         Log.d(TAG, "Audio capture stopped")

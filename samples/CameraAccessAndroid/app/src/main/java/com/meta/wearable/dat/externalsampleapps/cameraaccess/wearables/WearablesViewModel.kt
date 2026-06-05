@@ -26,7 +26,6 @@ import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.types.DeviceIdentifier
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -127,12 +126,10 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     if (_uiState.value.isStreaming) {
       return
     }
-    SettingsManager.videoStreamingEnabled = true
     _uiState.update { it.copy(isStreaming = true, isPhoneMode = false) }
   }
 
   fun navigateToPhoneMode() {
-    SettingsManager.videoStreamingEnabled = true
     _uiState.update { it.copy(isStreaming = true, isPhoneMode = true) }
   }
 

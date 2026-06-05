@@ -45,7 +45,7 @@ object SettingsManager {
         set(value) = prefs.edit().putString("webrtcSignalingURL", value).apply()
 
     var videoStreamingEnabled: Boolean
-        get() = prefs.getBoolean("videoStreamingEnabled", true)
+        get() = prefs.getBoolean("videoStreamingEnabled", false)
         set(value) = prefs.edit().putBoolean("videoStreamingEnabled", value).apply()
 
     var proactiveNotificationsEnabled: Boolean

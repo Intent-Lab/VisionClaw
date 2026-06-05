@@ -134,7 +134,10 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.width(12.dp))
                 Switch(
                     checked = videoStreamingEnabled,
-                    onCheckedChange = { videoStreamingEnabled = it },
+                    onCheckedChange = {
+                        videoStreamingEnabled = it
+                        SettingsManager.videoStreamingEnabled = it
+                    },
                 )
             }
 
@@ -156,7 +159,10 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.width(12.dp))
                 Switch(
                     checked = demoSpeakerModeEnabled,
-                    onCheckedChange = { demoSpeakerModeEnabled = it },
+                    onCheckedChange = {
+                        demoSpeakerModeEnabled = it
+                        SettingsManager.demoSpeakerModeEnabled = it
+                    },
                 )
             }
 
@@ -235,7 +241,10 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.width(12.dp))
                 Switch(
                     checked = proactiveNotificationsEnabled,
-                    onCheckedChange = { proactiveNotificationsEnabled = it },
+                    onCheckedChange = {
+                        proactiveNotificationsEnabled = it
+                        SettingsManager.proactiveNotificationsEnabled = it
+                    },
                 )
             }
 
