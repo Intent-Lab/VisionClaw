@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @MainActor
 class ToolCallRouter {
@@ -6,6 +7,15 @@ class ToolCallRouter {
   private var inFlightTasks: [String: Task<Void, Never>] = [:]
   private var consecutiveFailures = 0
   private let maxConsecutiveFailures = 3
+
+  /// Callback for local capture_photo handling. Called with (description, completion).
+  var onCapturePhoto: ((_ description: String?, _ completion: @escaping (ToolResult) -> Void) -> Void)?
+
+  /// Latest camera frame for include_image on execute tool calls.
+  var latestFrame: UIImage?
+
+  /// Callback to auto-save frame to gallery when image is attached to execute call.
+  var onAutoSaveFrame: ((_ image: UIImage, _ description: String?) -> Void)?
 
   init(bridge: OpenClawBridge) {
     self.bridge = bridge
@@ -23,6 +33,27 @@ class ToolCallRouter {
     NSLog("[ToolCall] Received: %@ (id: %@) args: %@",
           callName, callId, String(describing: call.args))
 
+    // Local tool: capture_photo; handle on-device and do not send to OpenClaw.
+    if callName == "capture_photo" {
+      let description = call.args["description"] as? String
+      if let onCapturePhoto {
+        onCapturePhoto(description) { [weak self] result in
+          guard let self else { return }
+          NSLog("[ToolCall] capture_photo result: %@", String(describing: result))
+          let response = self.buildToolResponse(callId: callId, name: callName, result: result)
+          sendResponse(response)
+        }
+      } else {
+        let response = buildToolResponse(
+          callId: callId,
+          name: callName,
+          result: .failure("capture_photo handler not configured")
+        )
+        sendResponse(response)
+      }
+      return
+    }
+
     // Circuit breaker: stop sending tool calls after repeated failures
     if consecutiveFailures >= maxConsecutiveFailures {
       NSLog("[ToolCall] Circuit breaker open (%d consecutive failures), rejecting %@",
@@ -38,7 +69,14 @@ class ToolCallRouter {
 
     let task = Task { @MainActor in
       let taskDesc = call.args["task"] as? String ?? String(describing: call.args)
-      let result = await bridge.delegateTask(task: taskDesc, toolName: callName)
+      // Attach image only when Gemini explicitly sets include_image=true
+      let includeImage = call.args["include_image"] as? Bool ?? false
+      let image: UIImage? = includeImage ? latestFrame : nil
+      // Auto-save to gallery when image is attached
+      if let image {
+        onAutoSaveFrame?(image, String(taskDesc.prefix(100)))
+      }
+      let result = await bridge.delegateTask(task: taskDesc, toolName: callName, image: image)
 
       guard !Task.isCancelled else {
         NSLog("[ToolCall] Task %@ was cancelled, skipping response", callId)
@@ -99,7 +137,7 @@ class ToolCallRouter {
           [
             "id": callId,
             "name": name,
-            "response": result.responseValue
+            "response": result.responseValue.merging(["scheduling": "INTERRUPT"]) { _, new in new }
           ]
         ]
       ]

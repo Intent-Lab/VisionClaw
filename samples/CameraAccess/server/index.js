@@ -34,8 +34,91 @@ function getTurnCredentials() {
   };
 }
 
+// --- Session Logger ---
+// Stores logs as JSONL files in ~/.openclaw/visionclaw-logs/ so OpenClaw
+// can discover and analyze them via its file tools (read, exec, etc.).
+// This makes logs "agent-extractable" — just ask OpenClaw to read them.
+const os = require("os");
+const LOGS_DIR = path.join(os.homedir(), ".openclaw", "visionclaw-logs");
+if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
+console.log(`[Logger] Writing logs to ${LOGS_DIR}`);
+
+function getLogFilePath() {
+  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  return path.join(LOGS_DIR, `visionclaw-${date}.jsonl`);
+}
+
+function appendLog(entry) {
+  const line = JSON.stringify(entry) + "\n";
+  fs.appendFile(getLogFilePath(), line, (err) => {
+    if (err) console.error("[Logger] Write error:", err.message);
+  });
+}
+
 // HTTP server for serving the web viewer
 const httpServer = http.createServer((req, res) => {
+  // --- Logging API ---
+  if (req.url === "/api/logs" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      try {
+        const payload = JSON.parse(body);
+        const entry = {
+          ts: new Date().toISOString(),
+          type: payload.type || "event",
+          session: payload.session || "unknown",
+          data: payload.data || payload,
+        };
+        appendLog(entry);
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid JSON" }));
+      }
+    });
+    return;
+  }
+
+  if (req.url?.startsWith("/api/logs") && req.method === "GET") {
+    // Return recent logs from today's file
+    const logFile = getLogFilePath();
+    if (!fs.existsSync(logFile)) {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify({ logs: [], count: 0 }));
+      return;
+    }
+    const lines = fs.readFileSync(logFile, "utf-8").trim().split("\n").filter(Boolean);
+    const count = parseInt(new URL(req.url, "http://localhost").searchParams.get("count") || "50");
+    const logs = lines.slice(-count).reverse().map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+    res.writeHead(200, {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(JSON.stringify({ logs, count: logs.length }));
+    return;
+  }
+
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, x-api-token",
+    });
+    res.end();
+    return;
+  }
+
   // TURN credentials API endpoint
   if (req.url === "/api/turn") {
     const creds = getTurnCredentials();

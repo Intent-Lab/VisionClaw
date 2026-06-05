@@ -85,8 +85,23 @@ enum ToolCallStatus: Equatable {
 enum ToolDeclarations {
 
   static func allDeclarations() -> [[String: Any]] {
-    return [execute]
+    return [execute, capturePhoto]
   }
+
+  static let capturePhoto: [String: Any] = [
+    "name": "capture_photo",
+    "description": "Capture and save the current camera frame as a photo. Use when the user asks to take a photo, capture what they see, save a picture, or snap a photo.",
+    "parameters": [
+      "type": "object",
+      "properties": [
+        "description": [
+          "type": "string",
+          "description": "Brief description of what is in the photo"
+        ]
+      ],
+      "required": [] as [String]
+    ] as [String: Any]
+  ]
 
   static let execute: [String: Any] = [
     "name": "execute",
@@ -97,10 +112,14 @@ enum ToolDeclarations {
         "task": [
           "type": "string",
           "description": "Clear, detailed description of what to do. Include all relevant context: names, content, platforms, quantities, etc."
+        ],
+        "include_image": [
+          "type": "boolean",
+          "description": "Set to true ONLY when the task requires the agent to see the current camera image (e.g. editing a photo, identifying a product by appearance, reading text from a sign). Do NOT set for tasks that can be described in text alone."
         ]
       ],
       "required": ["task"]
     ] as [String: Any],
-    "behavior": "BLOCKING"
+    "behavior": "NON_BLOCKING"
   ]
 }

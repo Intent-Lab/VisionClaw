@@ -72,7 +72,7 @@ sealed class ToolResult {
 
 sealed class ToolCallStatus {
     data object Idle : ToolCallStatus()
-    data class Executing(val name: String) : ToolCallStatus()
+    data class Executing(val name: String, val progressText: String? = null) : ToolCallStatus()
     data class Completed(val name: String) : ToolCallStatus()
     data class Failed(val name: String, val error: String) : ToolCallStatus()
     data class Cancelled(val name: String) : ToolCallStatus()
@@ -80,7 +80,7 @@ sealed class ToolCallStatus {
     val displayText: String
         get() = when (this) {
             is Idle -> ""
-            is Executing -> "Running: $name..."
+            is Executing -> progressText ?: "OpenClaw is working"
             is Completed -> "Done: $name"
             is Failed -> "Failed: $name - $error"
             is Cancelled -> "Cancelled: $name"
@@ -103,12 +103,33 @@ sealed class OpenClawConnectionState {
 
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray {
-        return JSONArray().put(executeJSON())
+        return JSONArray().apply {
+            put(executeJSON())
+            put(capturePhotoJSON())
+        }
+    }
+
+    private fun capturePhotoJSON(): JSONObject {
+        return JSONObject().apply {
+            put("name", "capture_photo")
+            put("description", "Capture and save the current camera frame as a photo. Use when the user asks to take a photo, capture what they see, save a picture, or snap a photo.")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("description", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Brief description of what is in the photo")
+                    })
+                })
+                put("required", JSONArray())
+            })
+        }
     }
 
     private fun executeJSON(): JSONObject {
         return JSONObject().apply {
             put("name", "execute")
+            put("behavior", "NON_BLOCKING")
             put("description", "Your only way to take action. You have no memory, storage, or ability to do anything on your own -- use this tool for everything: sending messages, searching the web, adding to lists, setting reminders, creating notes, research, drafts, scheduling, smart home control, app interactions, or any request that goes beyond answering a question. When in doubt, use this tool.")
             put("parameters", JSONObject().apply {
                 put("type", "object")
@@ -117,10 +138,13 @@ object ToolDeclarations {
                         put("type", "string")
                         put("description", "Clear, detailed description of what to do. Include all relevant context: names, content, platforms, quantities, etc.")
                     })
+                    put("include_image", JSONObject().apply {
+                        put("type", "boolean")
+                        put("description", "Set to true ONLY when the task requires the agent to see the current camera image (e.g. editing a photo, identifying a product by appearance, reading text from a sign). Do NOT set for tasks that can be described in text alone.")
+                    })
                 })
                 put("required", JSONArray().put("task"))
             })
-            put("behavior", "BLOCKING")
         }
     }
 }

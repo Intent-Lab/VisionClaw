@@ -82,7 +82,6 @@ class MainActivity : ComponentActivity() {
     setContent {
       CameraAccessScaffold(
           viewModel = viewModel,
-          onRequestWearablesPermission = ::requestWearablesPermission,
       )
     }
   }

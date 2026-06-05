@@ -10,7 +10,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -23,11 +24,10 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun ControlsRow(
     onStopStream: () -> Unit,
-    onCapturePhoto: () -> Unit,
     onToggleAI: () -> Unit,
     isAIActive: Boolean,
-    onToggleLive: () -> Unit,
-    isLiveActive: Boolean,
+    onToggleMic: () -> Unit,
+    isMicEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -43,10 +43,6 @@ fun ControlsRow(
             onClick = onStopStream,
             isDestructive = true,
             modifier = Modifier.weight(1f),
-        )
-
-        CaptureButton(
-            onClick = onCapturePhoto,
         )
 
         // AI toggle button
@@ -66,21 +62,26 @@ fun ControlsRow(
             )
         }
 
-        // Live toggle button
+        // Mic toggle button (only meaningful when AI is active)
         Button(
-            onClick = onToggleLive,
+            onClick = onToggleMic,
+            enabled = isAIActive,
             modifier = Modifier.aspectRatio(1f),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (isLiveActive) AppColor.Red else AppColor.DeepBlue,
+                containerColor = if (!isAIActive) AppColor.DeepBlue
+                else if (isMicEnabled) AppColor.DeepBlue
+                else AppColor.Red,
+                disabledContainerColor = AppColor.DeepBlue,
             ),
             shape = CircleShape,
             contentPadding = PaddingValues(0.dp),
         ) {
             Icon(
-                imageVector = Icons.Default.Videocam,
-                contentDescription = if (isLiveActive) "Stop Live" else "Start Live",
+                imageVector = if (isMicEnabled) Icons.Default.Mic else Icons.Default.MicOff,
+                contentDescription = if (isMicEnabled) "Mute Mic" else "Unmute Mic",
                 tint = Color.White,
             )
         }
+
     }
 }

@@ -16,7 +16,7 @@ object GeminiConfig {
     const val VIDEO_JPEG_QUALITY = 50
 
     val systemInstruction: String
-        get() = SettingsManager.geminiSystemPrompt
+        get() = SettingsManager.geminiSystemPrompt.trimEnd() + TOOL_RESULT_ADDENDUM
 
     val apiKey: String
         get() = SettingsManager.geminiAPIKey
@@ -45,4 +45,17 @@ object GeminiConfig {
         get() = openClawGatewayToken != "YOUR_OPENCLAW_GATEWAY_TOKEN"
                 && openClawGatewayToken.isNotEmpty()
                 && openClawHost != "http://YOUR_MAC_HOSTNAME.local"
+
+    private const val TOOL_RESULT_ADDENDUM = """
+
+--------------------------------
+TOOL RESULT HANDLING
+--------------------------------
+
+When execute returns a result, immediately answer the user using that result.
+Do not end the turn with only a brief acknowledgment after execute has returned.
+If you did not manage to say the acknowledgment before calling execute, do not say it after the result arrives; use the result instead.
+Keep the final answer concise and in the user's conversation language.
+If the user's utterance contains Japanese, use Japanese for both the pre-tool acknowledgment and the final answer.
+"""
 }

@@ -22,6 +22,14 @@ struct StreamView: View {
   @ObservedObject var wearablesVM: WearablesViewModel
   @ObservedObject var geminiVM: GeminiSessionViewModel
   @ObservedObject var webrtcVM: WebRTCSessionViewModel
+  @State private var selectedTab: StreamTab = .camera
+  @State private var showGallery = false
+  @State private var showCaptureToast = false
+
+  enum StreamTab: String, CaseIterable {
+    case camera = "Camera"
+    case chat = "Chat"
+  }
 
   var body: some View {
     ZStack {
@@ -29,64 +37,49 @@ struct StreamView: View {
       Color.black
         .edgesIgnoringSafeArea(.all)
 
-      // Video backdrop: PiP when WebRTC connected, otherwise single local feed
-      if webrtcVM.isActive && webrtcVM.connectionState == .connected {
-        PiPVideoView(
-          localFrame: viewModel.currentVideoFrame,
-          remoteVideoTrack: webrtcVM.remoteVideoTrack,
-          hasRemoteVideo: webrtcVM.hasRemoteVideo
-        )
-      } else if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
-        GeometryReader { geometry in
-          Image(uiImage: videoFrame)
-            .resizable()
-            .aspectRatio(contentMode: .fill)
-            .frame(width: geometry.size.width, height: geometry.size.height)
-            .clipped()
-        }
-        .edgesIgnoringSafeArea(.all)
-      } else {
-        ProgressView()
-          .scaleEffect(1.5)
-          .foregroundColor(.white)
+      TabView(selection: $selectedTab) {
+        // --- Camera tab ---
+        cameraContent
+          .tag(StreamTab.camera)
+
+        // --- Chat tab ---
+        ChatTranscriptView(geminiVM: geminiVM)
+          .padding(.top, 60)
+          .padding(.bottom, 80)
+          .tag(StreamTab.chat)
       }
+      .tabViewStyle(.page(indexDisplayMode: .never))
 
-      // Gemini status overlay (top) + speaking indicator
-      if geminiVM.isGeminiActive {
-        VStack {
-          GeminiStatusBar(geminiVM: geminiVM)
+      // Top bar
+      VStack {
+        HStack {
+          if geminiVM.isGeminiActive {
+            GeminiStatusBar(geminiVM: geminiVM)
+          }
           Spacer()
-
-          VStack(spacing: 8) {
-            if !geminiVM.userTranscript.isEmpty || !geminiVM.aiTranscript.isEmpty {
-              TranscriptView(
-                userText: geminiVM.userTranscript,
-                aiText: geminiVM.aiTranscript
-              )
-            }
-
-            ToolCallStatusView(status: geminiVM.toolCallStatus)
-
-            if geminiVM.isModelSpeaking {
-              HStack(spacing: 8) {
-                Image(systemName: "speaker.wave.2.fill")
-                  .foregroundColor(.white)
-                  .font(.system(size: 14))
-                SpeakingIndicator()
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 8)
+          Button(action: { showGallery = true }) {
+            Image(systemName: "photo.on.rectangle")
+              .font(.system(size: 16, weight: .medium))
+              .foregroundColor(.white)
+              .padding(8)
               .background(Color.black.opacity(0.5))
-              .cornerRadius(20)
+              .clipShape(Circle())
+          }
+          Picker("", selection: $selectedTab) {
+            ForEach(StreamTab.allCases, id: \.self) { tab in
+              Text(tab.rawValue).tag(tab)
             }
           }
-          .padding(.bottom, 80)
+          .pickerStyle(.segmented)
+          .frame(width: 140)
         }
-        .padding(.all, 24)
+        Spacer()
       }
+      .padding(.horizontal, 24)
+      .padding(.top, 24)
 
       // WebRTC status overlay (top)
-      if webrtcVM.isActive {
+      if webrtcVM.isActive && selectedTab == .camera {
         VStack {
           WebRTCStatusBar(webrtcVM: webrtcVM)
           Spacer()
@@ -101,6 +94,12 @@ struct StreamView: View {
       }
       .padding(.all, 24)
     }
+    // Auto-switch to chat tab when Gemini starts if no video
+    .onChange(of: geminiVM.isGeminiActive) { _, active in
+      if active && !SettingsManager.shared.videoStreamingEnabled {
+        selectedTab = .chat
+      }
+    }
     .onDisappear {
       Task {
         if viewModel.streamingStatus != .stopped {
@@ -112,6 +111,34 @@ struct StreamView: View {
         if webrtcVM.isActive {
           webrtcVM.stopSession()
         }
+      }
+    }
+    // Gallery sheet
+    .sheet(isPresented: $showGallery) {
+      NavigationStack {
+        GalleryView()
+      }
+    }
+    // Capture toast
+    .overlay(alignment: .top) {
+      if showCaptureToast {
+        Text("Photo captured")
+          .font(.subheadline.weight(.medium))
+          .foregroundColor(.white)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 8)
+          .background(Color.black.opacity(0.7))
+          .cornerRadius(20)
+          .padding(.top, 80)
+          .transition(.move(edge: .top).combined(with: .opacity))
+      }
+    }
+    .onChange(of: geminiVM.lastCapturedPhoto?.id) { _, newId in
+      guard newId != nil else { return }
+      withAnimation { showCaptureToast = true }
+      Task {
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        withAnimation { showCaptureToast = false }
       }
     }
     // Show captured photos from DAT SDK in a preview sheet
@@ -142,6 +169,61 @@ struct StreamView: View {
       Button("OK") { webrtcVM.errorMessage = nil }
     } message: {
       Text(webrtcVM.errorMessage ?? "")
+    }
+  }
+
+  @ViewBuilder
+  private var cameraContent: some View {
+    // Video backdrop: PiP when WebRTC connected, otherwise single local feed
+    if webrtcVM.isActive && webrtcVM.connectionState == .connected {
+      PiPVideoView(
+        localFrame: viewModel.currentVideoFrame,
+        remoteVideoTrack: webrtcVM.remoteVideoTrack,
+        hasRemoteVideo: webrtcVM.hasRemoteVideo
+      )
+    } else if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
+      GeometryReader { geometry in
+        Image(uiImage: videoFrame)
+          .resizable()
+          .aspectRatio(contentMode: .fill)
+          .frame(width: geometry.size.width, height: geometry.size.height)
+          .clipped()
+      }
+      .edgesIgnoringSafeArea(.all)
+    } else {
+      ProgressView()
+        .scaleEffect(1.5)
+        .foregroundColor(.white)
+    }
+
+    // Gemini speaking/transcript overlay on camera
+    if geminiVM.isGeminiActive {
+      VStack {
+        Spacer()
+        VStack(spacing: 8) {
+          if !geminiVM.userTranscript.isEmpty || !geminiVM.aiTranscript.isEmpty {
+            TranscriptView(
+              userText: geminiVM.userTranscript,
+              aiText: geminiVM.aiTranscript
+            )
+          }
+          ToolCallStatusView(status: geminiVM.toolCallStatus)
+          if geminiVM.isModelSpeaking {
+            HStack(spacing: 8) {
+              Image(systemName: "speaker.wave.2.fill")
+                .foregroundColor(.white)
+                .font(.system(size: 14))
+              SpeakingIndicator()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.black.opacity(0.5))
+            .cornerRadius(20)
+          }
+        }
+        .padding(.bottom, 80)
+      }
+      .padding(.horizontal, 24)
     }
   }
 }
@@ -208,3 +290,4 @@ struct ControlsView: View {
     }
   }
 }
+

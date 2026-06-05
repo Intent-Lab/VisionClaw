@@ -35,8 +35,10 @@ import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.PhoneCameraManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -73,38 +75,138 @@ class StreamViewModel(
   var webrtcViewModel: WebRTCSessionViewModel? = null
   private var phoneCameraManager: PhoneCameraManager? = null
 
+  fun setStreamingMode(mode: StreamingMode) {
+    _uiState.update { it.copy(streamingMode = mode) }
+  }
+
+  fun setVideoStreamingEnabled(enabled: Boolean, lifecycleOwner: LifecycleOwner? = null) {
+    SettingsManager.videoStreamingEnabled = enabled
+
+    if (enabled) {
+      when (_uiState.value.streamingMode) {
+        StreamingMode.PHONE -> lifecycleOwner?.let { startPhoneCamera(it) }
+        StreamingMode.GLASSES -> startStream()
+      }
+    } else {
+      stopActiveVideoSource(preserveMode = true)
+      clearVideoCache()
+    }
+  }
+
+  fun clearVideoCache() {
+    geminiViewModel?.clearCachedVideoFrame()
+    _uiState.update { it.copy(videoFrame = null) }
+  }
+
+  private fun stopActiveVideoSource(preserveMode: Boolean) {
+    Log.d(TAG, "Stopping active video source preserveMode=$preserveMode")
+
+    StreamingService.stop(getApplication())
+
+    videoJob?.cancel()
+    videoJob = null
+    stateJob?.cancel()
+    stateJob = null
+    streamSession?.close()
+    streamSession = null
+    phoneCameraManager?.stop()
+    phoneCameraManager = null
+
+    val mode = if (preserveMode) _uiState.value.streamingMode else StreamingMode.GLASSES
+    _uiState.update {
+      it.copy(
+        streamSessionState = StreamSessionState.STOPPED,
+        videoFrame = null,
+        capturedPhoto = null,
+        isShareDialogVisible = false,
+        isCapturing = false,
+        streamingMode = mode,
+      )
+    }
+  }
+
   fun startStream() {
+    if (!SettingsManager.videoStreamingEnabled) {
+      setStreamingMode(StreamingMode.GLASSES)
+      stopActiveVideoSource(preserveMode = true)
+      clearVideoCache()
+      return
+    }
+
+    if (streamSession != null) {
+      Log.d(TAG, "Ignoring startStream because a stream session already exists")
+      return
+    }
+
     videoJob?.cancel()
     stateJob?.cancel()
 
-    // Start foreground service to keep streaming alive in background / screen locked
     StreamingService.start(getApplication())
 
     val streamSession =
+      try {
         Wearables.startStreamSession(
-                getApplication(),
-                deviceSelector,
-                StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
-            )
-            .also { streamSession = it }
-    _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
-    videoJob = viewModelScope.launch { streamSession.videoStream.collect { handleVideoFrame(it) } }
-    stateJob =
-        viewModelScope.launch {
-          streamSession.state.collect { currentState ->
-            val prevState = _uiState.value.streamSessionState
-            _uiState.update { it.copy(streamSessionState = currentState) }
+          getApplication(),
+          deviceSelector,
+          StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
+        ).also { streamSession = it }
+      } catch (t: Throwable) {
+        Log.e(TAG, "Failed to start stream session", t)
+        StreamingService.stop(getApplication())
+        _uiState.update { it.copy(streamSessionState = StreamSessionState.STOPPED) }
+        return
+      }
 
-            // navigate back when state transitioned to STOPPED
-            if (currentState != prevState && currentState == StreamSessionState.STOPPED) {
-              stopStream()
-              wearablesViewModel.navigateToDeviceSelection()
-            }
+
+    _uiState.update {
+      it.copy(
+        streamingMode = StreamingMode.GLASSES,
+        streamSessionState = StreamSessionState.STARTING,
+      )
+    }
+
+    videoJob =
+      viewModelScope.launch {
+        streamSession.videoStream.collect { frame -> handleVideoFrame(frame) }
+      }
+
+    stateJob =
+      viewModelScope.launch {
+        Log.d(TAG, "Stream state collector launched")
+        var sawStartedState = false
+        streamSession.state.collect { currentState ->
+          Log.d(TAG, "Stream state = $currentState")
+          val prevState = _uiState.value.streamSessionState
+          _uiState.update { it.copy(streamSessionState = currentState) }
+
+          if (
+            currentState == StreamSessionState.STARTING ||
+                currentState == StreamSessionState.STREAMING
+          ) {
+            sawStartedState = true
+          }
+
+          if (
+            sawStartedState &&
+                currentState != prevState &&
+                currentState == StreamSessionState.STOPPED
+          ) {
+            Log.d(TAG, "Stream state became STOPPED; stopping stream")
+            stopStream()
+            wearablesViewModel.navigateToDeviceSelection()
           }
         }
+      }
   }
 
   fun startPhoneCamera(lifecycleOwner: LifecycleOwner) {
+    if (!SettingsManager.videoStreamingEnabled) {
+      setStreamingMode(StreamingMode.PHONE)
+      stopActiveVideoSource(preserveMode = true)
+      clearVideoCache()
+      return
+    }
+
     val manager = PhoneCameraManager(getApplication())
     phoneCameraManager = manager
 
@@ -127,18 +229,8 @@ class StreamViewModel(
   }
 
   fun stopStream() {
-    // Stop foreground service
-    StreamingService.stop(getApplication())
-
-    videoJob?.cancel()
-    videoJob = null
-    stateJob?.cancel()
-    stateJob = null
-    streamSession?.close()
-    streamSession = null
-    phoneCameraManager?.stop()
-    phoneCameraManager = null
-    _uiState.update { INITIAL_STATE }
+    Log.d(TAG, "Stopping stream")
+    stopActiveVideoSource(preserveMode = false)
   }
 
   fun capturePhoto() {

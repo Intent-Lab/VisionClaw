@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.net.wifi.WifiManager
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -26,124 +27,172 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
  */
 class StreamingService : Service() {
 
-  companion object {
-    private const val TAG = "StreamingService"
-    private const val CHANNEL_ID = "streaming_channel"
-    private const val CHANNEL_NAME = "Camera Streaming"
-    private const val NOTIFICATION_ID = 1001
-    private const val WAKELOCK_TAG = "VisionClaw::StreamingWakeLock"
+    companion object {
+        private const val TAG = "StreamingService"
+        private const val CHANNEL_ID = "streaming_channel"
+        private const val CHANNEL_NAME = "Camera Streaming"
+        private const val NOTIFICATION_ID = 1001
+        private const val WAKELOCK_TAG = "VisionClaw::StreamingWakeLock"
+        private const val ACTION_START = "com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.START"
+        private const val ACTION_STOP = "com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.STOP"
 
-    fun start(context: Context) {
-      val intent =
-          Intent(context, StreamingService::class.java).apply { `package` = context.packageName }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        context.startForegroundService(intent)
-      } else {
-        context.startService(intent)
-      }
+        fun start(context: Context) {
+            val intent =
+                Intent(context, StreamingService::class.java).apply {
+                    `package` = context.packageName
+                    action = ACTION_START
+                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }
+
+        fun stop(context: Context) {
+            val intent =
+                Intent(context, StreamingService::class.java).apply {
+                    `package` = context.packageName
+                    action = ACTION_STOP
+                }
+            try {
+                context.startService(intent)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Unable to send stop command; stopping service directly", e)
+                context.stopService(intent)
+            }
+        }
     }
 
-    fun stop(context: Context) {
-      val intent =
-          Intent(context, StreamingService::class.java).apply { `package` = context.packageName }
-      context.stopService(intent)
-    }
-  }
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
-  private var wakeLock: PowerManager.WakeLock? = null
+    override fun onBind(intent: Intent?): IBinder? = null
 
-  override fun onBind(intent: Intent?): IBinder? = null
-
-  override fun onCreate() {
-    super.onCreate()
-    Log.d(TAG, "Service created")
-    createNotificationChannel()
-  }
-
-  override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    Log.d(TAG, "Service started")
-
-    val notification = createNotification()
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      startForeground(
-          NOTIFICATION_ID,
-          notification,
-          ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-      )
-    } else {
-      startForeground(NOTIFICATION_ID, notification)
+    override fun onCreate() {
+        super.onCreate()
+        Log.d(TAG, "Service created")
+        createNotificationChannel()
     }
 
-    acquireWakeLock()
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "Service command: ${intent?.action ?: ACTION_START}")
 
-    return START_STICKY
-  }
+        if (intent?.action == ACTION_STOP) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
 
-  override fun onDestroy() {
-    Log.d(TAG, "Service destroyed")
-    releaseWakeLock()
-    super.onDestroy()
-  }
+        startInForeground()
+        acquireWakeLock()
+        acquireWifiLock()
 
-  private fun createNotificationChannel() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      val channel =
-          NotificationChannel(
-                  CHANNEL_ID,
-                  CHANNEL_NAME,
-                  NotificationManager.IMPORTANCE_LOW,
-              )
-              .apply {
-                description = "Notifications for active camera streaming"
-                setShowBadge(false)
-              }
-
-      val notificationManager = getSystemService(NotificationManager::class.java)
-      notificationManager.createNotificationChannel(channel)
+        return START_NOT_STICKY
     }
-  }
 
-  private fun createNotification(): Notification {
-    val pendingIntent =
-        PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java).apply {
-              flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            },
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-
-    return NotificationCompat.Builder(this, CHANNEL_ID)
-        .setContentTitle("Camera Streaming")
-        .setContentText("Streaming from your glasses...")
-        .setSmallIcon(R.drawable.ic_launcher_foreground)
-        .setOngoing(true)
-        .setContentIntent(pendingIntent)
-        .setPriority(NotificationCompat.PRIORITY_LOW)
-        .setCategory(NotificationCompat.CATEGORY_SERVICE)
-        .build()
-  }
-
-  private fun acquireWakeLock() {
-    if (wakeLock == null) {
-      val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-      wakeLock =
-          powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
-            acquire(10 * 60 * 1000L) // 10 minutes max
-          }
-      Log.d(TAG, "WakeLock acquired")
+    override fun onDestroy() {
+        Log.d(TAG, "Service destroyed")
+        releaseWakeLock()
+        releaseWifiLock()
+        super.onDestroy()
     }
-  }
 
-  private fun releaseWakeLock() {
-    wakeLock?.let {
-      if (it.isHeld) {
-        it.release()
-        Log.d(TAG, "WakeLock released")
-      }
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel =
+                NotificationChannel(
+                    CHANNEL_ID,
+                    CHANNEL_NAME,
+                    NotificationManager.IMPORTANCE_LOW,
+                )
+                    .apply {
+                        description = "Notifications for active camera streaming"
+                        setShowBadge(false)
+                    }
+
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.createNotificationChannel(channel)
+        }
     }
-    wakeLock = null
-  }
+
+    private fun startInForeground() {
+        val notification = createNotification()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val pendingIntent =
+            PendingIntent.getActivity(
+                this,
+                0,
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Camera Streaming")
+            .setContentText("Streaming from your glasses...")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setOngoing(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .build()
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock == null) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock =
+                powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+                    acquire() // No timeout — held for entire streaming session
+                }
+            Log.d(TAG, "WakeLock acquired (indefinite)")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+                Log.d(TAG, "WakeLock released")
+            }
+        }
+        wakeLock = null
+    }
+
+    private fun acquireWifiLock() {
+        if (wifiLock == null) {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            wifiLock = wifiManager.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "VisionClaw::GeminiWiFiLock"
+            ).apply {
+                acquire()
+            }
+            Log.d(TAG, "WiFiLock acquired")
+        }
+    }
+
+    private fun releaseWifiLock() {
+        wifiLock?.let {
+            if (it.isHeld) {
+                it.release()
+                Log.d(TAG, "WiFiLock released")
+            }
+        }
+        wifiLock = null
+    }
 }

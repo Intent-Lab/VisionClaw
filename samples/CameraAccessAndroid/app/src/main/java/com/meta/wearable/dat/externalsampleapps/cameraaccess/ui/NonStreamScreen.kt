@@ -56,8 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.meta.wearable.dat.core.types.Permission
-import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
@@ -67,7 +65,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun NonStreamScreen(
     viewModel: WearablesViewModel,
-    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
     modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -183,7 +180,7 @@ fun NonStreamScreen(
         // Start Streaming Button (glasses)
         SwitchButton(
             label = stringResource(R.string.stream_button_title),
-            onClick = { viewModel.navigateToStreaming(onRequestWearablesPermission) },
+            onClick = { viewModel.navigateToStreaming() },
             enabled = uiState.hasActiveDevice,
         )
 

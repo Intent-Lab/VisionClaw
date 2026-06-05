@@ -9,6 +9,7 @@ class GeminiSessionViewModel: ObservableObject {
   @Published var errorMessage: String?
   @Published var userTranscript: String = ""
   @Published var aiTranscript: String = ""
+  @Published var messages: [ChatMessage] = ChatHistoryStore.load()
   @Published var toolCallStatus: ToolCallStatus = .idle
   @Published var openClawConnectionState: OpenClawConnectionState = .notConfigured
   private let geminiService = GeminiLiveService()
@@ -17,7 +18,16 @@ class GeminiSessionViewModel: ObservableObject {
   private let audioManager = AudioManager()
   private let eventClient = OpenClawEventClient()
   private var lastVideoFrameTime: Date = .distantPast
+  private var latestVideoFrame: UIImage?
+  private let photoCaptureStore = PhotoCaptureStore.shared
+  @Published var lastCapturedPhoto: CapturedPhoto?
   private var stateObservation: Task<Void, Never>?
+
+  // Chat message tracking
+  private var activeUserBubbleId: String?
+  private var activeAIBubbleId: String?
+  private var lastUserText: String = ""
+  private var lastAIText: String = ""
 
   var streamingMode: StreamingMode = .glasses
 
@@ -30,6 +40,12 @@ class GeminiSessionViewModel: ObservableObject {
     }
 
     isGeminiActive = true
+    RemoteLogger.shared.log("session:start")
+
+    // Insert session divider if there are previous messages
+    if !messages.isEmpty {
+      messages.append(ChatMessage(role: .sessionDivider, text: ""))
+    }
 
     // Wire audio callbacks
     audioManager.onAudioCaptured = { [weak self] data in
@@ -54,8 +70,16 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.onTurnComplete = { [weak self] in
       guard let self else { return }
       Task { @MainActor in
-        // Clear user transcript when AI finishes responding
+        // Log finalized transcripts before clearing
+        if !self.lastUserText.isEmpty {
+          RemoteLogger.shared.log("voice:user", data: ["text": self.lastUserText])
+        }
+        if !self.lastAIText.isEmpty {
+          RemoteLogger.shared.log("voice:ai", data: ["text": self.lastAIText])
+        }
+        self.finalizeCurrentBubbles()
         self.userTranscript = ""
+        ChatHistoryStore.save(self.messages)
       }
     }
 
@@ -64,6 +88,7 @@ class GeminiSessionViewModel: ObservableObject {
       Task { @MainActor in
         self.userTranscript += text
         self.aiTranscript = ""
+        self.updateUserBubble(self.userTranscript)
       }
     }
 
@@ -71,6 +96,7 @@ class GeminiSessionViewModel: ObservableObject {
       guard let self else { return }
       Task { @MainActor in
         self.aiTranscript += text
+        self.updateAIBubble(self.aiTranscript)
       }
     }
 
@@ -87,16 +113,66 @@ class GeminiSessionViewModel: ObservableObject {
     // Check OpenClaw connectivity and start fresh session
     await openClawBridge.checkConnection()
     openClawBridge.resetSession()
+    openClawBridge.eventClient = eventClient
 
     // Wire tool call handling
     toolCallRouter = ToolCallRouter(bridge: openClawBridge)
+
+    // Local capture_photo handler
+    toolCallRouter?.onCapturePhoto = { [weak self] description, completion in
+      guard let self else { completion(.failure("Session ended")); return }
+      guard let frame = self.latestVideoFrame else {
+        completion(.failure("No camera frame available to capture"))
+        return
+      }
+      if let photo = self.photoCaptureStore.saveFrame(frame, description: description) {
+        self.lastCapturedPhoto = photo
+        // Also upload to Mac so agent can access the file
+        if let jpegData = frame.jpegData(compressionQuality: 0.9) {
+          let base64 = jpegData.base64EncodedString()
+          if let macPath = self.openClawBridge.uploadImageFile(base64) {
+            completion(.success("Photo captured and saved: \(photo.filename)\nAlso saved on Mac at: \(macPath)"))
+          } else {
+            completion(.success("Photo captured and saved: \(photo.filename)"))
+          }
+        } else {
+          completion(.success("Photo captured and saved: \(photo.filename)"))
+        }
+      } else {
+        completion(.failure("Failed to save photo"))
+      }
+    }
+
+    // Auto-save to gallery when image is attached to execute call
+    toolCallRouter?.onAutoSaveFrame = { [weak self] image, description in
+      guard let self else { return }
+      if let photo = self.photoCaptureStore.saveFrame(image, description: description) {
+        self.lastCapturedPhoto = photo
+      }
+    }
 
     geminiService.onToolCall = { [weak self] toolCall in
       guard let self else { return }
       Task { @MainActor in
         for call in toolCall.functionCalls {
+          self.finalizeCurrentBubbles()
+          let msg = ChatMessage(role: .toolCall(call.name), text: "Executing...", status: .streaming)
+          self.messages.append(msg)
+          let toolMsgId = msg.id
+
+          let taskDesc = (call.args["task"] as? String) ?? ""
+          RemoteLogger.shared.log("voice:tool_call", data: ["tool": call.name, "task": taskDesc])
+
           self.toolCallRouter?.handleToolCall(call) { [weak self] response in
-            self?.geminiService.sendToolResponse(response)
+            guard let self else { return }
+            if let idx = self.messages.firstIndex(where: { $0.id == toolMsgId }) {
+              self.messages[idx].text = "Done"
+              self.messages[idx].status = .complete
+            }
+            RemoteLogger.shared.log("voice:tool_result", data: ["tool": call.name, "result": String(response.prefix(500))])
+            // Reset active bubbles so post-tool AI text goes into a new bubble
+            self.finalizeCurrentBubbles()
+            self.geminiService.sendToolResponse(response)
           }
         }
       }
@@ -163,7 +239,7 @@ class GeminiSessionViewModel: ObservableObject {
       return
     }
 
-    // Connect to OpenClaw event stream for proactive notifications
+    // Always connect event client — needed for image sending via chat.send
     if SettingsManager.shared.proactiveNotificationsEnabled {
       eventClient.onNotification = { [weak self] text in
         guard let self else { return }
@@ -172,11 +248,14 @@ class GeminiSessionViewModel: ObservableObject {
           self.geminiService.sendTextMessage(text)
         }
       }
-      eventClient.connect()
+    } else {
+      eventClient.onNotification = nil
     }
+    eventClient.connect()
   }
 
   func stopSession() {
+    RemoteLogger.shared.log("session:end")
     eventClient.disconnect()
     toolCallRouter?.cancelAll()
     toolCallRouter = nil
@@ -190,9 +269,13 @@ class GeminiSessionViewModel: ObservableObject {
     userTranscript = ""
     aiTranscript = ""
     toolCallStatus = .idle
+    ChatHistoryStore.save(messages)
   }
 
   func sendVideoFrameIfThrottled(image: UIImage) {
+    // Always keep latest frame for capture_photo and include_image
+    latestVideoFrame = image
+    toolCallRouter?.latestFrame = image
     guard SettingsManager.shared.videoStreamingEnabled else { return }
     guard isGeminiActive, connectionState == .ready else { return }
     let now = Date()
@@ -201,4 +284,51 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.sendVideoFrame(image: image)
   }
 
+  // MARK: - Chat message helpers
+
+  private func updateUserBubble(_ text: String) {
+    guard !text.isEmpty else { return }
+    if let id = activeUserBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].text = text
+    } else {
+      // Finalize previous AI bubble before starting new user turn
+      if let aiId = activeAIBubbleId, let idx = messages.firstIndex(where: { $0.id == aiId }) {
+        messages[idx].status = .complete
+        activeAIBubbleId = nil
+      }
+      let msg = ChatMessage(role: .user, text: text, status: .streaming)
+      messages.append(msg)
+      activeUserBubbleId = msg.id
+    }
+    lastUserText = text
+  }
+
+  private func updateAIBubble(_ text: String) {
+    guard !text.isEmpty else { return }
+    // Finalize user bubble when AI starts responding
+    if let userId = activeUserBubbleId, let idx = messages.firstIndex(where: { $0.id == userId }) {
+      messages[idx].status = .complete
+    }
+    if let id = activeAIBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].text = text
+    } else {
+      let msg = ChatMessage(role: .assistant, text: text, status: .streaming)
+      messages.append(msg)
+      activeAIBubbleId = msg.id
+    }
+    lastAIText = text
+  }
+
+  private func finalizeCurrentBubbles() {
+    if let id = activeUserBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].status = .complete
+    }
+    if let id = activeAIBubbleId, let idx = messages.firstIndex(where: { $0.id == id }) {
+      messages[idx].status = .complete
+    }
+    activeUserBubbleId = nil
+    activeAIBubbleId = nil
+    lastUserText = ""
+    lastAIText = ""
+  }
 }

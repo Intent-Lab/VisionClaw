@@ -54,19 +54,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.meta.wearable.dat.core.types.Permission
-import com.meta.wearable.dat.core.types.PermissionStatus
+import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraAccessScaffold(
     viewModel: WearablesViewModel,
-    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
     modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val geminiViewModel: GeminiSessionViewModel = composeViewModel()
   val snackbarHostState = remember { SnackbarHostState() }
   val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -84,16 +84,23 @@ fun CameraAccessScaffold(
         uiState.isSettingsVisible ->
             SettingsScreen(
                 onBack = { viewModel.hideSettings() },
+                onDebugMenu = if (BuildConfig.DEBUG) {{ viewModel.showDebugMenu() }} else null,
+                onOpenClawNewSession = if (BuildConfig.DEBUG) {
+                    { geminiViewModel.runOpenClawDeveloperCommand("/new") }
+                } else null,
+                onOpenClawCompactSession = if (BuildConfig.DEBUG) {
+                    { geminiViewModel.runOpenClawDeveloperCommand("/compact") }
+                } else null,
             )
         uiState.isStreaming ->
             StreamScreen(
                 wearablesViewModel = viewModel,
                 isPhoneMode = uiState.isPhoneMode,
+                geminiViewModel = geminiViewModel,
             )
         uiState.isRegistered ->
             NonStreamScreen(
                 viewModel = viewModel,
-                onRequestWearablesPermission = onRequestWearablesPermission,
             )
         else ->
             HomeScreen(
@@ -126,22 +133,13 @@ fun CameraAccessScaffold(
           },
       )
 
-      if (BuildConfig.DEBUG) {
-        FloatingActionButton(
-            onClick = { viewModel.showDebugMenu() },
-            modifier = Modifier.align(Alignment.CenterEnd),
+      if (BuildConfig.DEBUG && uiState.isDebugMenuVisible) {
+        ModalBottomSheet(
+            onDismissRequest = { viewModel.hideDebugMenu() },
+            sheetState = bottomSheetState,
+            modifier = Modifier.fillMaxSize(),
         ) {
-          Icon(Icons.Default.BugReport, contentDescription = "Debug Menu")
-        }
-
-        if (uiState.isDebugMenuVisible) {
-          ModalBottomSheet(
-              onDismissRequest = { viewModel.hideDebugMenu() },
-              sheetState = bottomSheetState,
-              modifier = Modifier.fillMaxSize(),
-          ) {
-            MockDeviceKitScreen(modifier = Modifier.fillMaxSize())
-          }
+          MockDeviceKitScreen(modifier = Modifier.fillMaxSize())
         }
       }
     }
