@@ -55,11 +55,11 @@ class SignalingClient {
   }
 
   func joinRoom(code: String) {
-    sendJSON(["type": "join", "room": code])
+    sendJSON(["type": "join", "room": code, "room_code": code])
   }
 
   func rejoinRoom(code: String) {
-    sendJSON(["type": "rejoin", "room": code])
+    sendJSON(["type": "rejoin", "room": code, "room_code": code])
   }
 
   func send(sdp: RTCSessionDescription) {
@@ -134,7 +134,7 @@ class SignalingClient {
 
     switch type {
     case "room_created":
-      if let room = json["room"] as? String {
+      if let room = roomCode(from: json) {
         onMessageReceived?(.roomCreated(room))
       }
 
@@ -142,14 +142,14 @@ class SignalingClient {
       onMessageReceived?(.roomJoined)
 
     case "room_rejoined":
-      if let room = json["room"] as? String {
+      if let room = roomCode(from: json) {
         onMessageReceived?(.roomRejoined(room))
       }
 
-    case "peer_joined":
+    case "peer_joined", "viewer_joined":
       onMessageReceived?(.peerJoined)
 
-    case "peer_left":
+    case "peer_left", "viewer_left":
       onMessageReceived?(.peerLeft)
 
     case "offer":
@@ -181,6 +181,16 @@ class SignalingClient {
     default:
       NSLog("[Signaling] Unknown message type: %@", type)
     }
+  }
+
+  private func roomCode(from json: [String: Any]) -> String? {
+    if let room = json["room"] as? String, !room.isEmpty {
+      return room
+    }
+    if let roomCode = json["room_code"] as? String, !roomCode.isEmpty {
+      return roomCode
+    }
+    return nil
   }
 }
 

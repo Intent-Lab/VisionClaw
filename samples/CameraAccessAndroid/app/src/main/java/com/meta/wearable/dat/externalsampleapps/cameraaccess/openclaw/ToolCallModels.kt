@@ -103,7 +103,9 @@ sealed class OpenClawConnectionState {
 
 object ToolDeclarations {
     fun allDeclarationsJSON(): JSONArray {
-        return JSONArray().put(executeJSON())
+        return JSONArray()
+            .put(executeJSON())
+            .put(logSopStepJSON())
     }
 
     private fun executeJSON(): JSONObject {
@@ -121,6 +123,44 @@ object ToolDeclarations {
                 put("required", JSONArray().put("task"))
             })
             put("behavior", "BLOCKING")
+        }
+    }
+
+    private fun logSopStepJSON(): JSONObject {
+        return JSONObject().apply {
+            put("name", "log_sop_step")
+            put("description", "Log a standard operating procedure step to the external SOP processor.")
+            put("parameters", JSONObject().apply {
+                put("type", "object")
+                put("properties", JSONObject().apply {
+                    put("step_number", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "Current SOP step number (1-based).")
+                    })
+                    put("step_name", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "The SOP step label that should be logged.")
+                    })
+                    put("action", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Step action state: started, completed, failed, or skipped.")
+                    })
+                    put("total_steps", JSONObject().apply {
+                        put("type", "integer")
+                        put("description", "Total number of SOP steps.")
+                    })
+                    put("frame_data", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Optional current frame image in base64. If omitted, the app uses the latest captured frame.")
+                    })
+                    put("notes", JSONObject().apply {
+                        put("type", "string")
+                        put("description", "Optional operator/model notes for this step.")
+                    })
+                })
+                put("required", JSONArray().put("step_name"))
+            })
+            put("behavior", "NON_BLOCKING")
         }
     }
 }

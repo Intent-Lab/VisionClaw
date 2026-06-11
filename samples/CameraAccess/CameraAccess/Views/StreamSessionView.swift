@@ -19,8 +19,6 @@ struct StreamSessionView: View {
   let wearables: WearablesInterface
   @ObservedObject private var wearablesViewModel: WearablesViewModel
   @StateObject private var viewModel: StreamSessionViewModel
-  @StateObject private var geminiVM = GeminiSessionViewModel()
-  @StateObject private var webrtcVM = WebRTCSessionViewModel()
 
   init(wearables: WearablesInterface, wearablesVM: WearablesViewModel) {
     self.wearables = wearables
@@ -29,23 +27,24 @@ struct StreamSessionView: View {
   }
 
   var body: some View {
-    ZStack {
-      if viewModel.isStreaming {
-        // Full-screen video view with streaming controls
-        StreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
-      } else {
-        // Pre-streaming setup view with permissions and start button
-        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel)
+    NavigationStack {
+      HomeView(viewModel: viewModel, wearablesViewModel: wearablesViewModel)
+        .background(DesignSystem.colors.adminBackground.ignoresSafeArea())
+    }
+    .overlay(alignment: .bottom) {
+      if viewModel.showShipSuccessToast {
+        Text("Execution recorded")
+          .font(DesignSystem.fonts.mono(size: 13, weight: .semibold))
+          .foregroundColor(DesignSystem.colors.white)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 12)
+          .background(DesignSystem.colors.deepGreen)
+          .overlay(Rectangle().stroke(DesignSystem.colors.white, lineWidth: 1))
+          .padding(.bottom, 20)
+          .transition(.move(edge: .bottom).combined(with: .opacity))
       }
     }
-    .task {
-      viewModel.geminiSessionVM = geminiVM
-      viewModel.webrtcSessionVM = webrtcVM
-      geminiVM.streamingMode = viewModel.streamingMode
-    }
-    .onChange(of: viewModel.streamingMode) { newMode in
-      geminiVM.streamingMode = newMode
-    }
+    .animation(.easeInOut(duration: 0.2), value: viewModel.showShipSuccessToast)
     .onAppear {
       UIApplication.shared.isIdleTimerDisabled = true
     }

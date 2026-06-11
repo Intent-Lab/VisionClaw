@@ -26,20 +26,33 @@ struct CustomButton: View {
     var backgroundColor: Color {
       switch self {
       case .primary:
-        return .appPrimary
+        return DesignSystem.colors.vibrantTeal
       case .secondary:
-        return Color(white: 0.25)
+        return DesignSystem.colors.surface
       case .destructive:
-        return .destructiveBackground
+        return DesignSystem.colors.dangerRed
       }
     }
 
     var foregroundColor: Color {
       switch self {
-      case .primary, .secondary:
+      case .primary:
+        return DesignSystem.colors.deepNavy
+      case .secondary:
         return .white
       case .destructive:
-        return .destructiveForeground
+        return .white
+      }
+    }
+
+    var borderColor: Color {
+      switch self {
+      case .primary:
+        return DesignSystem.colors.border
+      case .secondary:
+        return DesignSystem.colors.border
+      case .destructive:
+        return DesignSystem.colors.dangerRed
       }
     }
   }
@@ -52,6 +65,10 @@ struct CustomButton: View {
         .frame(maxWidth: .infinity)
         .frame(height: 56)
         .background(style.backgroundColor)
+        .overlay(
+          RoundedRectangle(cornerRadius: 30)
+            .stroke(style.borderColor, lineWidth: 1)
+        )
         .cornerRadius(30)
     }
     .disabled(isDisabled)

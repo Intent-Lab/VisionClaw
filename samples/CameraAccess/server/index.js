@@ -1,43 +1,88 @@
+const crypto = require("crypto");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 8080;
+const NODE_ENV = process.env.NODE_ENV || "development";
+const IS_PRODUCTION = NODE_ENV === "production";
 const rooms = new Map(); // roomCode -> { creator: ws, viewer: ws, destroyTimer: timeout|null }
 
 // Grace period (ms) before destroying a room when creator disconnects.
 // Allows the iOS user to switch apps (e.g. copy room code, send via WhatsApp) and come back.
 const ROOM_GRACE_PERIOD_MS = 60_000;
 
-// TURN: ExpressTURN (1000 GB/month free, reliable)
-// Ports 3478 (standard), 80, 443 (firewall bypass)
-const EXPRESSTURN_SERVER = process.env.EXPRESSTURN_SERVER || "free.expressturn.com";
-const EXPRESSTURN_USER = process.env.EXPRESSTURN_USER || "efPU52K4SLOQ34W2QY";
-const EXPRESSTURN_PASS = process.env.EXPRESSTURN_PASS || "1TJPNFxHKXrZfelz";
+const STUN_SERVER = process.env.STUN_SERVER || "";
+const TURN_HOST = (process.env.TURN_HOST || "").trim();
+const TURN_PORT = Number(process.env.TURN_PORT || 3478);
+const TURN_TLS_PORT = Number(process.env.TURN_TLS_PORT || 5349);
+const TURN_TTL_SECONDS = Number(process.env.TURN_TTL_SECONDS || 86400);
+const TURN_SHARED_SECRET = (process.env.TURN_SHARED_SECRET || process.env.TURN_SECRET || "").trim();
+const HAS_TURN_CREDENTIALS = Boolean(TURN_HOST && TURN_SHARED_SECRET);
+
+if (!HAS_TURN_CREDENTIALS) {
+  console.warn("[TURN] No TURN credentials configured; /api/turn will return 503.");
+}
 
 function getTurnCredentials() {
+  const iceServers = [];
+
+  if (STUN_SERVER) {
+    iceServers.push({ urls: [STUN_SERVER] });
+  }
+
+  if (HAS_TURN_CREDENTIALS) {
+    const username = `${Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS}:support`;
+    const credential = crypto
+      .createHmac("sha1", TURN_SHARED_SECRET)
+      .update(username)
+      .digest("base64");
+
+    iceServers.push({
+      urls: [
+        `stun:${TURN_HOST}:${TURN_PORT}`,
+        `turn:${TURN_HOST}:${TURN_PORT}?transport=udp`,
+        `turn:${TURN_HOST}:${TURN_PORT}?transport=tcp`,
+        `turns:${TURN_HOST}:${TURN_TLS_PORT}?transport=tcp`,
+      ],
+      username,
+      credential,
+    });
+  }
+
   return {
-    iceServers: [
-      {
-        urls: [
-          `turn:${EXPRESSTURN_SERVER}:3478`,
-          `turn:${EXPRESSTURN_SERVER}:3478?transport=tcp`,
-          `turn:${EXPRESSTURN_SERVER}:80`,
-          `turn:${EXPRESSTURN_SERVER}:80?transport=tcp`,
-          `turns:${EXPRESSTURN_SERVER}:443?transport=tcp`,
-        ],
-        username: EXPRESSTURN_USER,
-        credential: EXPRESSTURN_PASS,
-      },
-    ],
+    iceServers,
   };
 }
 
 // HTTP server for serving the web viewer
 const httpServer = http.createServer((req, res) => {
+  if (req.url === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        ok: true,
+        status: "ok",
+        environment: NODE_ENV,
+        roomCount: rooms.size,
+        turnConfigured: HAS_TURN_CREDENTIALS,
+      })
+    );
+    return;
+  }
+
   // TURN credentials API endpoint
   if (req.url === "/api/turn") {
+    if (!HAS_TURN_CREDENTIALS) {
+      res.writeHead(503, {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(JSON.stringify({ error: "TURN credentials are not configured." }));
+      return;
+    }
+
     const creds = getTurnCredentials();
     res.writeHead(200, {
       "Content-Type": "application/json",
@@ -102,18 +147,26 @@ wss.on("connection", (ws, req) => {
 
     switch (msg.type) {
       case "create": {
-        const code = generateRoomCode();
+        const requested =
+          typeof msg.room_code === "string" && msg.room_code.trim()
+            ? msg.room_code.trim().toUpperCase()
+            : null;
+        const code = requested && !rooms.has(requested) ? requested : generateRoomCode();
         rooms.set(code, { creator: ws, viewer: null, destroyTimer: null });
         currentRoom = code;
         role = "creator";
-        ws.send(JSON.stringify({ type: "room_created", room: code }));
+        ws.send(JSON.stringify({ type: "room_created", room: code, room_code: code }));
         console.log(`[Room] Created: ${code}`);
         break;
       }
 
       case "rejoin": {
         // Creator reconnects to an existing room (after app backgrounding)
-        const room = rooms.get(msg.room);
+        const code =
+          typeof msg.room_code === "string" && msg.room_code.trim()
+            ? msg.room_code.trim().toUpperCase()
+            : String(msg.room || "").trim().toUpperCase();
+        const room = rooms.get(code);
         if (!room) {
           ws.send(
             JSON.stringify({ type: "error", message: "Room not found" })
@@ -124,23 +177,27 @@ wss.on("connection", (ws, req) => {
         if (room.destroyTimer) {
           clearTimeout(room.destroyTimer);
           room.destroyTimer = null;
-          console.log(`[Room] Creator rejoined, cancelled destroy timer: ${msg.room}`);
+          console.log(`[Room] Creator rejoined, cancelled destroy timer: ${code}`);
         }
         room.creator = ws;
-        currentRoom = msg.room;
+        currentRoom = code;
         role = "creator";
-        ws.send(JSON.stringify({ type: "room_rejoined", room: msg.room }));
+        ws.send(JSON.stringify({ type: "room_rejoined", room: code, room_code: code }));
         // If viewer is already waiting, trigger a new offer
         if (room.viewer && room.viewer.readyState === 1) {
-          ws.send(JSON.stringify({ type: "peer_joined" }));
-          console.log(`[Room] Viewer already present, notifying rejoined creator: ${msg.room}`);
+          ws.send(JSON.stringify({ type: "peer_joined", room: code, room_code: code }));
+          console.log(`[Room] Viewer already present, notifying rejoined creator: ${code}`);
         }
-        console.log(`[Room] Creator rejoined: ${msg.room}`);
+        console.log(`[Room] Creator rejoined: ${code}`);
         break;
       }
 
       case "join": {
-        const room = rooms.get(msg.room);
+        const code =
+          typeof msg.room_code === "string" && msg.room_code.trim()
+            ? msg.room_code.trim().toUpperCase()
+            : String(msg.room || "").trim().toUpperCase();
+        const room = rooms.get(code);
         if (!room) {
           ws.send(
             JSON.stringify({ type: "error", message: "Room not found" })
@@ -152,14 +209,14 @@ wss.on("connection", (ws, req) => {
           return;
         }
         room.viewer = ws;
-        currentRoom = msg.room;
+        currentRoom = code;
         role = "viewer";
-        ws.send(JSON.stringify({ type: "room_joined" }));
+        ws.send(JSON.stringify({ type: "room_joined", room: code, room_code: code }));
         // Notify creator that viewer joined (only if creator is connected)
         if (room.creator && room.creator.readyState === 1) {
-          room.creator.send(JSON.stringify({ type: "peer_joined" }));
+          room.creator.send(JSON.stringify({ type: "peer_joined", room: code, room_code: code }));
         }
-        console.log(`[Room] Viewer joined: ${msg.room}`);
+        console.log(`[Room] Viewer joined: ${code}`);
         break;
       }
 
@@ -195,7 +252,7 @@ wss.on("connection", (ws, req) => {
       const room = rooms.get(currentRoom);
       const otherPeer = role === "creator" ? room.viewer : room.creator;
       if (otherPeer && otherPeer.readyState === 1) {
-        otherPeer.send(JSON.stringify({ type: "peer_left" }));
+        otherPeer.send(JSON.stringify({ type: "peer_left", room: currentRoom, room_code: currentRoom }));
       }
       if (role === "creator") {
         // Don't destroy immediately -- give the creator a grace period to reconnect

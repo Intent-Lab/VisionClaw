@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 
@@ -42,8 +44,11 @@ fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var workerLoginCode by remember { mutableStateOf(SettingsManager.workerLoginCode) }
     var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
+    var opsBaseURL by remember { mutableStateOf(SettingsManager.opsBaseURL) }
+    var signalBaseURL by remember { mutableStateOf(SettingsManager.signalBaseURL) }
     var openClawHost by remember { mutableStateOf(SettingsManager.openClawHost) }
     var openClawPort by remember { mutableStateOf(SettingsManager.openClawPort.toString()) }
     var openClawHookToken by remember { mutableStateOf(SettingsManager.openClawHookToken) }
@@ -54,8 +59,11 @@ fun SettingsScreen(
     var showResetDialog by remember { mutableStateOf(false) }
 
     fun save() {
+        SettingsManager.workerLoginCode = workerLoginCode.trim()
         SettingsManager.geminiAPIKey = geminiAPIKey.trim()
         SettingsManager.geminiSystemPrompt = systemPrompt.trim()
+        SettingsManager.opsBaseURL = opsBaseURL.trim()
+        SettingsManager.signalBaseURL = signalBaseURL.trim()
         SettingsManager.openClawHost = openClawHost.trim()
         openClawPort.trim().toIntOrNull()?.let { SettingsManager.openClawPort = it }
         SettingsManager.openClawHookToken = openClawHookToken.trim()
@@ -66,8 +74,11 @@ fun SettingsScreen(
     }
 
     fun reload() {
+        workerLoginCode = SettingsManager.workerLoginCode
         geminiAPIKey = SettingsManager.geminiAPIKey
         systemPrompt = SettingsManager.geminiSystemPrompt
+        opsBaseURL = SettingsManager.opsBaseURL
+        signalBaseURL = SettingsManager.signalBaseURL
         openClawHost = SettingsManager.openClawHost
         openClawPort = SettingsManager.openClawPort.toString()
         openClawHookToken = SettingsManager.openClawHookToken
@@ -98,6 +109,30 @@ fun SettingsScreen(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            SectionHeader("Worker")
+            MonoTextField(
+                value = workerLoginCode,
+                onValueChange = { workerLoginCode = it },
+                label = "Login Code",
+                placeholder = "EMBC-0001",
+            )
+
+            SectionHeader("Operations Backend")
+            MonoTextField(
+                value = opsBaseURL,
+                onValueChange = { opsBaseURL = it },
+                label = "Ops Base URL",
+                placeholder = "https://ops.embarcaderolabs.cloud",
+                keyboardType = KeyboardType.Uri,
+            )
+            MonoTextField(
+                value = signalBaseURL,
+                onValueChange = { signalBaseURL = it },
+                label = "Signal Base URL",
+                placeholder = "https://signal.embarcaderolabs.cloud",
+                keyboardType = KeyboardType.Uri,
+            )
+
             // Gemini section
             SectionHeader("Gemini API")
             MonoTextField(
@@ -105,6 +140,7 @@ fun SettingsScreen(
                 onValueChange = { geminiAPIKey = it },
                 label = "API Key",
                 placeholder = "Enter Gemini API key",
+                sensitive = true,
             )
 
             SectionHeader("System Prompt")
@@ -117,7 +153,7 @@ fun SettingsScreen(
             )
 
             // OpenClaw section
-            SectionHeader("OpenClaw")
+            SectionHeader("Video AI Analyst")
             MonoTextField(
                 value = openClawHost,
                 onValueChange = { openClawHost = it },
@@ -137,22 +173,14 @@ fun SettingsScreen(
                 onValueChange = { openClawHookToken = it },
                 label = "Hook Token",
                 placeholder = "Hook token",
+                sensitive = true,
             )
             MonoTextField(
                 value = openClawGatewayToken,
                 onValueChange = { openClawGatewayToken = it },
                 label = "Gateway Token",
                 placeholder = "Gateway auth token",
-            )
-
-            // WebRTC section
-            SectionHeader("WebRTC")
-            MonoTextField(
-                value = webrtcSignalingURL,
-                onValueChange = { webrtcSignalingURL = it },
-                label = "Signaling URL",
-                placeholder = "wss://your-server.example.com",
-                keyboardType = KeyboardType.Uri,
+                sensitive = true,
             )
 
             // Video
@@ -186,7 +214,7 @@ fun SettingsScreen(
                 Column {
                     Text("Proactive Notifications", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        "Receive updates from OpenClaw spoken through glasses.",
+                        "Receive updates from Video AI Analyst spoken through glasses.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -245,6 +273,7 @@ private fun MonoTextField(
     label: String,
     placeholder: String,
     keyboardType: KeyboardType = KeyboardType.Text,
+    sensitive: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
@@ -254,6 +283,9 @@ private fun MonoTextField(
         modifier = Modifier.fillMaxWidth(),
         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
         singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (sensitive) KeyboardType.Password else keyboardType
+        ),
+        visualTransformation = if (sensitive) PasswordVisualTransformation() else VisualTransformation.None,
     )
 }

@@ -38,6 +38,11 @@
 		9DD6CB0E2F3C64F400ED7098 /* WebRTCOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD6CB0D2F3C64F400ED7098 /* WebRTCOverlayView.swift */; };
 		9DD894B22F4047630090B9B9 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894AF2F4047630090B9B9 /* SettingsManager.swift */; };
 		9DD894B32F4047630090B9B9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894B02F4047630090B9B9 /* SettingsView.swift */; };
+		B10000012F50000100AA0001 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000012F50000100AA0002 /* DesignSystem.swift */; };
+		B10000012F50000200AA0001 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000012F50000200AA0002 /* HomeView.swift */; };
+		B10000012F50000300AA0001 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000012F50000300AA0002 /* CaptureView.swift */; };
+		B10000012F50004000AA0001 /* IPhoneCameraPreviewSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000012F50004000AA0002 /* IPhoneCameraPreviewSurface.swift */; };
+		B10000012F50000400AA0001 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000012F50000400AA0002 /* HistoryView.swift */; };
 		9DD895962F405E0E0090B9B9 /* RTCVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD895952F405E0E0090B9B9 /* RTCVideoView.swift */; };
 		9DD895972F405E0E0090B9B9 /* PiPVideoView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD895942F405E0E0090B9B9 /* PiPVideoView.swift */; };
 		A1B2C3D42F0A000200000001 /* GeminiConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000001 /* GeminiConfig.swift */; };
@@ -45,6 +50,8 @@
 		A1B2C3D42F0A000200000003 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000003 /* AudioManager.swift */; };
 		A1B2C3D42F0A000200000004 /* GeminiSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */; };
 		A1B2C3D42F0A000200000005 /* GeminiOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000005 /* GeminiOverlayView.swift */; };
+		A1B2C3D42F0A000200000006 /* SopRelayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000006 /* SopRelayClient.swift */; };
+		A1B2C3D42F0A000200000007 /* GeminiLiveSpotter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000007 /* GeminiLiveSpotter.swift */; };
 		E66D30242E7DA71900470B48 /* MockDeviceKitButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */; };
 		E6A188482EB918740097D0E1 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A188472EB918740097D0E1 /* StreamView.swift */; };
 		E6DA451D2E79A63100E3F688 /* MockDeviceCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA45182E79A63100E3F688 /* MockDeviceCardView.swift */; };
@@ -108,6 +115,11 @@
 		9DD6CB0D2F3C64F400ED7098 /* WebRTCOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebRTCOverlayView.swift; sourceTree = "<group>"; };
 		9DD894AF2F4047630090B9B9 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
 		9DD894B02F4047630090B9B9 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B10000012F50000100AA0002 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		B10000012F50000200AA0002 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		B10000012F50000300AA0002 /* CaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureView.swift; sourceTree = "<group>"; };
+		B10000012F50004000AA0002 /* IPhoneCameraPreviewSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPhoneCameraPreviewSurface.swift; sourceTree = "<group>"; };
+		B10000012F50000400AA0002 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		9DD895942F405E0E0090B9B9 /* PiPVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiPVideoView.swift; sourceTree = "<group>"; };
 		9DD895952F405E0E0090B9B9 /* RTCVideoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RTCVideoView.swift; sourceTree = "<group>"; };
 		A1B2C3D42F0A000100000001 /* GeminiConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfig.swift; sourceTree = "<group>"; };
@@ -115,6 +127,8 @@
 		A1B2C3D42F0A000100000003 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiSessionViewModel.swift; sourceTree = "<group>"; };
 		A1B2C3D42F0A000100000005 /* GeminiOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiOverlayView.swift; sourceTree = "<group>"; };
+		A1B2C3D42F0A000100000006 /* SopRelayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SopRelayClient.swift; sourceTree = "<group>"; };
+		A1B2C3D42F0A000100000007 /* GeminiLiveSpotter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveSpotter.swift; sourceTree = "<group>"; };
 		E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceKitButton.swift; sourceTree = "<group>"; };
 		E699CC952E8150670052C240 /* CameraAccessTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CameraAccessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E6A188472EB918740097D0E1 /* StreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamView.swift; sourceTree = "<group>"; };
@@ -126,7 +140,6 @@
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		9D3C69602F367CF700E641A5 /* iPhone */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = iPhone; sourceTree = "<group>"; };
-		9D85EB992F35EC46006C44D1 /* OpenClaw */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); name = OpenClaw; path = CameraAccess/OpenClaw; sourceTree = SOURCE_ROOT; };
 		E699CC962E8150670052C240 /* CameraAccessTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CameraAccessTests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
@@ -188,6 +201,11 @@
 			children = (
 				8FFD5FF42E8422580035E446 /* Components */,
 				E6DA451B2E79A63100E3F688 /* MockDeviceKit */,
+				B10000012F50000100AA0002 /* DesignSystem.swift */,
+				B10000012F50000200AA0002 /* HomeView.swift */,
+				B10000012F50000300AA0002 /* CaptureView.swift */,
+				B10000012F50004000AA0002 /* IPhoneCameraPreviewSurface.swift */,
+				B10000012F50000400AA0002 /* HistoryView.swift */,
 				8FFD605E2E84A2F70035E446 /* DebugMenuView.swift */,
 				8FD96B722E6F0A9800F56AB1 /* HomeScreenView.swift */,
 				8FFD605F2E84A2F70035E446 /* MainAppView.swift */,
@@ -215,7 +233,6 @@
 				8FD96B782E6F0A9800F56AB1 /* CameraAccess.entitlements */,
 				8FD96B792E6F0A9800F56AB1 /* CameraAccessApp.swift */,
 				8FD96B7B2E6F0A9800F56AB1 /* Info.plist */,
-				9D85EB992F35EC46006C44D1 /* OpenClaw */,
 			);
 			path = CameraAccess;
 			sourceTree = "<group>";
@@ -272,7 +289,9 @@
 				A1B2C3D42F0A000100000003 /* AudioManager.swift */,
 				A1B2C3D42F0A000100000001 /* GeminiConfig.swift */,
 				A1B2C3D42F0A000100000002 /* GeminiLiveService.swift */,
+				A1B2C3D42F0A000100000007 /* GeminiLiveSpotter.swift */,
 				A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */,
+				A1B2C3D42F0A000100000006 /* SopRelayClient.swift */,
 			);
 			path = Gemini;
 			sourceTree = "<group>";
@@ -305,7 +324,6 @@
 			);
 			fileSystemSynchronizedGroups = (
 				9D3C69602F367CF700E641A5 /* iPhone */,
-				9D85EB992F35EC46006C44D1 /* OpenClaw */,
 			);
 			name = CameraAccess;
 			productName = CameraAccess;
@@ -397,7 +415,12 @@
 		AAAAAAAAAAAAAAAAAAAAAA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (
+				files = (
+					B10000012F50000100AA0001 /* DesignSystem.swift in Sources */,
+					B10000012F50000200AA0001 /* HomeView.swift in Sources */,
+					B10000012F50000300AA0001 /* CaptureView.swift in Sources */,
+					B10000012F50004000AA0001 /* IPhoneCameraPreviewSurface.swift in Sources */,
+					B10000012F50000400AA0001 /* HistoryView.swift in Sources */,
 				8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */,
 				8FD96B812E6F0A9800F56AB1 /* HomeScreenView.swift in Sources */,
 				8F2D23802E856711002D0588 /* DebugMenuViewModel.swift in Sources */,
@@ -432,8 +455,10 @@
 				E6FD3BCE2EB4D53A00E7FE5D /* NonStreamView.swift in Sources */,
 				A1B2C3D42F0A000200000001 /* GeminiConfig.swift in Sources */,
 				A1B2C3D42F0A000200000002 /* GeminiLiveService.swift in Sources */,
+				A1B2C3D42F0A000200000007 /* GeminiLiveSpotter.swift in Sources */,
 				A1B2C3D42F0A000200000003 /* AudioManager.swift in Sources */,
 				A1B2C3D42F0A000200000004 /* GeminiSessionViewModel.swift in Sources */,
+				A1B2C3D42F0A000200000006 /* SopRelayClient.swift in Sources */,
 				9DD894B22F4047630090B9B9 /* SettingsManager.swift in Sources */,
 				9DD894B32F4047630090B9B9 /* SettingsView.swift in Sources */,
 				A1B2C3D42F0A000200000005 /* GeminiOverlayView.swift in Sources */,
@@ -469,7 +494,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = WY253UX7FC;
+				DEVELOPMENT_TEAM = CVABQ59BK3;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "";
 				INFOPLIST_FILE = CameraAccess/Info.plist;
@@ -479,7 +504,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucascunha.VisionClaw.SOP;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -498,7 +523,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "";
-				DEVELOPMENT_TEAM = WY253UX7FC;
+				DEVELOPMENT_TEAM = CVABQ59BK3;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CameraAccess/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -507,7 +532,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lucascunha.VisionClaw.SOP;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;

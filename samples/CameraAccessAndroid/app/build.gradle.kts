@@ -12,6 +12,27 @@ plugins {
   alias(libs.plugins.compose.compiler)
 }
 
+fun loadEnvFile(projectRoot: File): Map<String, String> {
+  val envFile = projectRoot.resolve(".env")
+  if (!envFile.exists()) return emptyMap()
+
+  return envFile.readLines()
+    .map { it.trim() }
+    .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
+    .associate {
+      val splitIndex = it.indexOf('=')
+      val key = it.substring(0, splitIndex).trim()
+      val value = it.substring(splitIndex + 1).trim().removeSurrounding("\"")
+      key to value
+    }
+}
+
+fun envValue(envMap: Map<String, String>, key: String, defaultValue: String): String {
+  return envMap[key] ?: System.getenv(key) ?: defaultValue
+}
+
+val repoEnv = loadEnvFile(rootProject.projectDir)
+
 android {
   namespace = "com.meta.wearable.dat.externalsampleapps.cameraaccess"
   compileSdk = 35
@@ -27,6 +48,10 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     vectorDrawables { useSupportLibrary = true }
+
+    val openClawTailscaleIp = envValue(repoEnv, "OPENCLAW_TAILSCALE_IP", "")
+
+    buildConfigField("String", "OPENCLAW_TAILSCALE_IP", "\"${openClawTailscaleIp}\"")
   }
 
   buildTypes {
@@ -44,14 +69,6 @@ android {
   buildFeatures { compose = true }
   composeOptions { kotlinCompilerExtensionVersion = "1.5.1" }
   packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
-  signingConfigs {
-    getByName("debug") {
-      storeFile = file("sample.keystore")
-      storePassword = "sample"
-      keyAlias = "sample"
-      keyPassword = "sample"
-    }
-  }
 }
 
 dependencies {

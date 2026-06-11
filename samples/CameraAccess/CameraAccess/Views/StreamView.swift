@@ -20,8 +20,6 @@ import SwiftUI
 struct StreamView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
-  @ObservedObject var geminiVM: GeminiSessionViewModel
-  @ObservedObject var webrtcVM: WebRTCSessionViewModel
 
   var body: some View {
     ZStack {
@@ -29,14 +27,8 @@ struct StreamView: View {
       Color.black
         .edgesIgnoringSafeArea(.all)
 
-      // Video backdrop: PiP when WebRTC connected, otherwise single local feed
-      if webrtcVM.isActive && webrtcVM.connectionState == .connected {
-        PiPVideoView(
-          localFrame: viewModel.currentVideoFrame,
-          remoteVideoTrack: webrtcVM.remoteVideoTrack,
-          hasRemoteVideo: webrtcVM.hasRemoteVideo
-        )
-      } else if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
+      // Single local feed only (pure SOP capture interface)
+      if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
         GeometryReader { geometry in
           Image(uiImage: videoFrame)
             .resizable()
@@ -51,66 +43,66 @@ struct StreamView: View {
           .foregroundColor(.white)
       }
 
-      // Gemini status overlay (top) + speaking indicator
-      if geminiVM.isGeminiActive {
-        VStack {
-          GeminiStatusBar(geminiVM: geminiVM)
-          Spacer()
+      // SOP status + single action control
+      VStack {
+        if viewModel.isSopAuditRunning {
+          Text(String(format: "%.1fs", viewModel.sopAuditSecondsRemaining))
+            .font(.system(size: 56, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.top, 40)
 
-          VStack(spacing: 8) {
-            if !geminiVM.userTranscript.isEmpty || !geminiVM.aiTranscript.isEmpty {
-              TranscriptView(
-                userText: geminiVM.userTranscript,
-                aiText: geminiVM.aiTranscript
-              )
-            }
+          Text("Uploading at 2 FPS")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundColor(.white.opacity(0.9))
+        }
 
-            ToolCallStatusView(status: geminiVM.toolCallStatus)
+        Spacer()
 
-            if geminiVM.isModelSpeaking {
-              HStack(spacing: 8) {
-                Image(systemName: "speaker.wave.2.fill")
-                  .foregroundColor(.white)
-                  .font(.system(size: 14))
-                SpeakingIndicator()
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 8)
-              .background(Color.black.opacity(0.5))
-              .cornerRadius(20)
+        if !viewModel.sopAuditStatusMessage.isEmpty {
+          Text(viewModel.sopAuditStatusMessage)
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundColor(.white)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.55))
+            .cornerRadius(12)
+            .padding(.bottom, 12)
+        }
+
+        VStack(spacing: 10) {
+          CustomButton(
+            title: viewModel.isSopAuditRunning ? "AUDIT RUNNING..." : "INITIATE WALLET AUDIT",
+            style: .primary,
+            isDisabled: viewModel.isSopAuditRunning
+          ) {
+            viewModel.startSopAudit()
+          }
+
+          CustomButton(
+            title: "TOGGLE AI COPILOT",
+            style: .secondary,
+            isDisabled: false
+          ) {
+            Task {
+              await viewModel.toggleGeminiAssistant()
             }
           }
-          .padding(.bottom, 80)
         }
-        .padding(.all, 24)
-      }
-
-      // WebRTC status overlay (top)
-      if webrtcVM.isActive {
-        VStack {
-          WebRTCStatusBar(webrtcVM: webrtcVM)
-          Spacer()
-        }
-        .padding(.all, 24)
-      }
-
-      // Bottom controls layer
-      VStack {
-        Spacer()
-        ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
       }
       .padding(.all, 24)
+    }
+    .overlay(alignment: .top) {
+      GeminiAssistantOverlay(geminiVM: viewModel.geminiAssistant) {
+        Task {
+          await viewModel.toggleGeminiAssistant()
+        }
+      }
     }
     .onDisappear {
       Task {
         if viewModel.streamingStatus != .stopped {
           await viewModel.stopSession()
-        }
-        if geminiVM.isGeminiActive {
-          geminiVM.stopSession()
-        }
-        if webrtcVM.isActive {
-          webrtcVM.stopSession()
         }
       }
     }
@@ -124,87 +116,6 @@ struct StreamView: View {
           }
         )
       }
-    }
-    // Gemini error alert
-    .alert("AI Assistant", isPresented: Binding(
-      get: { geminiVM.errorMessage != nil },
-      set: { if !$0 { geminiVM.errorMessage = nil } }
-    )) {
-      Button("OK") { geminiVM.errorMessage = nil }
-    } message: {
-      Text(geminiVM.errorMessage ?? "")
-    }
-    // WebRTC error alert
-    .alert("Live Stream", isPresented: Binding(
-      get: { webrtcVM.errorMessage != nil },
-      set: { if !$0 { webrtcVM.errorMessage = nil } }
-    )) {
-      Button("OK") { webrtcVM.errorMessage = nil }
-    } message: {
-      Text(webrtcVM.errorMessage ?? "")
-    }
-  }
-}
-
-// Extracted controls for clarity
-struct ControlsView: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var geminiVM: GeminiSessionViewModel
-  @ObservedObject var webrtcVM: WebRTCSessionViewModel
-
-  var body: some View {
-    // Controls row
-    HStack(spacing: 8) {
-      CustomButton(
-        title: "Stop streaming",
-        style: .destructive,
-        isDisabled: false
-      ) {
-        Task {
-          await viewModel.stopSession()
-        }
-      }
-
-      // Photo button (glasses mode only -- DAT SDK capture)
-      if viewModel.streamingMode == .glasses {
-        CircleButton(icon: "camera.fill", text: nil) {
-          viewModel.capturePhoto()
-        }
-      }
-
-      // Gemini AI button (disabled when WebRTC is active — audio conflict)
-      CircleButton(
-        icon: geminiVM.isGeminiActive ? "waveform.circle.fill" : "waveform.circle",
-        text: "AI"
-      ) {
-        Task {
-          if geminiVM.isGeminiActive {
-            geminiVM.stopSession()
-          } else {
-            await geminiVM.startSession()
-          }
-        }
-      }
-      .opacity(webrtcVM.isActive ? 0.4 : 1.0)
-      .disabled(webrtcVM.isActive)
-
-      // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
-      CircleButton(
-        icon: webrtcVM.isActive
-          ? "antenna.radiowaves.left.and.right.circle.fill"
-          : "antenna.radiowaves.left.and.right.circle",
-        text: "Live"
-      ) {
-        Task {
-          if webrtcVM.isActive {
-            webrtcVM.stopSession()
-          } else {
-            await webrtcVM.startSession()
-          }
-        }
-      }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
     }
   }
 }

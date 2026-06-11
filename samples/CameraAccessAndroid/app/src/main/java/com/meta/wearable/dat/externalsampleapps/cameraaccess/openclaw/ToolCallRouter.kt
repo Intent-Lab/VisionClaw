@@ -33,7 +33,7 @@ class ToolCallRouter(
             Log.d(TAG, "Circuit breaker open ($consecutiveFailures consecutive failures), rejecting $callId")
             val errorResult = ToolResult.Failure(
                 "Tool execution is temporarily unavailable after $consecutiveFailures consecutive failures. " +
-                "Please tell the user you cannot complete this action right now and suggest they check their OpenClaw gateway connection."
+                "Please tell the user you cannot complete this action right now and suggest they check their Video AI Analyst gateway connection."
             )
             sendResponse(buildToolResponse(callId, callName, errorResult))
             return

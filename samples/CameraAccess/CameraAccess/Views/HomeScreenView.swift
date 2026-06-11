@@ -22,59 +22,84 @@ struct HomeScreenView: View {
 
   var body: some View {
     ZStack {
-      Color.white.edgesIgnoringSafeArea(.all)
+      DesignSystem.colors.deepNavy
+        .ignoresSafeArea()
 
-      VStack(spacing: 12) {
+      VStack(spacing: 18) {
         HStack {
           Spacer()
           Button {
             showSettings = true
           } label: {
-            Image(systemName: "gearshape")
-              .resizable()
-              .aspectRatio(contentMode: .fit)
-              .foregroundColor(.black)
-              .frame(width: 24, height: 24)
+            Image(systemName: "slider.horizontal.3")
+              .font(.system(size: 18, weight: .semibold))
+              .foregroundColor(DesignSystem.colors.vibrantTeal)
+              .frame(width: 42, height: 42)
+              .background(DesignSystem.colors.surface)
+              .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                  .stroke(DesignSystem.colors.border, lineWidth: 1)
+              )
+              .clipShape(RoundedRectangle(cornerRadius: 12))
           }
         }
 
-        Spacer()
+        Spacer(minLength: 0)
 
-        Image(.cameraAccessIcon)
-          .resizable()
-          .aspectRatio(contentMode: .fit)
-          .frame(width: 120)
+        VStack(spacing: 14) {
+          Image(.cameraAccessIcon)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 92)
+            .padding(18)
+            .background(DesignSystem.colors.surface)
+            .overlay(
+              RoundedRectangle(cornerRadius: 20)
+                .stroke(DesignSystem.colors.vibrantTeal.opacity(0.45), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+
+          Text("EMBARCADERO WORKER")
+            .font(DesignSystem.fonts.mono(size: 12, weight: .semibold))
+            .foregroundColor(DesignSystem.colors.vibrantTeal)
+
+          Text("Connect your glasses, load today’s package, and execute the next step hands-free.")
+            .font(DesignSystem.fonts.body(size: 17))
+            .foregroundColor(DesignSystem.colors.white)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 10)
+        }
 
         VStack(spacing: 12) {
           HomeTipItemView(
             resource: .smartGlassesIcon,
-            title: "Video Capture",
-            text: "Record videos directly from your glasses, from your point of view."
+            title: "Assigned SOP Packages",
+            text: "Sync your worker queue from ops-api so the current package and SOP line are ready when you begin."
           )
           HomeTipItemView(
             resource: .soundIcon,
-            title: "Open-Ear Audio",
-            text: "Hear notifications while keeping your ears open to the world around you."
+            title: "Live Supervisor Support",
+            text: "Request jump-in help during an execution and keep the room synced while you stay on task."
           )
           HomeTipItemView(
             resource: .walkingIcon,
-            title: "Enjoy On-the-Go",
-            text: "Stay hands-free while you move through your day. Move freely, stay connected."
+            title: "Phone Or Glasses",
+            text: "Use Ray-Bans when available, or continue on iPhone without breaking the execution flow."
           )
         }
 
-        Spacer()
+        Spacer(minLength: 0)
 
-        VStack(spacing: 20) {
-          Text("You'll be redirected to the Meta AI app to confirm your connection.")
-            .font(.system(size: 14))
-            .foregroundColor(.gray)
+        VStack(spacing: 16) {
+          Text("You’ll be redirected to the Meta AI app once to confirm the glasses connection.")
+            .font(DesignSystem.fonts.body(size: 14))
+            .foregroundColor(DesignSystem.colors.blueGrey)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
 
           CustomButton(
-            title: viewModel.registrationState == .registering ? "Connecting..." : "Connect my glasses",
+            title: viewModel.registrationState == .registering ? "CONNECTING GLASSES..." : "CONNECT RAY-BAN GLASSES",
             style: .primary,
             isDisabled: viewModel.registrationState == .registering
           ) {
@@ -82,7 +107,7 @@ struct HomeScreenView: View {
           }
 
           CustomButton(
-            title: "Start on iPhone",
+            title: "USE IPHONE CAMERA",
             style: .secondary,
             isDisabled: false
           ) {
@@ -109,7 +134,7 @@ struct HomeTipItemView: View {
       Image(resource)
         .resizable()
         .renderingMode(.template)
-        .foregroundColor(.black)
+        .foregroundColor(DesignSystem.colors.vibrantTeal)
         .aspectRatio(contentMode: .fit)
         .frame(width: 24)
         .padding(.leading, 4)
@@ -117,14 +142,21 @@ struct HomeTipItemView: View {
 
       VStack(alignment: .leading, spacing: 6) {
         Text(title)
-          .font(.system(size: 18, weight: .semibold))
-          .foregroundColor(.black)
+          .font(DesignSystem.fonts.mono(size: 16, weight: .semibold))
+          .foregroundColor(DesignSystem.colors.white)
 
         Text(text)
-          .font(.system(size: 15))
-          .foregroundColor(.gray)
+          .font(DesignSystem.fonts.body(size: 14))
+          .foregroundColor(DesignSystem.colors.blueGrey)
       }
       Spacer()
     }
+    .padding(14)
+    .background(DesignSystem.colors.surface)
+    .overlay(
+      RoundedRectangle(cornerRadius: 16)
+        .stroke(DesignSystem.colors.border, lineWidth: 1)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 16))
   }
 }

@@ -12,12 +12,18 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallRo
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
+import java.util.UUID
 
 data class GeminiUiState(
     val isGeminiActive: Boolean = false,
@@ -39,12 +45,18 @@ class GeminiSessionViewModel : ViewModel() {
     val uiState: StateFlow<GeminiUiState> = _uiState.asStateFlow()
 
     private val geminiService = GeminiLiveService()
+    private val sopRelayClient = SopRelayClient()
     private val openClawBridge = OpenClawBridge()
     private var toolCallRouter: ToolCallRouter? = null
     private val audioManager = AudioManager()
     private val eventClient = OpenClawEventClient()
     private var lastVideoFrameTime: Long = 0
     private var stateObservationJob: Job? = null
+    private var heartbeatJob: Job? = null
+    private var heartbeatTimeoutJob: Job? = null
+    private var currentSopSessionId: String? = null
+    private var isSopSessionTerminated = true
+    private var isFinalizingSession = false
 
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
@@ -93,12 +105,21 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onDisconnected = { reason ->
-            if (_uiState.value.isGeminiActive) {
-                stopSession()
+            if (_uiState.value.isGeminiActive && !isFinalizingSession) {
+                resetToIdle("Connection lost: ${reason ?: "Unknown error"}")
                 _uiState.value = _uiState.value.copy(
                     errorMessage = "Connection lost: ${reason ?: "Unknown error"}"
                 )
             }
+        }
+
+        geminiService.onSocketOpened = {
+            startSopHeartbeatSession()
+        }
+
+        geminiService.onSocketClosed = {
+            if (!_uiState.value.isGeminiActive || isFinalizingSession) return@onSocketClosed
+            finalizeSessionWithReceipt(status = "terminated")
         }
 
         // Check OpenClaw and start session
@@ -111,6 +132,11 @@ class GeminiSessionViewModel : ViewModel() {
 
             geminiService.onToolCall = { toolCall ->
                 for (call in toolCall.functionCalls) {
+                    if (call.name == "log_sop_step") {
+                        handleSopLogToolCall(call)
+                        continue
+                    }
+
                     toolCallRouter?.handleToolCall(call) { response ->
                         geminiService.sendToolResponse(response)
                     }
@@ -182,13 +208,7 @@ class GeminiSessionViewModel : ViewModel() {
 
     fun stopSession() {
         eventClient.disconnect()
-        toolCallRouter?.cancelAll()
-        toolCallRouter = null
-        audioManager.stopCapture()
-        geminiService.disconnect()
-        stateObservationJob?.cancel()
-        stateObservationJob = null
-        _uiState.value = GeminiUiState()
+        finalizeSessionWithReceipt(status = "terminated")
     }
 
     fun sendVideoFrameIfThrottled(bitmap: Bitmap) {
@@ -208,5 +228,142 @@ class GeminiSessionViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         stopSession()
+    }
+
+    private fun handleSopLogToolCall(call: com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiFunctionCall) {
+        val stepName = call.args["step_name"]?.toString()?.trim().orEmpty()
+        if (stepName.isEmpty()) {
+            geminiService.sendToolResponse(buildToolResponse(
+                callId = call.id,
+                name = call.name,
+                result = com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult.Failure("Missing required argument: step_name")
+            ))
+            return
+        }
+
+        val sessionId = currentSopSessionId ?: UUID.randomUUID().toString().also {
+            currentSopSessionId = it
+            isSopSessionTerminated = false
+        }
+
+        val imageBase64 = call.args["frame_data"]?.toString()?.takeIf { it.isNotBlank() }
+            ?: call.args["image_base64"]?.toString()?.takeIf { it.isNotBlank() }
+            ?: geminiService.lastVideoFrameBase64.orEmpty()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            sopRelayClient.postSopLog(
+                tailscaleIp = GeminiConfig.openClawTailscaleIP,
+                sessionId = sessionId,
+                stepName = stepName,
+                timestampIso8601 = Instant.now().toString(),
+                imageBase64 = imageBase64
+            )
+        }
+
+        geminiService.sendToolResponse(buildToolResponse(
+            callId = call.id,
+            name = call.name,
+            result = com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult.Success("SOP step forwarded")
+        ))
+    }
+
+    private fun startSopHeartbeatSession() {
+        if (currentSopSessionId != null && !isSopSessionTerminated) return
+
+        val sessionId = UUID.randomUUID().toString()
+        currentSopSessionId = sessionId
+        isSopSessionTerminated = false
+
+        heartbeatJob?.cancel()
+        heartbeatTimeoutJob?.cancel()
+
+        heartbeatJob = viewModelScope.launch(Dispatchers.IO) {
+            sopRelayClient.postHeartbeat(
+                tailscaleIp = GeminiConfig.openClawTailscaleIP,
+                sessionId = sessionId,
+                status = "active"
+            )
+
+            while (isActive && !isSopSessionTerminated) {
+                sopRelayClient.postHeartbeat(
+                    tailscaleIp = GeminiConfig.openClawTailscaleIP,
+                    sessionId = sessionId,
+                    status = "active"
+                )
+                delay(3_000)
+            }
+        }
+
+        heartbeatTimeoutJob = viewModelScope.launch {
+            delay(60_000)
+            finalizeSessionWithReceipt(status = "terminated")
+        }
+    }
+
+    private fun finalizeSessionWithReceipt(status: String) {
+        if (isFinalizingSession) return
+
+        val sessionId = currentSopSessionId
+        if (sessionId == null) {
+            resetToIdle(null)
+            return
+        }
+        if (isSopSessionTerminated) {
+            resetToIdle(null)
+            return
+        }
+
+        isFinalizingSession = true
+        isSopSessionTerminated = true
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+        heartbeatTimeoutJob?.cancel()
+        heartbeatTimeoutJob = null
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val receiptMessage = sopRelayClient.postHeartbeatForReceipt(
+                tailscaleIp = GeminiConfig.openClawTailscaleIP,
+                sessionId = sessionId,
+                status = status
+            )
+
+            withContext(Dispatchers.Main) {
+                resetToIdle(receiptMessage)
+            }
+        }
+    }
+
+    private fun resetToIdle(receiptMessage: String?) {
+        eventClient.disconnect()
+        geminiService.onDisconnected = null
+        geminiService.onSocketClosed = null
+        geminiService.onSocketOpened = null
+
+        toolCallRouter?.cancelAll()
+        toolCallRouter = null
+        audioManager.stopCapture()
+        geminiService.disconnect()
+        stateObservationJob?.cancel()
+        stateObservationJob = null
+
+        _uiState.value = GeminiUiState(errorMessage = receiptMessage)
+        isFinalizingSession = false
+        currentSopSessionId = null
+    }
+
+    private fun buildToolResponse(
+        callId: String,
+        name: String,
+        result: com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
+    ): JSONObject {
+        return JSONObject().apply {
+            put("toolResponse", JSONObject().apply {
+                put("functionResponses", JSONArray().put(JSONObject().apply {
+                    put("id", callId)
+                    put("name", name)
+                    put("response", result.toJSON())
+                }))
+            })
+        }
     }
 }

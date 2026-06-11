@@ -21,6 +21,15 @@ object GeminiConfig {
     val apiKey: String
         get() = SettingsManager.geminiAPIKey
 
+    val workerLoginCode: String
+        get() = SettingsManager.workerLoginCode
+
+    val opsBaseURL: String
+        get() = SettingsManager.opsBaseURL
+
+    val signalBaseURL: String
+        get() = SettingsManager.signalBaseURL
+
     val openClawHost: String
         get() = SettingsManager.openClawHost
 
@@ -32,6 +41,15 @@ object GeminiConfig {
 
     val openClawGatewayToken: String
         get() = SettingsManager.openClawGatewayToken
+
+    val openClawTailscaleIP: String
+        get() = SettingsManager.openClawTailscaleIP
+
+    val openClawBearerToken: String
+        get() = SettingsManager.openClawBearerToken
+
+    val deviceId: String
+        get() = SettingsManager.deviceId
 
     fun websocketURL(): String? {
         if (apiKey == "YOUR_GEMINI_API_KEY" || apiKey.isEmpty()) return null

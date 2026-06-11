@@ -50,6 +50,8 @@ class GeminiLiveService {
     var onOutputTranscription: ((String) -> Unit)? = null
     var onToolCall: ((GeminiToolCall) -> Unit)? = null
     var onToolCallCancellation: ((GeminiToolCallCancellation) -> Unit)? = null
+    var onSocketOpened: (() -> Unit)? = null
+    var onSocketClosed: ((String?) -> Unit)? = null
 
     // Latency tracking
     private var lastUserSpeechEnd: Long = 0
@@ -59,6 +61,10 @@ class GeminiLiveService {
     private val sendExecutor = Executors.newSingleThreadExecutor()
     private var connectCallback: ((Boolean) -> Unit)? = null
     private var timeoutTimer: Timer? = null
+    @Volatile private var latestVideoFrameBase64: String? = null
+
+    val lastVideoFrameBase64: String?
+        get() = latestVideoFrameBase64
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -80,6 +86,7 @@ class GeminiLiveService {
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket opened")
+                onSocketOpened?.invoke()
                 _connectionState.value = GeminiConnectionState.SettingUp
                 sendSetupMessage()
             }
@@ -98,6 +105,7 @@ class GeminiLiveService {
                 _connectionState.value = GeminiConnectionState.Error(msg)
                 _isModelSpeaking.value = false
                 resolveConnect(false)
+                onSocketClosed?.invoke(msg)
                 onDisconnected?.invoke(msg)
             }
 
@@ -106,6 +114,7 @@ class GeminiLiveService {
                 _connectionState.value = GeminiConnectionState.Disconnected
                 _isModelSpeaking.value = false
                 resolveConnect(false)
+                onSocketClosed?.invoke("Connection closing (code $code: $reason)")
                 onDisconnected?.invoke("Connection closed (code $code: $reason)")
             }
 
@@ -113,6 +122,7 @@ class GeminiLiveService {
                 Log.d(TAG, "WebSocket closed: $code $reason")
                 _connectionState.value = GeminiConnectionState.Disconnected
                 _isModelSpeaking.value = false
+                onSocketClosed?.invoke("Connection closed (code $code: $reason)")
             }
         })
 
@@ -134,10 +144,13 @@ class GeminiLiveService {
     fun disconnect() {
         timeoutTimer?.cancel()
         timeoutTimer = null
+        onSocketClosed?.invoke("Disconnected")
         webSocket?.close(1000, null)
         webSocket = null
         onToolCall = null
         onToolCallCancellation = null
+        onSocketOpened = null
+        onSocketClosed = null
         _connectionState.value = GeminiConnectionState.Disconnected
         _isModelSpeaking.value = false
         resolveConnect(false)
@@ -165,6 +178,7 @@ class GeminiLiveService {
             val baos = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, GeminiConfig.VIDEO_JPEG_QUALITY, baos)
             val base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+            latestVideoFrameBase64 = base64
             val json = JSONObject().apply {
                 put("realtimeInput", JSONObject().apply {
                     put("video", JSONObject().apply {
@@ -269,6 +283,7 @@ class GeminiLiveService {
                 val seconds = goAway.optJSONObject("timeLeft")?.optInt("seconds", 0) ?: 0
                 _connectionState.value = GeminiConnectionState.Disconnected
                 _isModelSpeaking.value = false
+                onSocketClosed?.invoke("Server closing (time left: ${seconds}s)")
                 onDisconnected?.invoke("Server closing (time left: ${seconds}s)")
                 return
             }

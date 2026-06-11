@@ -1,5 +1,8 @@
 .DS_Store
 
+# Environment
+.env
+
 # Android
 samples/CameraAccessAndroid/app/src/main/java/**/Secrets.kt
 samples/CameraAccessAndroid/local.properties

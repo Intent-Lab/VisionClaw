@@ -79,11 +79,11 @@ class SignalingClient {
     }
 
     fun joinRoom(code: String) {
-        sendJSON(JSONObject().put("type", "join").put("room", code))
+        sendJSON(JSONObject().put("type", "join").put("room", code).put("room_code", code))
     }
 
     fun rejoinRoom(code: String) {
-        sendJSON(JSONObject().put("type", "rejoin").put("room", code))
+        sendJSON(JSONObject().put("type", "rejoin").put("room", code).put("room_code", code))
     }
 
     fun sendSdp(sdp: SessionDescription) {
@@ -120,7 +120,7 @@ class SignalingClient {
 
             when (type) {
                 "room_created" -> {
-                    val room = json.optString("room", "")
+                    val room = readRoomCode(json)
                     if (room.isNotEmpty()) {
                         onMessageReceived?.invoke(SignalingMessage.RoomCreated(room))
                     }
@@ -129,15 +129,15 @@ class SignalingClient {
                     onMessageReceived?.invoke(SignalingMessage.RoomJoined)
                 }
                 "room_rejoined" -> {
-                    val room = json.optString("room", "")
+                    val room = readRoomCode(json)
                     if (room.isNotEmpty()) {
                         onMessageReceived?.invoke(SignalingMessage.RoomRejoined(room))
                     }
                 }
-                "peer_joined" -> {
+                "peer_joined", "viewer_joined" -> {
                     onMessageReceived?.invoke(SignalingMessage.PeerJoined)
                 }
-                "peer_left" -> {
+                "peer_left", "viewer_left" -> {
                     onMessageReceived?.invoke(SignalingMessage.PeerLeft)
                 }
                 "offer" -> {
@@ -183,5 +183,9 @@ class SignalingClient {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse signaling message: ${e.message}")
         }
+    }
+
+    private fun readRoomCode(json: JSONObject): String {
+        return json.optString("room", json.optString("room_code", ""))
     }
 }

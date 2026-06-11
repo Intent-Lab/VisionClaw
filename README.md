@@ -117,6 +117,20 @@ git clone https://github.com/sseanliu/VisionClaw.git
 
 Open `samples/CameraAccessAndroid/` in Android Studio.
 
+### 1.5 Configure environment variables (.env)
+
+At repository root, copy the example and set your values:
+
+```bash
+cp .env.example .env
+```
+
+Set:
+- `GEMINI_API_KEY`
+- `OPENCLAW_TAILSCALE_IP`
+
+These are injected into Android `BuildConfig` at build time and used as defaults by the app settings layer.
+
 ### 2. Configure GitHub Packages (DAT SDK)
 
 The Meta DAT Android SDK is distributed via GitHub Packages. You need a GitHub Personal Access Token with `read:packages` scope.
@@ -285,7 +299,7 @@ All source code is in `samples/CameraAccessAndroid/app/src/main/java/.../cameraa
 
 ### Tool Calling
 
-Gemini Live supports function calling. Both apps declare a single `execute` tool that routes everything through OpenClaw:
+Gemini Live supports function calling. Both apps declare `execute` for OpenClaw actions. Android also declares `log_sop_step` to forward SOP step logs to an external state machine endpoint.
 
 1. User says "Add eggs to my shopping list"
 2. Gemini speaks "Sure, adding that now" (verbal acknowledgment before tool call)
