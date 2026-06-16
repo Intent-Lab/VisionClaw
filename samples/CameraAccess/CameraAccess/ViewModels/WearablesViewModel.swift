@@ -33,6 +33,7 @@ class WearablesViewModel: ObservableObject {
 
   private var registrationTask: Task<Void, Never>?
   private var deviceStreamTask: Task<Void, Never>?
+  private var didRequestCameraPermission = false
   private var setupDeviceStreamTask: Task<Void, Never>?
   private let wearables: WearablesInterface
   private var compatibilityListenerTokens: [DeviceIdentifier: AnyListenerToken] = [:]
@@ -55,6 +56,13 @@ class WearablesViewModel: ObservableObject {
         if self.showGettingStartedSheet == false && registrationState == .registered && previousState == .registering {
           self.showGettingStartedSheet = true
         }
+        // Per Meta DAT docs: a wearable will NOT appear in devicesStream until at least one
+        // permission (camera) is granted via the Meta AI app. The stock app only requests it
+        // inside handleStartStreaming(), which is gated behind a button disabled until a device
+        // appears — a deadlock. Request it as soon as we're registered so the glasses show up.
+        if registrationState == .registered {
+          requestCameraPermissionIfNeeded()
+        }
       }
     }
   }
@@ -73,6 +81,10 @@ class WearablesViewModel: ObservableObject {
     deviceStreamTask = Task {
       for await devices in wearables.devicesStream() {
         self.devices = devices
+        // Already-registered launch with no devices yet: still need the camera permission grant.
+        if devices.isEmpty && self.registrationState == .registered {
+          requestCameraPermissionIfNeeded()
+        }
         #if canImport(MWDATMockDevice)
         self.hasMockDevice = !MockDeviceKit.shared.pairedDevices.isEmpty
         #endif
@@ -103,6 +115,23 @@ class WearablesViewModel: ObservableObject {
         }
       }
       compatibilityListenerTokens[deviceId] = token
+    }
+  }
+
+  /// Request glasses camera permission via the Meta AI app. Required for the wearable to appear
+  /// in devicesStream at all (per Meta DAT docs). Guarded so it only fires once per session.
+  func requestCameraPermissionIfNeeded() {
+    guard !didRequestCameraPermission else { return }
+    didRequestCameraPermission = true
+    Task { @MainActor in
+      do {
+        let status = try await wearables.checkPermissionStatus(Permission.camera)
+        if status != .granted {
+          _ = try await wearables.requestPermission(Permission.camera)
+        }
+      } catch {
+        self.didRequestCameraPermission = false  // allow a retry on error
+      }
     }
   }
 
