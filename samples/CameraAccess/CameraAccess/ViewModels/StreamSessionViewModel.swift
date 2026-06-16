@@ -67,8 +67,12 @@ class StreamSessionViewModel: ObservableObject {
   // WebRTC Live streaming integration
   var webrtcSessionVM: WebRTCSessionViewModel?
 
-  // The core DAT SDK StreamSession - handles all streaming operations
-  private var streamSession: StreamSession
+  // DAT SDK 0.7.0 session-based model: a DeviceSession owns the device connection, and a
+  // camera Stream (added to a started session) produces video frames + photos. Both are
+  // created on demand in startSession() because addStream() requires a started DeviceSession.
+  private var deviceSession: DeviceSession?
+  private var stream: MWDATCamera.Stream?
+  private var sessionErrorListenerToken: AnyListenerToken?
   // Listener tokens are used to manage DAT SDK event subscriptions
   private var stateListenerToken: AnyListenerToken?
   private var videoFrameListenerToken: AnyListenerToken?
@@ -90,11 +94,6 @@ class StreamSessionViewModel: ObservableObject {
     self.wearables = wearables
     // Let the SDK auto-select from available devices
     self.deviceSelector = AutoDeviceSelector(wearables: wearables)
-    let config = StreamSessionConfig(
-      videoCodec: VideoCodec.raw,
-      resolution: StreamingResolution.low,
-      frameRate: 24)
-    streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
 
     // Monitor device availability
     deviceMonitorTask = Task { @MainActor in
@@ -104,7 +103,8 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     setupVideoDecoder()
-    attachListeners()
+    // Session + camera Stream (and their listeners) are created on start, not here —
+    // addStream() requires a started DeviceSession in the 0.7.0 model.
   }
 
   private func setupVideoDecoder() {
@@ -134,18 +134,13 @@ class StreamSessionViewModel: ObservableObject {
   func updateResolution(_ resolution: StreamingResolution) {
     guard !isStreaming else { return }
     selectedResolution = resolution
-    let config = StreamSessionConfig(
-      videoCodec: VideoCodec.raw,
-      resolution: resolution,
-      frameRate: 24)
-    streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
-    attachListeners()
+    // The StreamConfiguration is applied when the camera Stream is created on the next start.
     NSLog("[Stream] Resolution changed to %@", resolutionLabel)
   }
 
-  private func attachListeners() {
+  private func attachStreamListeners(to stream: MWDATCamera.Stream) {
     // Subscribe to session state changes using the DAT SDK listener pattern
-    stateListenerToken = streamSession.statePublisher.listen { [weak self] state in
+    stateListenerToken = stream.statePublisher.listen { [weak self] state in
       Task { @MainActor [weak self] in
         self?.updateStatusFromState(state)
       }
@@ -154,7 +149,7 @@ class StreamSessionViewModel: ObservableObject {
     // Subscribe to video frames from the device camera
     // This callback fires whether the app is in the foreground or background,
     // enabling continuous streaming even when the screen is locked.
-    videoFrameListenerToken = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
+    videoFrameListenerToken = stream.videoFramePublisher.listen { [weak self] videoFrame in
       Task { @MainActor [weak self] in
         guard let self else { return }
 
@@ -208,7 +203,7 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     // Subscribe to streaming errors
-    errorListenerToken = streamSession.errorPublisher.listen { [weak self] error in
+    errorListenerToken = stream.errorPublisher.listen { [weak self] error in
       Task { @MainActor [weak self] in
         guard let self else { return }
         // Suppress device-not-found errors when user hasn't started streaming yet
@@ -223,10 +218,10 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
-    updateStatusFromState(streamSession.state)
+    updateStatusFromState(stream.state)
 
     // Subscribe to photo capture events
-    photoDataListenerToken = streamSession.photoDataPublisher.listen { [weak self] photoData in
+    photoDataListenerToken = stream.photoDataPublisher.listen { [weak self] photoData in
       Task { @MainActor [weak self] in
         guard let self else { return }
         if let uiImage = UIImage(data: photoData.data) {
@@ -257,7 +252,63 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func startSession() async {
-    await streamSession.start()
+    do {
+      // 1) Create a device session bound to the auto-selected wearable.
+      let session = try wearables.createSession(deviceSelector: deviceSelector)
+      self.deviceSession = session
+      attachSessionListeners(to: session)
+
+      // 2) Get the state stream BEFORE start() (it doesn't buffer past events), start the
+      //    session, then wait until it reaches .started. addStream() returns nil if the
+      //    device session hasn't finished connecting yet (Meta's own sample does this).
+      let stateStream = session.stateStream()
+      try session.start()
+      if session.state != .started {
+        for await state in stateStream {
+          if state == .started || state == .stopped { break }
+        }
+      }
+      guard session.state == .started else {
+        showError("The glasses session didn't finish connecting. Please try again.")
+        cleanupSession()
+        return
+      }
+
+      // 3) Add a camera stream and wire its publishers, then start it.
+      let config = StreamConfiguration(
+        videoCodec: VideoCodec.raw,
+        resolution: selectedResolution,
+        frameRate: 24)
+      guard let stream = try session.addStream(config: config) else {
+        showError("Failed to create a camera stream from the glasses.")
+        cleanupSession()
+        return
+      }
+      self.stream = stream
+      attachStreamListeners(to: stream)
+      await stream.start()
+    } catch {
+      showError(formatDeviceSessionError(error))
+      cleanupSession()
+    }
+  }
+
+  /// Subscribe to device-session-level state + error (connection lifecycle), separate from the
+  /// camera Stream's own state/frames.
+  private func attachSessionListeners(to session: DeviceSession) {
+    sessionErrorListenerToken = session.errorPublisher.listen { [weak self] error in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        if self.streamingStatus != .stopped {
+          self.showError(self.formatDeviceSessionError(error))
+        }
+      }
+    }
+  }
+
+  private func cleanupSession() {
+    stream = nil
+    deviceSession = nil
   }
 
   private func showError(_ message: String) {
@@ -270,7 +321,9 @@ class StreamSessionViewModel: ObservableObject {
       stopIPhoneSession()
       return
     }
-    await streamSession.stop()
+    await stream?.stop()
+    deviceSession?.stop()
+    cleanupSession()
   }
 
   // MARK: - iPhone Camera Mode
@@ -320,7 +373,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func capturePhoto() {
-    streamSession.capturePhoto(format: .jpeg)
+    _ = stream?.capturePhoto(format: .jpeg)
   }
 
   func dismissPhotoPreview() {
@@ -328,7 +381,7 @@ class StreamSessionViewModel: ObservableObject {
     capturedPhoto = nil
   }
 
-  private func updateStatusFromState(_ state: StreamSessionState) {
+  private func updateStatusFromState(_ state: StreamState) {
     switch state {
     case .stopped:
       currentVideoFrame = nil
@@ -340,7 +393,7 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  private func formatStreamingError(_ error: StreamSessionError) -> String {
+  private func formatStreamingError(_ error: StreamError) -> String {
     switch error {
     case .internalError:
       return "An internal error occurred. Please try again."
@@ -352,14 +405,33 @@ class StreamSessionViewModel: ObservableObject {
       return "The operation timed out. Please try again."
     case .videoStreamingError:
       return "Video streaming failed. Please try again."
-    case .audioStreamingError:
-      return "Audio streaming failed. Please try again."
     case .permissionDenied:
       return "Camera permission denied. Please grant permission in Settings."
     case .hingesClosed:
       return "The hinges on the glasses were closed. Please open the hinges and try again."
     @unknown default:
       return "An unknown streaming error occurred."
+    }
+  }
+
+  /// Map 0.7.0 device-session errors to a user-facing message. noEligibleDevice /
+  /// datAppOnTheGlassesUpdateRequired are the common "glasses won't attach" cases.
+  private func formatDeviceSessionError(_ error: DeviceSessionError) -> String {
+    switch error {
+    case .noEligibleDevice:
+      return "No compatible glasses were found. Make sure your glasses are connected in the Meta AI app and camera access is granted."
+    case .datAppOnTheGlassesUpdateRequired:
+      return "Your glasses need a software update. Open the Meta AI app and update your glasses, then try again."
+    case .sessionAlreadyExists, .capabilityAlreadyActive:
+      return "A session is already active. Stop streaming and try again."
+    case .thermalCritical, .thermalEmergency:
+      return "The glasses are too warm to stream right now. Let them cool down and try again."
+    case .batteryCritical:
+      return "The glasses' battery is too low to stream. Charge them and try again."
+    case .unexpectedError(let description):
+      return "Failed to start session: \(description)"
+    @unknown default:
+      return "Failed to start the glasses session. Please try again."
     }
   }
 }
