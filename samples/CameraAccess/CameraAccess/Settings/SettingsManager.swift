@@ -5,12 +5,17 @@ final class SettingsManager {
 
   private let defaults = UserDefaults.standard
 
-  private enum Key: String {
+  // Keys for secrets (stored in Keychain)
+  private enum SecretKey: String {
     case geminiAPIKey
-    case openClawHost
-    case openClawPort
     case openClawHookToken
     case openClawGatewayToken
+  }
+
+  // Keys for non-sensitive settings (stored in UserDefaults)
+  private enum Key: String {
+    case openClawHost
+    case openClawPort
     case geminiSystemPrompt
     case webrtcSignalingURL
     case speakerOutputEnabled
@@ -18,13 +23,32 @@ final class SettingsManager {
     case proactiveNotificationsEnabled
   }
 
-  private init() {}
+  private init() {
+    migrateSecretsFromUserDefaults()
+  }
 
-  // MARK: - Gemini
+  /// One-time migration: move secrets from UserDefaults to Keychain.
+  /// Runs on first launch after update — old UserDefaults entries are deleted.
+  private func migrateSecretsFromUserDefaults() {
+    let migrationKey = "secrets_migrated_to_keychain"
+    guard !defaults.bool(forKey: migrationKey) else { return }
+
+    for key in [SecretKey.geminiAPIKey, .openClawHookToken, .openClawGatewayToken] {
+      if let value = defaults.string(forKey: key.rawValue), !value.isEmpty {
+        KeychainManager.set(key.rawValue, value: value)
+        defaults.removeObject(forKey: key.rawValue)
+        NSLog("[Settings] Migrated %@ from UserDefaults to Keychain", key.rawValue)
+      }
+    }
+
+    defaults.set(true, forKey: migrationKey)
+  }
+
+  // MARK: - Gemini (secrets in Keychain)
 
   var geminiAPIKey: String {
-    get { defaults.string(forKey: Key.geminiAPIKey.rawValue) ?? Secrets.geminiAPIKey }
-    set { defaults.set(newValue, forKey: Key.geminiAPIKey.rawValue) }
+    get { KeychainManager.get(SecretKey.geminiAPIKey.rawValue) ?? Secrets.geminiAPIKey }
+    set { KeychainManager.set(SecretKey.geminiAPIKey.rawValue, value: newValue) }
   }
 
   var geminiSystemPrompt: String {
@@ -48,13 +72,13 @@ final class SettingsManager {
   }
 
   var openClawHookToken: String {
-    get { defaults.string(forKey: Key.openClawHookToken.rawValue) ?? Secrets.openClawHookToken }
-    set { defaults.set(newValue, forKey: Key.openClawHookToken.rawValue) }
+    get { KeychainManager.get(SecretKey.openClawHookToken.rawValue) ?? Secrets.openClawHookToken }
+    set { KeychainManager.set(SecretKey.openClawHookToken.rawValue, value: newValue) }
   }
 
   var openClawGatewayToken: String {
-    get { defaults.string(forKey: Key.openClawGatewayToken.rawValue) ?? Secrets.openClawGatewayToken }
-    set { defaults.set(newValue, forKey: Key.openClawGatewayToken.rawValue) }
+    get { KeychainManager.get(SecretKey.openClawGatewayToken.rawValue) ?? Secrets.openClawGatewayToken }
+    set { KeychainManager.set(SecretKey.openClawGatewayToken.rawValue, value: newValue) }
   }
 
   // MARK: - WebRTC
@@ -88,9 +112,9 @@ final class SettingsManager {
   // MARK: - Reset
 
   func resetAll() {
-    for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
-                .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
-                .speakerOutputEnabled, .videoStreamingEnabled,
+    KeychainManager.deleteAll()
+    for key in [Key.geminiSystemPrompt, .openClawHost, .openClawPort,
+                .webrtcSignalingURL, .speakerOutputEnabled, .videoStreamingEnabled,
                 .proactiveNotificationsEnabled] {
       defaults.removeObject(forKey: key.rawValue)
     }
