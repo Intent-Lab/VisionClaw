@@ -9,6 +9,7 @@ final class SettingsManager {
     case geminiAPIKey
     case openClawHost
     case openClawPort
+    case openClawAgentTarget
     case openClawHookToken
     case openClawGatewayToken
     case geminiSystemPrompt
@@ -28,8 +29,20 @@ final class SettingsManager {
   }
 
   var geminiSystemPrompt: String {
-    get { defaults.string(forKey: Key.geminiSystemPrompt.rawValue) ?? GeminiConfig.defaultSystemInstruction }
-    set { defaults.set(newValue, forKey: Key.geminiSystemPrompt.rawValue) }
+    get {
+      guard let stored = defaults.string(forKey: Key.geminiSystemPrompt.rawValue),
+            !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return GeminiConfig.defaultSystemInstruction
+      }
+      return stored
+    }
+    set {
+      if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        defaults.removeObject(forKey: Key.geminiSystemPrompt.rawValue)
+      } else {
+        defaults.set(newValue, forKey: Key.geminiSystemPrompt.rawValue)
+      }
+    }
   }
 
   // MARK: - OpenClaw
@@ -45,6 +58,25 @@ final class SettingsManager {
       return stored != 0 ? stored : Secrets.openClawPort
     }
     set { defaults.set(newValue, forKey: Key.openClawPort.rawValue) }
+  }
+
+  var openClawAgentTarget: String {
+    get {
+      guard let stored = defaults.string(forKey: Key.openClawAgentTarget.rawValue)?
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+        !stored.isEmpty else {
+        return "openclaw"
+      }
+      return stored
+    }
+    set {
+      let target = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+      if target.isEmpty || target == "openclaw" {
+        defaults.removeObject(forKey: Key.openClawAgentTarget.rawValue)
+      } else {
+        defaults.set(target, forKey: Key.openClawAgentTarget.rawValue)
+      }
+    }
   }
 
   var openClawHookToken: String {
@@ -89,6 +121,7 @@ final class SettingsManager {
 
   func resetAll() {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .openClawHost, .openClawPort,
+                .openClawAgentTarget,
                 .openClawHookToken, .openClawGatewayToken, .webrtcSignalingURL,
                 .speakerOutputEnabled, .videoStreamingEnabled,
                 .proactiveNotificationsEnabled] {

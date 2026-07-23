@@ -1,6 +1,32 @@
 import Foundation
 import SwiftUI
 
+struct ToolAudioGate {
+  private var pendingCallIDs: Set<String> = []
+
+  var hasPendingCalls: Bool {
+    !pendingCallIDs.isEmpty
+  }
+
+  mutating func begin(callIDs: [String]) {
+    pendingCallIDs.formUnion(callIDs)
+  }
+
+  mutating func finish(callID: String) {
+    pendingCallIDs.remove(callID)
+  }
+
+  @discardableResult
+  mutating func cancel(callIDs: [String]) -> Bool {
+    pendingCallIDs.subtract(callIDs)
+    return !hasPendingCalls
+  }
+
+  mutating func reset() {
+    pendingCallIDs.removeAll()
+  }
+}
+
 @MainActor
 class GeminiSessionViewModel: ObservableObject {
   @Published var isGeminiActive: Bool = false
@@ -16,8 +42,14 @@ class GeminiSessionViewModel: ObservableObject {
   private var toolCallRouter: ToolCallRouter?
   private let audioManager = AudioManager()
   private let eventClient = OpenClawEventClient()
+  private var toolAudioGate = ToolAudioGate()
   private var lastVideoFrameTime: Date = .distantPast
   private var stateObservation: Task<Void, Never>?
+  private var isInputAudioPaused = false
+  private var pendingProactiveNotifications: [String] = []
+  private var isProactiveTurnInFlight = false
+  private var awaitingPostToolTurn = false
+  private var lastConversationActivity: Date = .distantPast
 
   var streamingMode: StreamingMode = .glasses
 
@@ -35,43 +67,57 @@ class GeminiSessionViewModel: ObservableObject {
     audioManager.onAudioCaptured = { [weak self] data in
       guard let self else { return }
       Task { @MainActor in
-        // Mute mic while model speaks when speaker is on the phone
-        // (loudspeaker + co-located mic overwhelms iOS echo cancellation)
-        let speakerOnPhone = self.streamingMode == .iPhone || SettingsManager.shared.speakerOutputEnabled
-        if speakerOnPhone && self.geminiService.isModelSpeaking { return }
+        // Keep the session half-duplex until every locally queued PCM buffer has
+        // played. This prevents the glasses from feeding Gemini's voice back into
+        // its own sensitive VAD after server-side turnComplete arrives.
+        if self.geminiService.isModelSpeaking
+            || self.audioManager.isPlaybackActive
+            || self.toolAudioGate.hasPendingCalls
+            || self.awaitingPostToolTurn
+            || self.isProactiveTurnInFlight {
+          self.pauseInputAudioIfNeeded()
+          return
+        }
+        self.isInputAudioPaused = false
         self.geminiService.sendAudio(data: data)
       }
     }
 
     geminiService.onAudioReceived = { [weak self] data in
-      self?.audioManager.playAudio(data: data)
+      guard let self else { return }
+      self.lastConversationActivity = Date()
+      self.audioManager.playAudio(data: data)
     }
 
     geminiService.onInterrupted = { [weak self] in
-      self?.audioManager.stopPlayback()
+      guard let self else { return }
+      self.lastConversationActivity = Date()
+      self.isProactiveTurnInFlight = false
+      self.awaitingPostToolTurn = false
+      self.audioManager.stopPlayback(reason: "Gemini interruption")
+      self.isInputAudioPaused = false
     }
 
     geminiService.onTurnComplete = { [weak self] in
       guard let self else { return }
-      Task { @MainActor in
-        // Clear user transcript when AI finishes responding
-        self.userTranscript = ""
-      }
+      self.lastConversationActivity = Date()
+      self.isProactiveTurnInFlight = false
+      self.awaitingPostToolTurn = false
+      // Clear user transcript when AI finishes responding
+      self.userTranscript = ""
     }
 
     geminiService.onInputTranscription = { [weak self] text in
       guard let self else { return }
-      Task { @MainActor in
-        self.userTranscript += text
-        self.aiTranscript = ""
-      }
+      self.lastConversationActivity = Date()
+      self.userTranscript += text
+      self.aiTranscript = ""
     }
 
     geminiService.onOutputTranscription = { [weak self] text in
       guard let self else { return }
-      Task { @MainActor in
-        self.aiTranscript += text
-      }
+      self.lastConversationActivity = Date()
+      self.aiTranscript += text
     }
 
     // Handle unexpected disconnection
@@ -94,9 +140,39 @@ class GeminiSessionViewModel: ObservableObject {
     geminiService.onToolCall = { [weak self] toolCall in
       guard let self else { return }
       Task { @MainActor in
-        for call in toolCall.functionCalls {
-          self.toolCallRouter?.handleToolCall(call) { [weak self] response in
-            self?.geminiService.sendToolResponse(response)
+        self.lastConversationActivity = Date()
+        let callIDs = toolCall.functionCalls.map(\.id)
+        guard let toolCallRouter = self.toolCallRouter else {
+          let canResumeStreaming = self.toolAudioGate.cancel(callIDs: callIDs)
+          if canResumeStreaming {
+            self.geminiService.setVideoStreamingPaused(false)
+          }
+          return
+        }
+
+        if !callIDs.isEmpty {
+          self.toolAudioGate.begin(callIDs: callIDs)
+          self.pauseInputAudioIfNeeded()
+          self.geminiService.setVideoStreamingPaused(true)
+          // Never stop or discard playback here. The acknowledgement is allowed
+          // to drain completely while OpenClaw runs.
+        }
+
+        toolCallRouter.handleToolCalls(toolCall.functionCalls) { [weak self] response in
+          guard let self else { return }
+          self.awaitingPostToolTurn = true
+          self.geminiService.sendToolResponse(response) { [weak self] sent in
+            guard let self else { return }
+            for callID in callIDs {
+              self.toolAudioGate.finish(callID: callID)
+            }
+            if !self.toolAudioGate.hasPendingCalls {
+              self.geminiService.setVideoStreamingPaused(false)
+            }
+            if !sent {
+              self.awaitingPostToolTurn = false
+              self.errorMessage = "The OpenClaw result could not be returned to Gemini."
+            }
           }
         }
       }
@@ -106,19 +182,42 @@ class GeminiSessionViewModel: ObservableObject {
       guard let self else { return }
       Task { @MainActor in
         self.toolCallRouter?.cancelToolCalls(ids: cancellation.ids)
+        let canResumeStreaming = self.toolAudioGate.cancel(callIDs: cancellation.ids)
+        if canResumeStreaming {
+          self.awaitingPostToolTurn = false
+          self.geminiService.setVideoStreamingPaused(false)
+        }
       }
     }
 
     // Observe service state
     stateObservation = Task { [weak self] in
-      guard let self else { return }
       while !Task.isCancelled {
         try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
         guard !Task.isCancelled else { break }
-        self.connectionState = self.geminiService.connectionState
-        self.isModelSpeaking = self.geminiService.isModelSpeaking
-        self.toolCallStatus = self.openClawBridge.lastToolCallStatus
-        self.openClawConnectionState = self.openClawBridge.connectionState
+        guard let self else { break }
+        let nextConnectionState = self.geminiService.connectionState
+        if self.connectionState != nextConnectionState {
+          self.connectionState = nextConnectionState
+        }
+
+        let nextIsModelSpeaking = self.geminiService.isModelSpeaking
+          || self.audioManager.isPlaybackActive
+        if self.isModelSpeaking != nextIsModelSpeaking {
+          self.isModelSpeaking = nextIsModelSpeaking
+        }
+
+        let nextToolCallStatus = self.openClawBridge.lastToolCallStatus
+        if self.toolCallStatus != nextToolCallStatus {
+          self.toolCallStatus = nextToolCallStatus
+        }
+
+        let nextOpenClawState = self.openClawBridge.connectionState
+        if self.openClawConnectionState != nextOpenClawState {
+          self.openClawConnectionState = nextOpenClawState
+        }
+
+        self.deliverPendingNotificationIfIdle()
       }
     }
 
@@ -126,8 +225,9 @@ class GeminiSessionViewModel: ObservableObject {
     do {
       try audioManager.setupAudioSession(useIPhoneMode: streamingMode == .iPhone)
     } catch {
-      errorMessage = "Audio setup failed: \(error.localizedDescription)"
-      isGeminiActive = false
+      let message = "Audio setup failed: \(error.localizedDescription)"
+      stopSession()
+      errorMessage = message
       return
     }
 
@@ -141,12 +241,8 @@ class GeminiSessionViewModel: ObservableObject {
       } else {
         msg = "Failed to connect to Gemini"
       }
+      stopSession()
       errorMessage = msg
-      geminiService.disconnect()
-      stateObservation?.cancel()
-      stateObservation = nil
-      isGeminiActive = false
-      connectionState = .disconnected
       return
     }
 
@@ -154,12 +250,9 @@ class GeminiSessionViewModel: ObservableObject {
     do {
       try audioManager.startCapture()
     } catch {
-      errorMessage = "Mic capture failed: \(error.localizedDescription)"
-      geminiService.disconnect()
-      stateObservation?.cancel()
-      stateObservation = nil
-      isGeminiActive = false
-      connectionState = .disconnected
+      let message = "Mic capture failed: \(error.localizedDescription)"
+      stopSession()
+      errorMessage = message
       return
     }
 
@@ -169,7 +262,7 @@ class GeminiSessionViewModel: ObservableObject {
         guard let self else { return }
         Task { @MainActor in
           guard self.isGeminiActive, self.connectionState == .ready else { return }
-          self.geminiService.sendTextMessage(text)
+          self.enqueueProactiveNotification(text)
         }
       }
       eventClient.connect()
@@ -180,6 +273,12 @@ class GeminiSessionViewModel: ObservableObject {
     eventClient.disconnect()
     toolCallRouter?.cancelAll()
     toolCallRouter = nil
+    toolAudioGate.reset()
+    isInputAudioPaused = false
+    pendingProactiveNotifications.removeAll()
+    isProactiveTurnInFlight = false
+    awaitingPostToolTurn = false
+    audioManager.stopPlayback(reason: "AI session stopped")
     audioManager.stopCapture()
     geminiService.disconnect()
     stateObservation?.cancel()
@@ -199,6 +298,39 @@ class GeminiSessionViewModel: ObservableObject {
     guard now.timeIntervalSince(lastVideoFrameTime) >= GeminiConfig.videoFrameInterval else { return }
     lastVideoFrameTime = now
     geminiService.sendVideoFrame(image: image)
+  }
+
+  private func pauseInputAudioIfNeeded() {
+    guard !isInputAudioPaused else { return }
+    isInputAudioPaused = true
+    geminiService.sendAudioStreamEnd()
+  }
+
+  private func enqueueProactiveNotification(_ text: String) {
+    pendingProactiveNotifications.append(text)
+    if pendingProactiveNotifications.count > 10 {
+      pendingProactiveNotifications.removeFirst(pendingProactiveNotifications.count - 10)
+    }
+    deliverPendingNotificationIfIdle()
+  }
+
+  private func deliverPendingNotificationIfIdle() {
+    guard isGeminiActive,
+          connectionState == .ready,
+          !isProactiveTurnInFlight,
+          !pendingProactiveNotifications.isEmpty,
+          !geminiService.isModelSpeaking,
+          !audioManager.isPlaybackActive,
+          !toolAudioGate.hasPendingCalls,
+          !awaitingPostToolTurn,
+          userTranscript.isEmpty,
+          Date().timeIntervalSince(lastConversationActivity) >= 0.75 else { return }
+
+    isProactiveTurnInFlight = true
+    lastConversationActivity = Date()
+    let text = pendingProactiveNotifications.removeFirst()
+    pauseInputAudioIfNeeded()
+    geminiService.sendTextMessage(text)
   }
 
 }

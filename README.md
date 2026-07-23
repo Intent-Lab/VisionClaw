@@ -101,6 +101,10 @@ First, enable Developer Mode in the Meta AI app:
 
 ![How to enable Developer Mode](assets/dev_mode.png)
 
+The iOS target defaults `META_APP_ID` to `0` for Developer Mode. For a registered
+release-channel app, override the `META_APP_ID` and `CLIENT_TOKEN` build settings
+with the values from the Wearables Developer Center.
+
 Then in VisionClaw:
 1. Tap **"Start Streaming"** in the app
 2. Tap the **AI button** for voice + vision conversation
@@ -216,6 +220,10 @@ const val openClawGatewayToken = "your-gateway-token-here"
 To find your Mac's Bonjour hostname: **System Settings > General > Sharing** -- it's shown at the top (e.g., `Johns-MacBook-Pro.local`).
 
 > Both iOS and Android also have an in-app Settings screen where you can change these values at runtime without editing source code.
+>
+> The iOS app targets the gateway's default `openclaw` agent. To use a dedicated
+> agent, set **Agent Target** in Settings to a model target such as
+> `openclaw/glasses`.
 
 ### 3. Start the gateway
 
@@ -272,7 +280,7 @@ All source code is in `samples/CameraAccessAndroid/app/src/main/java/.../cameraa
 
 ### Audio Pipeline
 
-- **Input**: Phone mic -> AudioManager (PCM Int16, 16kHz mono, 100ms chunks) -> Gemini WebSocket
+- **Input**: Phone mic -> AudioManager (PCM Int16, 16kHz mono; 40ms chunks on iOS, 100ms on Android) -> Gemini WebSocket
 - **Output**: Gemini WebSocket -> AudioManager playback queue -> Phone speaker
 - **iOS iPhone mode**: Uses `.voiceChat` audio session for echo cancellation + mic gating during AI speech
 - **iOS Glasses mode**: Uses `.videoChat` audio session (mic is on glasses, speaker is on phone -- no echo)
@@ -280,8 +288,9 @@ All source code is in `samples/CameraAccessAndroid/app/src/main/java/.../cameraa
 
 ### Video Pipeline
 
-- **Glasses**: DAT SDK video stream (24fps) -> throttle to ~1fps -> JPEG (50% quality) -> Gemini
-- **Phone**: Camera capture (30fps) -> throttle to ~1fps -> JPEG -> Gemini
+- **Glasses**: DAT SDK capture (24fps low, 7fps medium/high) -> latest-frame-only throttle to ~1fps -> 640px JPEG (40% quality) -> Gemini
+- **Phone**: Camera capture (30fps) -> latest-frame-only throttle to ~1fps -> 640px JPEG (40% quality) -> Gemini
+- **iOS AI mode**: switches glasses capture to the low profile while Gemini is active to protect audio and tool-response latency
 
 ### Tool Calling
 
@@ -320,7 +329,7 @@ For full details, see [`samples/CameraAccess/CameraAccess/WebRTC/README.md`](sam
 
 ### iOS
 - iOS 17.0+
-- Xcode 15.0+
+- Xcode 16.0+ (required by the DAT 0.8 Swift package)
 - Gemini API key ([get one free](https://aistudio.google.com/apikey))
 - Meta Ray-Ban glasses (optional -- use iPhone mode for testing)
 - OpenClaw on your Mac (optional -- for agentic actions)

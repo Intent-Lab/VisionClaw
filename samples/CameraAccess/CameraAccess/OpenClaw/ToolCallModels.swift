@@ -45,12 +45,20 @@ enum ToolResult {
   case success(String)
   case failure(String)
 
+  static let maxResponseCharacters = 12_000
+
+  private static func bounded(_ value: String) -> String {
+    guard value.count > maxResponseCharacters else { return value }
+    let marker = "\n\n[response truncated]"
+    return String(value.prefix(maxResponseCharacters - marker.count)) + marker
+  }
+
   var responseValue: [String: Any] {
     switch self {
     case .success(let result):
-      return ["result": result]
+      return ["result": Self.bounded(result)]
     case .failure(let error):
-      return ["error": error]
+      return ["error": Self.bounded(error)]
     }
   }
 }
@@ -90,7 +98,7 @@ enum ToolDeclarations {
 
   static let execute: [String: Any] = [
     "name": "execute",
-    "description": "Your only way to take action. You have no memory, storage, or ability to do anything on your own -- use this tool for everything: sending messages, searching the web, adding to lists, setting reminders, creating notes, research, drafts, scheduling, smart home control, app interactions, or any request that goes beyond answering a question. When in doubt, use this tool.",
+    "description": "Your mandatory connection to OpenClaw and all external systems. Use it to inspect OpenClaw agents, sessions, skills, tools, status, configuration, capabilities, and environment, and for actions such as messages, web search, lists, reminders, notes, research, drafts, scheduling, smart-home control, and app interactions. For every OpenClaw question or request, call this tool; never infer the answer from the camera. Speak exactly one short pending acknowledgement before calling. After the call, stop speaking and wait; never report success or a result until this tool returns. When in doubt, use this tool.",
     "parameters": [
       "type": "object",
       "properties": [
@@ -100,7 +108,6 @@ enum ToolDeclarations {
         ]
       ],
       "required": ["task"]
-    ] as [String: Any],
-    "behavior": "BLOCKING"
+    ] as [String: Any]
   ]
 }

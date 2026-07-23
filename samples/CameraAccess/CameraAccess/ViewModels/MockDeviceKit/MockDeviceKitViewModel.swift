@@ -32,7 +32,7 @@ extension MockDeviceKitView {
 
     // Add a new mock Ray-Ban Meta device
     func pairRaybanMeta() {
-      let mockDevice = mockDeviceKit.pairRaybanMeta()
+      guard let mockDevice = try? mockDeviceKit.pairGlasses(model: .rayBanMeta) else { return }
       cardViewModels.append(MockDeviceCardView.ViewModel(device: mockDevice))
     }
 

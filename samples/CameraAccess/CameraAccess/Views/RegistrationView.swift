@@ -25,6 +25,12 @@ struct RegistrationView: View {
       // Handle callback URLs from the Meta mobile app
       // This is essential for completing DAT SDK registration and permission flows
       .onOpenURL { url in
+        NSLog(
+          "[Wearables] received callback scheme=%@ hasAction=%@",
+          url.scheme ?? "<none>",
+          String(
+            describing: URLComponents(url: url, resolvingAgainstBaseURL: false)?
+              .queryItems?.contains(where: { $0.name == "metaWearablesAction" }) == true))
         guard
           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
           // Check if this URL is related to DAT SDK workflows (contains metaWearablesAction query param)

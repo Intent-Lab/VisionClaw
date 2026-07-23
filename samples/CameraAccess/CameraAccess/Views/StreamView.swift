@@ -181,12 +181,14 @@ struct ControlsView: View {
           if geminiVM.isGeminiActive {
             geminiVM.stopSession()
           } else {
-            await geminiVM.startSession()
+            if await viewModel.prepareForAIMode(), !webrtcVM.isActive {
+              await geminiVM.startSession()
+            }
           }
         }
       }
-      .opacity(webrtcVM.isActive ? 0.4 : 1.0)
-      .disabled(webrtcVM.isActive)
+      .opacity(webrtcVM.isActive || viewModel.isPreparingForAIMode ? 0.4 : 1.0)
+      .disabled(webrtcVM.isActive || viewModel.isPreparingForAIMode)
 
       // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
       CircleButton(
@@ -203,8 +205,8 @@ struct ControlsView: View {
           }
         }
       }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
+      .opacity(geminiVM.isGeminiActive || viewModel.isPreparingForAIMode ? 0.4 : 1.0)
+      .disabled(geminiVM.isGeminiActive || viewModel.isPreparingForAIMode)
     }
   }
 }

@@ -70,16 +70,24 @@ struct NonStreamView: View {
 
         Spacer()
 
-        HStack(spacing: 8) {
-          Image(systemName: "hourglass")
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .foregroundColor(.white.opacity(0.7))
-            .frame(width: 16, height: 16)
+        VStack(spacing: 8) {
+          HStack(spacing: 8) {
+            Image(systemName: "hourglass")
+              .resizable()
+              .aspectRatio(contentMode: .fit)
+              .foregroundColor(.white.opacity(0.7))
+              .frame(width: 16, height: 16)
 
-          Text("Waiting for an active device")
-            .font(.system(size: 14))
-            .foregroundColor(.white.opacity(0.7))
+            Text(wearablesVM.connectionStatus)
+              .font(.system(size: 14))
+              .foregroundColor(.white.opacity(0.7))
+          }
+
+          Button("Check glasses update") {
+            wearablesVM.openDATGlassesAppUpdate()
+          }
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundColor(.blue)
         }
         .padding(.bottom, 12)
         .opacity(viewModel.hasActiveDevice ? 0 : 1)
@@ -107,7 +115,7 @@ struct NonStreamView: View {
         CustomButton(
           title: "Start on iPhone",
           style: .secondary,
-          isDisabled: false
+          isDisabled: viewModel.isStartingSession
         ) {
           Task {
             await viewModel.handleStartIPhone()
@@ -115,9 +123,9 @@ struct NonStreamView: View {
         }
 
         CustomButton(
-          title: "Start streaming",
+          title: viewModel.isStartingSession ? "Connecting…" : "Start streaming",
           style: .primary,
-          isDisabled: !viewModel.hasActiveDevice
+          isDisabled: !viewModel.hasActiveDevice || viewModel.isStartingSession
         ) {
           Task {
             await viewModel.handleStartStreaming()

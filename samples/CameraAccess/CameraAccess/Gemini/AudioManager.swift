@@ -2,21 +2,93 @@ import AVFoundation
 import Foundation
 import UIKit
 
+/// Tracks buffers until AVAudioPlayerNode confirms that they were actually
+/// played. Server turn completion is not the same as local speaker drain.
+final class PlaybackDrainTracker: @unchecked Sendable {
+  struct Ticket: Sendable {
+    fileprivate let generation: UInt64
+  }
+
+  struct EnqueueResult: Sendable {
+    let ticket: Ticket
+    let becameActive: Bool
+  }
+
+  private let lock = NSLock()
+  private var generation: UInt64 = 0
+  private var pendingBuffers = 0
+
+  var isActive: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return pendingBuffers > 0
+  }
+
+  var pendingBufferCount: Int {
+    lock.lock()
+    defer { lock.unlock() }
+    return pendingBuffers
+  }
+
+  func enqueue() -> EnqueueResult {
+    lock.lock()
+    let becameActive = pendingBuffers == 0
+    pendingBuffers += 1
+    let ticket = Ticket(generation: generation)
+    lock.unlock()
+    return EnqueueResult(ticket: ticket, becameActive: becameActive)
+  }
+
+  func isCurrent(_ ticket: Ticket) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return ticket.generation == generation
+  }
+
+  /// Returns true when this completion drained the current generation.
+  @discardableResult
+  func complete(_ ticket: Ticket) -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    guard ticket.generation == generation, pendingBuffers > 0 else { return false }
+    pendingBuffers -= 1
+    return pendingBuffers == 0
+  }
+
+  func invalidate() {
+    lock.lock()
+    generation &+= 1
+    pendingBuffers = 0
+    lock.unlock()
+  }
+}
+
 class AudioManager {
   var onAudioCaptured: ((Data) -> Void)?
 
-  private let audioEngine = AVAudioEngine()
-  private let playerNode = AVAudioPlayerNode()
+  private var audioEngine = AVAudioEngine()
+  private var playerNode = AVAudioPlayerNode()
   private var isCapturing = false
+  private var isInputTapInstalled = false
   private var wasCapturingBeforeInterruption = false
   private var useIPhoneMode = false
 
   private let outputFormat: AVAudioFormat
 
-  // Accumulate resampled PCM into ~100ms chunks before sending
+  // Google recommends 20-40ms realtime input chunks. Forty milliseconds keeps
+  // request overhead modest while cutting the previous 100ms input delay.
   private let sendQueue = DispatchQueue(label: "audio.accumulator")
   private var accumulatedData = Data()
-  private let minSendBytes = 3200  // 100ms at 16kHz mono Int16 = 1600 frames * 2 bytes
+  private let minSendBytes = 1280  // 40ms at 16kHz mono Int16
+  private let playbackPreparationQueue = DispatchQueue(
+    label: "audio.playback.prepare",
+    qos: .userInitiated
+  )
+  private let playbackDrainTracker = PlaybackDrainTracker()
+
+  var isPlaybackActive: Bool {
+    playbackDrainTracker.isActive
+  }
 
   // Notification observers for background resilience
   private var interruptionObserver: NSObjectProtocol?
@@ -34,6 +106,7 @@ class AudioManager {
   }
 
   func setupAudioSession(useIPhoneMode: Bool = false) throws {
+    removeObservers()
     self.useIPhoneMode = useIPhoneMode
     let session = AVAudioSession.sharedInstance()
     // voiceChat: aggressive echo cancellation (mic + speaker co-located on phone)
@@ -44,7 +117,7 @@ class AudioManager {
       try session.setCategory(
         .playAndRecord,
         mode: .voiceChat,
-        options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
+        options: [.defaultToSpeaker, .allowBluetoothHFP, .mixWithOthers]
       )
     } else {
       try session.setCategory(
@@ -69,7 +142,9 @@ class AudioManager {
   func startCapture() throws {
     guard !isCapturing else { return }
 
-    audioEngine.attach(playerNode)
+    if playerNode.engine == nil {
+      audioEngine.attach(playerNode)
+    }
     let playerFormat = AVAudioFormat(
       commonFormat: .pcmFormatFloat32,
       sampleRate: GeminiConfig.outputAudioSampleRate,
@@ -129,12 +204,12 @@ class AudioManager {
         pcmData = self.float32BufferToInt16Data(buffer)
       }
 
-      // Accumulate into ~100ms chunks before sending to Gemini
+      // Emit exact ~40ms chunks even when the audio tap delivers a larger buffer.
       self.sendQueue.async {
         self.accumulatedData.append(pcmData)
-        if self.accumulatedData.count >= self.minSendBytes {
-          let chunk = self.accumulatedData
-          self.accumulatedData = Data()
+        while self.accumulatedData.count >= self.minSendBytes {
+          let chunk = Data(self.accumulatedData.prefix(self.minSendBytes))
+          self.accumulatedData.removeFirst(self.minSendBytes)
           if tapCount <= 3 {
             NSLog("[Audio] Sending chunk: %d bytes (~%dms)",
                   chunk.count, chunk.count / 32)  // 16kHz * 2 bytes = 32 bytes/ms
@@ -143,15 +218,53 @@ class AudioManager {
         }
       }
     }
+    isInputTapInstalled = true
 
-    try audioEngine.start()
-    playerNode.play()
-    isCapturing = true
+    do {
+      try audioEngine.start()
+      playerNode.play()
+      isCapturing = true
+    } catch {
+      stopCapture()
+      throw error
+    }
   }
 
   func playAudio(data: Data) {
     guard isCapturing, !data.isEmpty else { return }
+    let registration = playbackDrainTracker.enqueue()
+    if registration.becameActive {
+      NSLog("[Audio] Playback started")
+    }
 
+    playbackPreparationQueue.async { [weak self] in
+      guard let self else { return }
+      guard let buffer = Self.makePlaybackBuffer(data: data) else {
+        self.finishPlaybackBuffer(registration.ticket)
+        return
+      }
+
+      DispatchQueue.main.async { [weak self] in
+        guard let self else { return }
+        guard self.isCapturing,
+              self.playbackDrainTracker.isCurrent(registration.ticket) else {
+          self.finishPlaybackBuffer(registration.ticket)
+          return
+        }
+        self.playerNode.scheduleBuffer(
+          buffer,
+          completionCallbackType: .dataPlayedBack
+        ) { [weak self] _ in
+          self?.finishPlaybackBuffer(registration.ticket)
+        }
+        if !self.playerNode.isPlaying {
+          self.playerNode.play()
+        }
+      }
+    }
+  }
+
+  private static func makePlaybackBuffer(data: Data) -> AVAudioPCMBuffer? {
     let playerFormat = AVAudioFormat(
       commonFormat: .pcmFormatFloat32,
       sampleRate: GeminiConfig.outputAudioSampleRate,
@@ -160,36 +273,48 @@ class AudioManager {
     )!
 
     let frameCount = UInt32(data.count) / (GeminiConfig.audioBitsPerSample / 8 * GeminiConfig.audioChannels)
-    guard frameCount > 0 else { return }
+    guard frameCount > 0 else { return nil }
 
-    guard let buffer = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: frameCount) else { return }
+    guard let buffer = AVAudioPCMBuffer(
+      pcmFormat: playerFormat,
+      frameCapacity: frameCount
+    ) else { return nil }
     buffer.frameLength = frameCount
 
-    guard let floatData = buffer.floatChannelData else { return }
+    guard let floatData = buffer.floatChannelData else { return nil }
     data.withUnsafeBytes { rawBuffer in
       guard let int16Ptr = rawBuffer.bindMemory(to: Int16.self).baseAddress else { return }
       for i in 0..<Int(frameCount) {
         floatData[0][i] = Float(int16Ptr[i]) / Float(Int16.max)
       }
     }
-
-    playerNode.scheduleBuffer(buffer)
-    if !playerNode.isPlaying {
-      playerNode.play()
-    }
+    return buffer
   }
 
-  func stopPlayback() {
+  func stopPlayback(reason: String = "unspecified") {
+    guard isCapturing else { return }
+    NSLog(
+      "[Audio] Playback flushed (%@, pending=%d)",
+      reason,
+      playbackDrainTracker.pendingBufferCount)
+    invalidatePreparedPlayback()
     playerNode.stop()
     playerNode.play()
   }
 
   func stopCapture() {
-    guard isCapturing else { return }
-    audioEngine.inputNode.removeTap(onBus: 0)
+    invalidatePreparedPlayback()
+    if isInputTapInstalled {
+      audioEngine.inputNode.removeTap(onBus: 0)
+      isInputTapInstalled = false
+    }
     playerNode.stop()
-    audioEngine.stop()
-    audioEngine.detach(playerNode)
+    if audioEngine.isRunning {
+      audioEngine.stop()
+    }
+    if playerNode.engine != nil {
+      audioEngine.detach(playerNode)
+    }
     isCapturing = false
     // Flush any remaining accumulated audio
     sendQueue.async {
@@ -200,6 +325,16 @@ class AudioManager {
       }
     }
     removeObservers()
+  }
+
+  private func finishPlaybackBuffer(_ ticket: PlaybackDrainTracker.Ticket) {
+    if playbackDrainTracker.complete(ticket) {
+      NSLog("[Audio] Playback fully drained")
+    }
+  }
+
+  private func invalidatePreparedPlayback() {
+    playbackDrainTracker.invalidate()
   }
 
   // MARK: - Audio Interruption & Route Change Handling
@@ -304,6 +439,9 @@ class AudioManager {
     do {
       try audioSession.setActive(true)
       try audioEngine.start()
+      if !playerNode.isPlaying {
+        playerNode.play()
+      }
       NSLog("[Audio] Audio resumed successfully")
     } catch {
       NSLog("[Audio] Failed to resume audio: %@", error.localizedDescription)
@@ -315,11 +453,19 @@ class AudioManager {
     NSLog("[Audio] Attempting audio reset")
     let wasCapturing = isCapturing
 
+    invalidatePreparedPlayback()
+    playerNode.stop()
     if audioEngine.isRunning {
       audioEngine.stop()
     }
-    audioEngine.inputNode.removeTap(onBus: 0)
+    if isInputTapInstalled {
+      audioEngine.inputNode.removeTap(onBus: 0)
+      isInputTapInstalled = false
+    }
     isCapturing = false
+    removeObservers()
+    audioEngine = AVAudioEngine()
+    playerNode = AVAudioPlayerNode()
 
     if wasCapturing {
       do {

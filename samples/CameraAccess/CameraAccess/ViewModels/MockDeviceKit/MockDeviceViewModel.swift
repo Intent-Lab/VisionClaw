@@ -36,7 +36,7 @@ extension MockDeviceCardView {
 
     // Display name for the mock device in the UI
     var deviceName: String {
-      if device is MockRaybanMeta {
+      if device is any MockGlasses {
         return "RayBan Meta Glasses"
       }
       return "Device"
@@ -59,34 +59,30 @@ extension MockDeviceCardView {
     }
 
     func unfold() {
-      if let rayBanDevice = device as? MockDisplaylessGlasses {
+      if let rayBanDevice = device as? any MockGlasses {
         rayBanDevice.unfold()
       }
     }
 
     func fold() {
-      if let rayBanDevice = device as? MockDisplaylessGlasses {
+      if let rayBanDevice = device as? any MockGlasses {
         rayBanDevice.fold()
       }
     }
 
     // Load mock video content
     func selectVideo(from url: URL) {
-      if let cameraKit = (device as? MockDisplaylessGlasses)?.getCameraKit() {
-        Task {
-          await cameraKit.setCameraFeed(fileURL: url)
-          hasCameraFeed = true
-        }
+      if let glasses = device as? any MockGlasses {
+        glasses.services.camera.setCameraFeed(fileURL: url)
+        hasCameraFeed = true
       }
     }
 
     // Load mock image content
     func selectImage(from url: URL) {
-      if let cameraKit = (device as? MockDisplaylessGlasses)?.getCameraKit() {
-        Task {
-          await cameraKit.setCapturedImage(fileURL: url)
-          hasCapturedImage = true
-        }
+      if let glasses = device as? any MockGlasses {
+        glasses.services.camera.setCapturedImage(fileURL: url)
+        hasCapturedImage = true
       }
     }
   }

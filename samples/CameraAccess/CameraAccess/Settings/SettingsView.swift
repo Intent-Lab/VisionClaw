@@ -7,6 +7,7 @@ struct SettingsView: View {
   @State private var geminiAPIKey: String = ""
   @State private var openClawHost: String = ""
   @State private var openClawPort: String = ""
+  @State private var openClawAgentTarget: String = ""
   @State private var openClawHookToken: String = ""
   @State private var openClawGatewayToken: String = ""
   @State private var geminiSystemPrompt: String = ""
@@ -55,6 +56,16 @@ struct SettingsView: View {
               .foregroundColor(.secondary)
             TextField("18789", text: $openClawPort)
               .keyboardType(.numberPad)
+              .font(.system(.body, design: .monospaced))
+          }
+
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Agent Target")
+              .font(.caption)
+              .foregroundColor(.secondary)
+            TextField("openclaw", text: $openClawAgentTarget)
+              .autocapitalization(.none)
+              .disableAutocorrection(true)
               .font(.system(.body, design: .monospaced))
           }
 
@@ -147,6 +158,7 @@ struct SettingsView: View {
     geminiSystemPrompt = settings.geminiSystemPrompt
     openClawHost = settings.openClawHost
     openClawPort = String(settings.openClawPort)
+    openClawAgentTarget = settings.openClawAgentTarget
     openClawHookToken = settings.openClawHookToken
     openClawGatewayToken = settings.openClawGatewayToken
     webrtcSignalingURL = settings.webrtcSignalingURL
@@ -162,6 +174,8 @@ struct SettingsView: View {
     if let port = Int(openClawPort.trimmingCharacters(in: .whitespacesAndNewlines)) {
       settings.openClawPort = port
     }
+    settings.openClawAgentTarget =
+      openClawAgentTarget.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.openClawHookToken = openClawHookToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.openClawGatewayToken = openClawGatewayToken.trimmingCharacters(in: .whitespacesAndNewlines)
     settings.webrtcSignalingURL = webrtcSignalingURL.trimmingCharacters(in: .whitespacesAndNewlines)
