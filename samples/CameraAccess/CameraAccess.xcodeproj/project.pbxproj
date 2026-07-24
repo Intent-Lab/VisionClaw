@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B70100000000000000000011 /* GlassesSessionShortcutDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70100000000000000000001 /* GlassesSessionShortcutDestination.swift */; };
+		B70100000000000000000012 /* OpenGlassesSessionIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70100000000000000000002 /* OpenGlassesSessionIntent.swift */; };
+		B70200000000000000000011 /* GlassesSessionWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = B70200000000000000000001 /* GlassesSessionWidget.swift */; };
+		B70200000000000000000012 /* VisionClawWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B70200000000000000000003 /* VisionClawWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8F2D23802E856711002D0588 /* DebugMenuViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */; };
 		8F8F00782E8ACB4600A4BDAF /* WearablesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */; };
 		8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B792E6F0A9800F56AB1 /* CameraAccessApp.swift */; };
@@ -46,6 +50,7 @@
 		A1B2C3D42F0A000200000004 /* GeminiSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000004 /* GeminiSessionViewModel.swift */; };
 		A1B2C3D42F0A000200000005 /* GeminiOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000005 /* GeminiOverlayView.swift */; };
 		E66D30242E7DA71900470B48 /* MockDeviceKitButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */; };
+		E699CCA12E8150670052C240 /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = E699CCA22E8150670052C240 /* MWDATMockDevice */; };
 		E6A188482EB918740097D0E1 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A188472EB918740097D0E1 /* StreamView.swift */; };
 		E6DA451D2E79A63100E3F688 /* MockDeviceCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA45182E79A63100E3F688 /* MockDeviceCardView.swift */; };
 		E6DA451E2E79A63100E3F688 /* CardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA45172E79A63100E3F688 /* CardView.swift */; };
@@ -54,6 +59,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		B70200000000000000000060 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CCCCCCCCCCCCCCCCCCCCCC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B70200000000000000000040;
+			remoteInfo = VisionClawWidgets;
+		};
 		E699CC992E8150670052C240 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = CCCCCCCCCCCCCCCCCCCCCC /* Project object */;
@@ -64,6 +76,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		B70200000000000000000033 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B70200000000000000000012 /* VisionClawWidgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		8FD96B932E6F0C6E00F56AB1 /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -77,6 +100,11 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B70100000000000000000001 /* GlassesSessionShortcutDestination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesSessionShortcutDestination.swift; sourceTree = "<group>"; };
+		B70100000000000000000002 /* OpenGlassesSessionIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenGlassesSessionIntent.swift; sourceTree = "<group>"; };
+		B70200000000000000000001 /* GlassesSessionWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassesSessionWidget.swift; sourceTree = "<group>"; };
+		B70200000000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B70200000000000000000003 /* VisionClawWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = VisionClawWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3A3A3A3A3A3A3A3A3A3A3A3A /* CameraAccess.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CameraAccess.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugMenuViewModel.swift; sourceTree = "<group>"; };
 		8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearablesViewModel.swift; sourceTree = "<group>"; };
@@ -131,6 +159,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		B70200000000000000000031 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		4A4A4A4A4A4A4A4A4A4A4A4A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -142,6 +177,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E699CCA02E8150670052C240 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E699CCA12E8150670052C240 /* MWDATMockDevice in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -149,6 +192,7 @@
 			isa = PBXGroup;
 			children = (
 				8FD96B7D2E6F0A9800F56AB1 /* CameraAccess */,
+				B70200000000000000000020 /* CameraAccessWidgets */,
 				8F2A14F12DDBCEB900D4E5F2 /* Frameworks */,
 				7A7A7A7A7A7A7A7A7A7A7A7A /* Products */,
 				E699CC962E8150670052C240 /* CameraAccessTests */,
@@ -159,6 +203,7 @@
 			isa = PBXGroup;
 			children = (
 				3A3A3A3A3A3A3A3A3A3A3A3A /* CameraAccess.app */,
+				B70200000000000000000003 /* VisionClawWidgets.appex */,
 				E699CC952E8150670052C240 /* CameraAccessTests.xctest */,
 			);
 			name = Products;
@@ -203,6 +248,7 @@
 		8FD96B7D2E6F0A9800F56AB1 /* CameraAccess */ = {
 			isa = PBXGroup;
 			children = (
+				B70100000000000000000020 /* SystemIntegration */,
 				9DD894B12F4047630090B9B9 /* Settings */,
 				9DD6CB042F3C637D00ED7098 /* WebRTC */,
 				9DD6CAAD2F3C426600ED7098 /* Secrets.swift */,
@@ -218,6 +264,24 @@
 				9D85EB992F35EC46006C44D1 /* OpenClaw */,
 			);
 			path = CameraAccess;
+			sourceTree = "<group>";
+		};
+		B70100000000000000000020 /* SystemIntegration */ = {
+			isa = PBXGroup;
+			children = (
+				B70100000000000000000001 /* GlassesSessionShortcutDestination.swift */,
+				B70100000000000000000002 /* OpenGlassesSessionIntent.swift */,
+			);
+			path = SystemIntegration;
+			sourceTree = "<group>";
+		};
+		B70200000000000000000020 /* CameraAccessWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				B70200000000000000000001 /* GlassesSessionWidget.swift */,
+				B70200000000000000000002 /* Info.plist */,
+			);
+			path = CameraAccessWidgets;
 			sourceTree = "<group>";
 		};
 		8FFD5FF42E8422580035E446 /* Components */ = {
@@ -298,10 +362,12 @@
 				4A4A4A4A4A4A4A4A4A4A4A4A /* Frameworks */,
 				BBBBBBBBBBBBBBBBBBBBBB /* Resources */,
 				8FD96B932E6F0C6E00F56AB1 /* Embed Frameworks */,
+				B70200000000000000000033 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B70200000000000000000061 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				9D3C69602F367CF700E641A5 /* iPhone */,
@@ -312,11 +378,29 @@
 			productReference = 3A3A3A3A3A3A3A3A3A3A3A3A /* CameraAccess.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B70200000000000000000040 /* VisionClawWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B70200000000000000000052 /* Build configuration list for PBXNativeTarget "VisionClawWidgets" */;
+			buildPhases = (
+				B70200000000000000000030 /* Sources */,
+				B70200000000000000000031 /* Frameworks */,
+				B70200000000000000000032 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VisionClawWidgets;
+			productName = VisionClawWidgets;
+			productReference = B70200000000000000000003 /* VisionClawWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		E699CC942E8150670052C240 /* CameraAccessTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E699CC9D2E8150670052C240 /* Build configuration list for PBXNativeTarget "CameraAccessTests" */;
 			buildPhases = (
 				E699CC912E8150670052C240 /* Sources */,
+				E699CCA02E8150670052C240 /* Frameworks */,
 				E699CC932E8150670052C240 /* Resources */,
 			);
 			buildRules = (
@@ -329,6 +413,7 @@
 			);
 			name = CameraAccessTests;
 			packageProductDependencies = (
+				E699CCA22E8150670052C240 /* MWDATMockDevice */,
 			);
 			productName = CameraAccessTests;
 			productReference = E699CC952E8150670052C240 /* CameraAccessTests.xctest */;
@@ -345,6 +430,9 @@
 				TargetAttributes = {
 					8A8A8A8A8A8A8A8A8A8A8A8A = {
 						CreatedOnToolsVersion = 12.5;
+					};
+					B70200000000000000000040 = {
+						CreatedOnToolsVersion = 26.0;
 					};
 					E699CC942E8150670052C240 = {
 						CreatedOnToolsVersion = 26.0;
@@ -370,12 +458,20 @@
 			projectRoot = "";
 			targets = (
 				8A8A8A8A8A8A8A8A8A8A8A8A /* CameraAccess */,
+				B70200000000000000000040 /* VisionClawWidgets */,
 				E699CC942E8150670052C240 /* CameraAccessTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		B70200000000000000000032 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		BBBBBBBBBBBBBBBBBBBBBB /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -394,10 +490,20 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		B70200000000000000000030 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B70200000000000000000011 /* GlassesSessionWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AAAAAAAAAAAAAAAAAAAAAA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B70100000000000000000011 /* GlassesSessionShortcutDestination.swift in Sources */,
+				B70100000000000000000012 /* OpenGlassesSessionIntent.swift in Sources */,
 				8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */,
 				8FD96B812E6F0A9800F56AB1 /* HomeScreenView.swift in Sources */,
 				8F2D23802E856711002D0588 /* DebugMenuViewModel.swift in Sources */,
@@ -450,6 +556,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		B70200000000000000000061 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B70200000000000000000040 /* VisionClawWidgets */;
+			targetProxy = B70200000000000000000060 /* PBXContainerItemProxy */;
+		};
 		E699CC9A2E8150670052C240 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 8A8A8A8A8A8A8A8A8A8A8A8A /* CameraAccess */;
@@ -458,6 +569,55 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		B70200000000000000000050 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = WY253UX7FC;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CameraAccessWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VISIONCLAW_APP_BUNDLE_IDENTIFIER).GlassesWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VISIONCLAW_APP_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
+			};
+			name = Debug;
+		};
+		B70200000000000000000051 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = WY253UX7FC;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = CameraAccessWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VISIONCLAW_APP_BUNDLE_IDENTIFIER).GlassesWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VISIONCLAW_APP_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
+			};
+			name = Release;
+		};
 		0B0B0B0B0B0B0B0B0B0B0B0B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -467,6 +627,7 @@
 				CODE_SIGN_ENTITLEMENTS = CameraAccess/CameraAccess.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CLIENT_TOKEN = "";
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = WY253UX7FC;
@@ -479,11 +640,13 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
+				META_APP_ID = 0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VISIONCLAW_APP_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				VISIONCLAW_APP_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
 			};
 			name = Debug;
 		};
@@ -496,6 +659,7 @@
 				CODE_SIGN_ENTITLEMENTS = CameraAccess/CameraAccess.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CLIENT_TOKEN = "";
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = WY253UX7FC;
@@ -507,11 +671,13 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
+				META_APP_ID = 0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(VISIONCLAW_APP_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				VISIONCLAW_APP_BUNDLE_IDENTIFIER = com.xiaoanliu.VisionClaw;
 			};
 			name = Release;
 		};
@@ -691,6 +857,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		B70200000000000000000052 /* Build configuration list for PBXNativeTarget "VisionClawWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B70200000000000000000050 /* Debug */,
+				B70200000000000000000051 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		9A9A9A9A9A9A9A9A9A9A9A9A /* Build configuration list for PBXNativeTarget "CameraAccess" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -726,7 +901,7 @@
 			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
 			requirement = {
 				kind = exactVersion;
-				version = 0.4.0;
+				version = 0.8.0;
 			};
 		};
 		9DD6CAFC2F3C62DA00ED7098 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
@@ -767,6 +942,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 9DD6CB0A2F3C648800ED7098 /* XCRemoteSwiftPackageReference "WebRTC" */;
 			productName = WebRTC;
+		};
+		E699CCA22E8150670052C240 /* MWDATMockDevice */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 95F7F3332DEF0D91006D1C1A /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
+			productName = MWDATMockDevice;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

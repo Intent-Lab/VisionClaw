@@ -1,5 +1,29 @@
 import Foundation
 
+@MainActor
+final class OpenClawRequestGate {
+  private var isAcquired = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  func acquire() async {
+    if !isAcquired {
+      isAcquired = true
+      return
+    }
+    await withCheckedContinuation { continuation in
+      waiters.append(continuation)
+    }
+  }
+
+  func release() {
+    guard !waiters.isEmpty else {
+      isAcquired = false
+      return
+    }
+    waiters.removeFirst().resume()
+  }
+}
+
 enum OpenClawConnectionState: Equatable {
   case notConfigured
   case checking
@@ -14,11 +38,25 @@ class OpenClawBridge: ObservableObject {
 
   private let session: URLSession
   private let pingSession: URLSession
-  private var sessionKey: String
-  private var conversationHistory: [[String: String]] = []
-  private let maxHistoryTurns = 10
+  private let requestGate = OpenClawRequestGate()
+  private var conversationID: String
 
-  private static let stableSessionKey = "agent:main:glass"
+  static func makeConversationID() -> String {
+    "visionclaw-glass-\(UUID().uuidString.lowercased())"
+  }
+
+  static func makeRequestBody(
+    task: String,
+    agentTarget: String = GeminiConfig.openClawAgentTarget,
+    conversationID: String
+  ) -> [String: Any] {
+    [
+      "model": agentTarget,
+      "messages": [["role": "user", "content": task]],
+      "stream": false,
+      "user": conversationID
+    ]
+  }
 
   init() {
     let config = URLSessionConfiguration.default
@@ -29,7 +67,7 @@ class OpenClawBridge: ObservableObject {
     pingConfig.timeoutIntervalForRequest = 5
     self.pingSession = URLSession(configuration: pingConfig)
 
-    self.sessionKey = OpenClawBridge.stableSessionKey
+    self.conversationID = OpenClawBridge.makeConversationID()
   }
 
   func checkConnection() async {
@@ -38,7 +76,7 @@ class OpenClawBridge: ObservableObject {
       return
     }
     connectionState = .checking
-    guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
+    guard let url = GeminiConfig.openClawEndpoint.chatCompletionsURL else {
       connectionState = .unreachable("Invalid URL")
       return
     }
@@ -61,11 +99,11 @@ class OpenClawBridge: ObservableObject {
   }
 
   func resetSession() {
-    conversationHistory = []
-    NSLog("[OpenClaw] Session reset (key retained: %@)", sessionKey)
+    conversationID = OpenClawBridge.makeConversationID()
+    NSLog("[OpenClaw] Conversation reset")
   }
 
-  // MARK: - Agent Chat (session continuity via x-openclaw-session-key header)
+  // MARK: - Agent Chat
 
   func delegateTask(
     task: String,
@@ -73,33 +111,34 @@ class OpenClawBridge: ObservableObject {
   ) async -> ToolResult {
     lastToolCallStatus = .executing(toolName)
 
-    guard let url = URL(string: "\(GeminiConfig.openClawHost):\(GeminiConfig.openClawPort)/v1/chat/completions") else {
-      lastToolCallStatus = .failed(toolName, "Invalid URL")
-      return .failure("Invalid gateway URL")
+    await requestGate.acquire()
+    defer { requestGate.release() }
+
+    guard !Task.isCancelled else {
+      lastToolCallStatus = .cancelled(toolName)
+      return .failure("Agent request was cancelled")
     }
 
-    // Append the new user message to conversation history
-    conversationHistory.append(["role": "user", "content": task])
-
-    // Trim history to keep only the most recent turns (user+assistant pairs)
-    if conversationHistory.count > maxHistoryTurns * 2 {
-      conversationHistory = Array(conversationHistory.suffix(maxHistoryTurns * 2))
+    let agentTarget = GeminiConfig.openClawAgentTarget
+    guard let url = GeminiConfig.openClawEndpoint.chatCompletionsURL else {
+      lastToolCallStatus = .failed(toolName, "Invalid URL")
+      return .failure("Invalid gateway URL")
     }
 
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("Bearer \(GeminiConfig.openClawGatewayToken)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue(sessionKey, forHTTPHeaderField: "x-openclaw-session-key")
     request.setValue("glass", forHTTPHeaderField: "x-openclaw-message-channel")
 
-    let body: [String: Any] = [
-      "model": "openclaw",
-      "messages": conversationHistory,
-      "stream": false
-    ]
-
-    NSLog("[OpenClaw] Sending %d messages in conversation", conversationHistory.count)
+    // OpenClaw derives an agent-scoped session from `user`. Avoid constructing
+    // explicit session keys from model aliases because `openclaw`,
+    // `openclaw/default`, `openclaw:<id>`, and `agent:<id>` route differently.
+    let body = OpenClawBridge.makeRequestBody(
+      task: task,
+      agentTarget: agentTarget,
+      conversationID: conversationID)
+    NSLog("[OpenClaw] Delegating to %@", agentTarget)
 
     do {
       request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -108,8 +147,7 @@ class OpenClawBridge: ObservableObject {
 
       guard let statusCode = httpResponse?.statusCode, (200...299).contains(statusCode) else {
         let code = httpResponse?.statusCode ?? 0
-        let bodyStr = String(data: data, encoding: .utf8) ?? "no body"
-        NSLog("[OpenClaw] Chat failed: HTTP %d - %@", code, String(bodyStr.prefix(200)))
+        NSLog("[OpenClaw] Chat failed: HTTP %d (%d bytes)", code, data.count)
         lastToolCallStatus = .failed(toolName, "HTTP \(code)")
         return .failure("Agent returned HTTP \(code)")
       }
@@ -119,16 +157,13 @@ class OpenClawBridge: ObservableObject {
          let first = choices.first,
          let message = first["message"] as? [String: Any],
          let content = message["content"] as? String {
-        // Append assistant response to history for continuity
-        conversationHistory.append(["role": "assistant", "content": content])
-        NSLog("[OpenClaw] Agent result: %@", String(content.prefix(200)))
+        NSLog("[OpenClaw] Agent returned %d characters", content.count)
         lastToolCallStatus = .completed(toolName)
         return .success(content)
       }
 
       let raw = String(data: data, encoding: .utf8) ?? "OK"
-      conversationHistory.append(["role": "assistant", "content": raw])
-      NSLog("[OpenClaw] Agent raw: %@", String(raw.prefix(200)))
+      NSLog("[OpenClaw] Agent returned an unstructured %d-byte response", data.count)
       lastToolCallStatus = .completed(toolName)
       return .success(raw)
     } catch {

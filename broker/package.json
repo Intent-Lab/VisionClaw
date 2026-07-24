@@ -1,0 +1,17 @@
+{
+  "name": "@visionclaw/glasses-broker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/cli.mjs start",
+    "pair": "node src/cli.mjs pair",
+    "pairings": "node src/cli.mjs pairings",
+    "revoke": "node src/cli.mjs revoke",
+    "status": "node src/cli.mjs status"
+  }
+}

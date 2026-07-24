@@ -28,8 +28,13 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>cameraaccess</string>
+				<string>visionclaw</string>
 			</array>
 		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>fb-viewapp</string>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
@@ -37,13 +42,18 @@
 	<!-- Meta Wearables Device Access Toolkit Setup -->
 	<key>MWDAT</key>
 	<dict>
+		<key>Analytics</key>
+		<dict>
+			<key>OptOut</key>
+			<true/>
+		</dict>
 		<key>AppLinkURLScheme</key>
 		<!-- Tell DAT your URL scheme so it can be called back from Meta AI -->
 		<string>cameraaccess://</string>
 		<key>MetaAppID</key>
-		<!-- Without Developer Mode, this key will need to be set with ID from the app registered in Wearables Developer Center -->
+		<!-- Defaults to 0 for Developer Mode. Override this build setting for a registered app. -->
 		<string>$(META_APP_ID)</string>
-		<!-- Without Developer Mode, this key will need to be set with ClientToken from the app registered in Wearables Developer Center -->
+		<!-- Override this build setting together with MetaAppID for a registered app. -->
 		<key>ClientToken</key>
 		<string>$(CLIENT_TOKEN)</string>
 		<!-- Without Developer Mode, this key will need to be set with your Apple Developer Team ID - Set this in Xcode under Signing & Capabilities -->
@@ -53,6 +63,8 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>processing</string>
+		<string>bluetooth-central</string>
 		<string>bluetooth-peripheral</string>
 		<string>external-accessory</string>
 	</array>
@@ -71,6 +83,12 @@
 	<string>This app uses the microphone to have voice conversations with the AI assistant while streaming from your glasses.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>This allows your phone to connect to your glasses and discover a paired VisionClaw relay on your local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_visionclaw._tcp</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

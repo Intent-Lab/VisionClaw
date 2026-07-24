@@ -66,6 +66,7 @@ struct StreamView: View {
             }
 
             ToolCallStatusView(status: geminiVM.toolCallStatus)
+            HarnessRoutingStatusView(state: geminiVM.harnessRoutingState)
 
             if geminiVM.isModelSpeaking {
               HStack(spacing: 8) {
@@ -170,23 +171,27 @@ struct ControlsView: View {
         CircleButton(icon: "camera.fill", text: nil) {
           viewModel.capturePhoto()
         }
+        .accessibilityLabel("Capture photo")
+        .accessibilityHint("Captures a still image from the glasses camera")
       }
 
       // Gemini AI button (disabled when WebRTC is active — audio conflict)
       CircleButton(
         icon: geminiVM.isGeminiActive ? "waveform.circle.fill" : "waveform.circle",
-        text: "AI"
+        text: "Session"
       ) {
         Task {
           if geminiVM.isGeminiActive {
             geminiVM.stopSession()
           } else {
-            await geminiVM.startSession()
+            if await viewModel.prepareForAIMode(), !webrtcVM.isActive {
+              await geminiVM.startSession()
+            }
           }
         }
       }
-      .opacity(webrtcVM.isActive ? 0.4 : 1.0)
-      .disabled(webrtcVM.isActive)
+      .opacity(webrtcVM.isActive || viewModel.isPreparingForAIMode ? 0.4 : 1.0)
+      .disabled(webrtcVM.isActive || viewModel.isPreparingForAIMode)
 
       // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
       CircleButton(
@@ -203,8 +208,8 @@ struct ControlsView: View {
           }
         }
       }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
+      .opacity(geminiVM.isGeminiActive || viewModel.isPreparingForAIMode ? 0.4 : 1.0)
+      .disabled(geminiVM.isGeminiActive || viewModel.isPreparingForAIMode)
     }
   }
 }
