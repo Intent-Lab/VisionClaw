@@ -28,6 +28,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>cameraaccess</string>
+				<string>visionclaw</string>
 			</array>
 		</dict>
 	</array>
@@ -83,10 +84,10 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>This allows your phone to find and connect to your glasses over Wi-Fi.</string>
+	<string>This allows your phone to connect to your glasses and discover a paired VisionClaw relay on your local network.</string>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_bonjour._tcp</string>
+		<string>_visionclaw._tcp</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>

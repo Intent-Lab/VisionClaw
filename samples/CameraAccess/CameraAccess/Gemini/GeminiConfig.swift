@@ -48,8 +48,47 @@ enum GeminiConfig {
   static let videoMaxLongEdge: CGFloat = 640
 
   static var systemInstruction: String {
-    "\(SettingsManager.shared.geminiSystemPrompt)\n\n\(mandatoryOpenClawHandoffInstruction)"
+    systemInstruction(
+      namedRoutingEnabled: false,
+      registry: .standard()
+    )
   }
+
+  static func systemInstruction(
+    namedRoutingEnabled: Bool,
+    registry: NamedHarnessRegistry
+  ) -> String {
+    var sections = [
+      baseInstruction(
+        configuredPrompt: SettingsManager.shared.geminiSystemPrompt,
+        namedRoutingEnabled: namedRoutingEnabled
+      ),
+      mediaCaptureInstruction
+    ]
+    if namedRoutingEnabled {
+      sections.append(namedHarnessInstruction(registry: registry))
+    } else {
+      sections.append(mandatoryOpenClawHandoffInstruction)
+    }
+    return sections.joined(separator: "\n\n")
+  }
+
+  static func baseInstruction(
+    configuredPrompt: String,
+    namedRoutingEnabled: Bool
+  ) -> String {
+    if namedRoutingEnabled, configuredPrompt == defaultSystemInstruction {
+      return namedGlassesSessionInstruction
+    }
+    return configuredPrompt
+  }
+
+  static let namedGlassesSessionInstruction = """
+    You are a concise voice assistant for someone wearing Meta Ray-Ban smart
+    glasses. You can use the current camera context for visual conversation.
+    External systems are available only through the registered named harnesses;
+    never claim an external action without the selected harness result.
+    """
 
   static let mandatoryOpenClawHandoffInstruction = """
     OpenClaw handoff rules (mandatory):
@@ -59,6 +98,28 @@ enum GeminiConfig {
     - Never report success or a result until execute returns. Do not guess, infer, or fill the wait with commentary.
     - When execute returns, speak its result as the authoritative answer.
     """
+
+  static let mediaCaptureInstruction = """
+    Glasses media rules:
+    - You may answer ordinary "what am I looking at?" questions from the current camera context.
+    - When the user explicitly asks to take, capture, or save a picture, call capture_media with kind snapshot.
+    - When the user asks to record video, call capture_media with kind video and report its exact supported fallback. Never claim a recording started unless the tool confirms it.
+    - Never analyze an old image after the capture tool reports that no fresh image was available.
+    """
+
+  static func namedHarnessInstruction(
+    registry: NamedHarnessRegistry
+  ) -> String {
+    """
+    Named harness routing:
+    - Registered invocation names are: \(registry.promptDescription).
+    - The legacy execute tool is unavailable in named-routing mode. Every external request must use route_harness.
+    - If the user begins a request with a registered name, call route_harness with that exact target and the scoped operation.
+    - Do not silently substitute a different target. Speak the tool's explicit fallback or unavailable status.
+    - Codex continuation is a two-step prepare/confirm operation. Never approve permissions, change models, or mutate an unselected task by voice.
+    - Meta is a native-assistant handoff boundary; never claim that DAT activated Meta automatically.
+    """
+  }
 
   static let defaultSystemInstruction = """
     You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. You can see through their camera and have a voice conversation. Keep responses concise and natural.

@@ -2,6 +2,53 @@ import AVFoundation
 import Foundation
 import UIKit
 
+struct AudioRouteStatus: Equatable {
+  let inputNames: [String]
+  let outputNames: [String]
+  let hasBluetoothHFPInput: Bool
+  let hasBluetoothHFPOutput: Bool
+
+  static let unknown = AudioRouteStatus(
+    inputNames: [],
+    outputNames: [],
+    hasBluetoothHFPInput: false,
+    hasBluetoothHFPOutput: false
+  )
+
+  var isGlassesDuplex: Bool {
+    hasBluetoothHFPInput && hasBluetoothHFPOutput
+  }
+
+  var displayText: String {
+    if isGlassesDuplex {
+      return "Glasses Audio"
+    }
+    if !inputNames.isEmpty || !outputNames.isEmpty {
+      return "Phone Audio"
+    }
+    return "Audio Route…"
+  }
+
+  init(route: AVAudioSessionRouteDescription) {
+    inputNames = route.inputs.map(\.portName)
+    outputNames = route.outputs.map(\.portName)
+    hasBluetoothHFPInput = route.inputs.contains { $0.portType == .bluetoothHFP }
+    hasBluetoothHFPOutput = route.outputs.contains { $0.portType == .bluetoothHFP }
+  }
+
+  init(
+    inputNames: [String],
+    outputNames: [String],
+    hasBluetoothHFPInput: Bool,
+    hasBluetoothHFPOutput: Bool
+  ) {
+    self.inputNames = inputNames
+    self.outputNames = outputNames
+    self.hasBluetoothHFPInput = hasBluetoothHFPInput
+    self.hasBluetoothHFPOutput = hasBluetoothHFPOutput
+  }
+}
+
 /// Tracks buffers until AVAudioPlayerNode confirms that they were actually
 /// played. Server turn completion is not the same as local speaker drain.
 final class PlaybackDrainTracker: @unchecked Sendable {
@@ -63,8 +110,35 @@ final class PlaybackDrainTracker: @unchecked Sendable {
   }
 }
 
+struct AudioRouteRecoveryState {
+  private var nextGeneration: UInt64 = 0
+  private(set) var pendingGeneration: UInt64?
+
+  mutating func schedule(isCapturing: Bool) -> UInt64? {
+    guard isCapturing else { return nil }
+    nextGeneration &+= 1
+    pendingGeneration = nextGeneration
+    return nextGeneration
+  }
+
+  mutating func cancel() {
+    pendingGeneration = nil
+  }
+
+  mutating func consume(
+    generation: UInt64,
+    isCapturing: Bool,
+    engineIsRunning: Bool
+  ) -> Bool {
+    guard pendingGeneration == generation else { return false }
+    pendingGeneration = nil
+    return isCapturing && !engineIsRunning
+  }
+}
+
 class AudioManager {
   var onAudioCaptured: ((Data) -> Void)?
+  var onRouteChanged: ((AudioRouteStatus) -> Void)?
 
   private var audioEngine = AVAudioEngine()
   private var playerNode = AVAudioPlayerNode()
@@ -95,6 +169,9 @@ class AudioManager {
   private var routeChangeObserver: NSObjectProtocol?
   private var mediaServicesResetObserver: NSObjectProtocol?
   private var foregroundObserver: NSObjectProtocol?
+  private var routeRecoveryState = AudioRouteRecoveryState()
+  private var routeRecoveryWorkItem: DispatchWorkItem?
+  private var isResettingAudio = false
 
   init() {
     self.outputFormat = AVAudioFormat(
@@ -106,6 +183,7 @@ class AudioManager {
   }
 
   func setupAudioSession(useIPhoneMode: Bool = false) throws {
+    cancelPendingRouteRecovery()
     removeObservers()
     self.useIPhoneMode = useIPhoneMode
     let session = AVAudioSession.sharedInstance()
@@ -134,6 +212,7 @@ class AudioManager {
       NSLog("[Audio] Speaker output override: ON (iPhone speaker)")
     }
     NSLog("[Audio] Session mode: %@", useIPhoneMode ? "voiceChat (iPhone)" : "videoChat (glasses)")
+    publishCurrentRoute()
 
     setupInterruptionHandling()
     setupAppLifecycleObservers()
@@ -303,6 +382,7 @@ class AudioManager {
   }
 
   func stopCapture() {
+    cancelPendingRouteRecovery()
     invalidatePreparedPlayback()
     if isInputTapInstalled {
       audioEngine.inputNode.removeTap(onBus: 0)
@@ -421,16 +501,30 @@ class AudioManager {
     switch reason {
     case .newDeviceAvailable:
       NSLog("[Audio] New audio device available")
+      cancelPendingRouteRecovery()
     case .oldDeviceUnavailable:
       NSLog("[Audio] Audio device removed")
-      if isCapturing {
-        attemptAudioReset()
-      }
+      scheduleRouteRecoveryIfNeeded()
     case .categoryChange, .override, .wakeFromSleep, .routeConfigurationChange:
       NSLog("[Audio] Audio route change: %d", reason.rawValue)
+      if audioEngine.isRunning {
+        cancelPendingRouteRecovery()
+      }
     default:
       break
     }
+    publishCurrentRoute()
+  }
+
+  private func publishCurrentRoute() {
+    let status = AudioRouteStatus(route: AVAudioSession.sharedInstance().currentRoute)
+    NSLog(
+      "[Audio] Route input=%@ output=%@ glassesDuplex=%@",
+      status.inputNames.joined(separator: ","),
+      status.outputNames.joined(separator: ","),
+      status.isGlassesDuplex ? "yes" : "no"
+    )
+    onRouteChanged?(status)
   }
 
   private func resumeAudioAfterInterruption() {
@@ -450,6 +544,10 @@ class AudioManager {
   }
 
   private func attemptAudioReset() {
+    guard !isResettingAudio else { return }
+    isResettingAudio = true
+    defer { isResettingAudio = false }
+    cancelPendingRouteRecovery()
     NSLog("[Audio] Attempting audio reset")
     let wasCapturing = isCapturing
 
@@ -476,6 +574,38 @@ class AudioManager {
         NSLog("[Audio] Audio reset failed: %@", error.localizedDescription)
       }
     }
+  }
+
+  private func scheduleRouteRecoveryIfNeeded() {
+    guard let generation = routeRecoveryState.schedule(
+      isCapturing: isCapturing
+    ) else { return }
+    routeRecoveryWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      self.routeRecoveryWorkItem = nil
+      let shouldReset = self.routeRecoveryState.consume(
+        generation: generation,
+        isCapturing: self.isCapturing,
+        engineIsRunning: self.audioEngine.isRunning
+      )
+      if shouldReset {
+        self.attemptAudioReset()
+      } else {
+        NSLog("[Audio] Route recovered without flushing queued playback")
+      }
+    }
+    routeRecoveryWorkItem = workItem
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + 0.6,
+      execute: workItem
+    )
+  }
+
+  private func cancelPendingRouteRecovery() {
+    routeRecoveryWorkItem?.cancel()
+    routeRecoveryWorkItem = nil
+    routeRecoveryState.cancel()
   }
 
   private func removeObservers() {

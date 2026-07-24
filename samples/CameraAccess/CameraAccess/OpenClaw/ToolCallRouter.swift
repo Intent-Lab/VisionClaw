@@ -6,6 +6,15 @@ class ToolCallRouter {
     _ task: String,
     _ toolName: String
   ) async -> ToolResult
+  typealias RouteHarness = @MainActor (
+    _ request: NamedHarnessRouteRequest,
+    _ toolName: String
+  ) async -> ToolResult
+  typealias CaptureMedia = @MainActor (
+    _ request: GlassesMediaRequest,
+    _ callID: String,
+    _ transcriptionEpoch: UInt64
+  ) async -> ToolResult
 
   private struct PendingBatch {
     let orderedCallIDs: [String]
@@ -16,26 +25,31 @@ class ToolCallRouter {
 
   private let bridge: OpenClawBridge
   private let delegateTask: DelegateTask
+  private let routeHarness: RouteHarness?
+  private let captureMedia: CaptureMedia?
   private var inFlightTasks: [String: Task<Void, Never>] = [:]
   private var batchIDsByCallID: [String: UUID] = [:]
   private var pendingBatches: [UUID: PendingBatch] = [:]
-  private var consecutiveFailures = 0
-  private let maxConsecutiveFailures = 3
 
   init(
     bridge: OpenClawBridge,
-    delegateTask: DelegateTask? = nil
+    delegateTask: DelegateTask? = nil,
+    routeHarness: RouteHarness? = nil,
+    captureMedia: CaptureMedia? = nil
   ) {
     self.bridge = bridge
     self.delegateTask = delegateTask ?? { task, toolName in
       await bridge.delegateTask(task: task, toolName: toolName)
     }
+    self.routeHarness = routeHarness
+    self.captureMedia = captureMedia
   }
 
   /// Route a tool call from Gemini to OpenClaw. Calls sendResponse with the
   /// JSON dictionary to send back as a toolResponse message.
   func handleToolCalls(
     _ calls: [GeminiFunctionCall],
+    mediaAuthorizationEpoch: UInt64? = nil,
     sendResponse: @escaping ([String: Any]) -> Void
   ) {
     guard !calls.isEmpty else { return }
@@ -43,21 +57,6 @@ class ToolCallRouter {
 
     for call in calls {
       NSLog("[ToolCall] Received: %@ (id: %@)", call.name, call.id)
-    }
-
-    // Circuit breaker: stop sending tool calls after repeated failures
-    if consecutiveFailures >= maxConsecutiveFailures {
-      NSLog("[ToolCall] Circuit breaker open (%d consecutive failures), rejecting batch",
-            consecutiveFailures)
-      let errorResult: ToolResult = .failure(
-        "Tool execution is temporarily unavailable after \(consecutiveFailures) consecutive failures. " +
-        "Please tell the user you cannot complete this action right now and suggest they check their OpenClaw gateway connection."
-      )
-      let entries = calls.map {
-        Self.buildFunctionResponse(callId: $0.id, name: $0.name, result: errorResult)
-      }
-      sendResponse(Self.buildToolResponse(functionResponses: entries))
-      return
     }
 
     let batchID = UUID()
@@ -73,19 +72,14 @@ class ToolCallRouter {
           self.finishCancelledCall(callID: call.id, batchID: batchID)
           return
         }
-        let taskDesc = call.args["task"] as? String ?? String(describing: call.args)
-        let result = await self.delegateTask(taskDesc, call.name)
+        let result = await self.execute(
+          call,
+          mediaAuthorizationEpoch: mediaAuthorizationEpoch
+        )
 
         guard !Task.isCancelled else {
           self.finishCancelledCall(callID: call.id, batchID: batchID)
           return
-        }
-
-        switch result {
-        case .success:
-          self.consecutiveFailures = 0
-        case .failure:
-          self.consecutiveFailures += 1
         }
 
         let succeeded: Bool
@@ -124,10 +118,64 @@ class ToolCallRouter {
     inFlightTasks.removeAll()
     batchIDsByCallID.removeAll()
     pendingBatches.removeAll()
-    consecutiveFailures = 0
   }
 
   // MARK: - Private
+
+  private func execute(
+    _ call: GeminiFunctionCall,
+    mediaAuthorizationEpoch: UInt64?
+  ) async -> ToolResult {
+    switch call.name {
+    case "execute":
+      let task = call.args["task"] as? String ?? String(describing: call.args)
+      return await delegateTask(task, call.name)
+
+    case "route_harness":
+      guard let routeHarness,
+            let target = call.args["target"] as? String else {
+        return .failure(
+          "Named harness routing is not securely paired. No action was taken."
+        )
+      }
+      let operation = (call.args["operation"] as? String)
+        .flatMap(NamedHarnessOperation.init(rawValue:))
+      let suppliedRequestID = call.args["clientRequestID"] as? String
+      let needsGeneratedRequestID =
+        operation == .execute || operation == .prepareContinue
+      let clientRequestID = needsGeneratedRequestID
+        ? suppliedRequestID ?? call.id
+        : suppliedRequestID
+      let request = NamedHarnessRouteRequest(
+        targetName: target,
+        operation: operation,
+        task: call.args["task"] as? String ?? "",
+        taskReference: call.args["taskReference"] as? String,
+        actionReference: call.args["actionReference"] as? String,
+        clientRequestID: clientRequestID
+      )
+      return await routeHarness(request, call.name)
+
+    case "capture_media":
+      guard let captureMedia,
+            let request = GlassesMediaRequest(args: call.args),
+            let mediaAuthorizationEpoch else {
+        return .failure(
+          "The glasses media request is unavailable or invalid. No media was captured."
+        )
+      }
+      return await captureMedia(
+        request,
+        call.id,
+        mediaAuthorizationEpoch
+      )
+
+    default:
+      return .failure(
+        "Unsupported tool \(call.name). No external request was sent."
+      )
+    }
+  }
 
   private func finishCall(
     _ call: GeminiFunctionCall,
@@ -190,5 +238,21 @@ class ToolCallRouter {
         "functionResponses": functionResponses
       ]
     ]
+  }
+
+  static func blockedProactiveToolResponse(
+    for calls: [GeminiFunctionCall]
+  ) -> [String: Any] {
+    let responses = calls.map { call in
+      buildFunctionResponse(
+        callId: call.id,
+        name: call.name,
+        result: .failure(
+          "Tools are disabled while speaking an untrusted backend status update. " +
+          "Wait for a new spoken request."
+        )
+      )
+    }
+    return buildToolResponse(functionResponses: responses)
   }
 }

@@ -33,6 +33,11 @@ enum StreamingMode {
   case iPhone
 }
 
+private enum PhotoCaptureOrigin: Equatable {
+  case manual
+  case voice
+}
+
 /// Capture settings tuned for a responsive preview. Meta's sample uses low/24;
 /// larger raw frames need a lower source cadence to avoid saturating the phone.
 struct StreamPerformanceProfile {
@@ -286,6 +291,10 @@ class StreamSessionViewModel: ObservableObject {
   // Photo capture properties
   @Published var capturedPhoto: UIImage?
   @Published var showPhotoPreview: Bool = false
+  private var pendingPhotoCaptureOrigin: PhotoCaptureOrigin?
+  private var pendingVoicePhotoCapture: CheckedContinuation<UIImage?, Never>?
+  private var photoCaptureTimeoutTask: Task<Void, Never>?
+  private var mustDiscardLatePhotoResult = false
 
   // Gemini Live integration
   var geminiSessionVM: GeminiSessionViewModel?
@@ -472,9 +481,26 @@ class StreamSessionViewModel: ObservableObject {
       Task { @MainActor [weak self] in
         guard let self else { return }
         guard generation == self.streamGeneration else { return }
+        if self.mustDiscardLatePhotoResult {
+          self.mustDiscardLatePhotoResult = false
+          NSLog("[Stream] Discarded a late photo result after a timed-out voice capture")
+          return
+        }
         if let uiImage = UIImage(data: photoData.data) {
           self.capturedPhoto = uiImage
-          self.showPhotoPreview = true
+          if self.pendingPhotoCaptureOrigin == .voice {
+            self.finishPendingVoicePhotoCapture(with: uiImage)
+          } else {
+            self.photoCaptureTimeoutTask?.cancel()
+            self.photoCaptureTimeoutTask = nil
+            self.pendingPhotoCaptureOrigin = nil
+            self.showPhotoPreview = true
+          }
+        } else if self.pendingPhotoCaptureOrigin == .manual {
+          self.photoCaptureTimeoutTask?.cancel()
+          self.photoCaptureTimeoutTask = nil
+          self.pendingPhotoCaptureOrigin = nil
+          self.showError("The glasses returned an unreadable photo. Please try again.")
         }
       }
     }
@@ -1075,6 +1101,11 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   private func cleanupSession() async {
+    finishPendingVoicePhotoCapture(with: nil, expectLateResult: false)
+    photoCaptureTimeoutTask?.cancel()
+    photoCaptureTimeoutTask = nil
+    pendingPhotoCaptureOrigin = nil
+    mustDiscardLatePhotoResult = false
     streamGeneration &+= 1
     foregroundFramePump?.reset()
     foregroundFramePump = nil
@@ -1254,12 +1285,131 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func capturePhoto() {
-    _ = stream?.capturePhoto(format: .jpeg)
+    guard pendingPhotoCaptureOrigin == nil,
+          !mustDiscardLatePhotoResult,
+          let stream else { return }
+    pendingPhotoCaptureOrigin = .manual
+    if !stream.capturePhoto(format: .jpeg) {
+      pendingPhotoCaptureOrigin = nil
+      return
+    }
+    photoCaptureTimeoutTask = Task { @MainActor [weak self] in
+      do {
+        try await Task.sleep(nanoseconds: 8_000_000_000)
+      } catch {
+        return
+      }
+      guard let self, self.pendingPhotoCaptureOrigin == .manual else { return }
+      self.pendingPhotoCaptureOrigin = nil
+      self.mustDiscardLatePhotoResult = true
+      self.showError(
+        "Photo capture timed out. Restart the glasses stream before trying again."
+      )
+    }
+  }
+
+  func handleMediaCaptureRequest(
+    _ request: GlassesMediaRequest
+  ) async -> ToolResult {
+    switch request.kind {
+    case .snapshot:
+      guard streamingMode == .glasses,
+            streamingStatus == .streaming,
+            stream != nil else {
+        return .failure(
+          "The glasses camera is not streaming, so no fresh snapshot was captured."
+        )
+      }
+      guard pendingPhotoCaptureOrigin == nil else {
+        return .failure(
+          "Another glasses photo is still being captured. No second capture was started."
+        )
+      }
+      guard !mustDiscardLatePhotoResult else {
+        return .failure(
+          "The previous photo request timed out. Restart the glasses stream before " +
+          "trying another capture; no image was captured."
+        )
+      }
+      guard let image = await captureVoiceSnapshot() else {
+        let retryInstruction = mustDiscardLatePhotoResult
+          ? " Restart the glasses stream before trying another capture."
+          : ""
+        return .failure(
+          "The glasses did not return a fresh snapshot in time. No image was captured." +
+          retryInstruction
+        )
+      }
+      guard let geminiSessionVM,
+            await geminiSessionVM.sendPriorityVisionSnapshot(image: image) else {
+        return .failure(
+          "A fresh snapshot was captured, but it could not be attached to the AI turn. " +
+          "Do not claim that the image was analyzed."
+        )
+      }
+      return .success(
+        "A fresh glasses snapshot was captured and attached to this turn. " +
+        "Use that image for the answer."
+      )
+
+    case .video:
+      let duration = request.requestedDurationSeconds.map { " (\($0) seconds requested)" } ?? ""
+      return .failure(
+        "Video recording\(duration) was not started. Meta DAT 0.8 does not expose " +
+        "a supported video-recording API. Tell the user to use “Hey Meta, record a video” " +
+        "or the glasses capture control; do not claim VisionClaw recorded anything."
+      )
+    }
   }
 
   func dismissPhotoPreview() {
     showPhotoPreview = false
     capturedPhoto = nil
+  }
+
+  private func captureVoiceSnapshot() async -> UIImage? {
+    guard pendingPhotoCaptureOrigin == nil,
+          !mustDiscardLatePhotoResult,
+          let stream else { return nil }
+
+    return await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        pendingPhotoCaptureOrigin = .voice
+        pendingVoicePhotoCapture = continuation
+        photoCaptureTimeoutTask = Task { @MainActor [weak self] in
+          do {
+            try await Task.sleep(nanoseconds: 8_000_000_000)
+          } catch {
+            return
+          }
+          self?.finishPendingVoicePhotoCapture(with: nil, expectLateResult: true)
+        }
+        guard stream.capturePhoto(format: .jpeg) else {
+          finishPendingVoicePhotoCapture(with: nil, expectLateResult: false)
+          return
+        }
+      }
+    } onCancel: {
+      Task { @MainActor [weak self] in
+        self?.finishPendingVoicePhotoCapture(with: nil, expectLateResult: true)
+      }
+    }
+  }
+
+  private func finishPendingVoicePhotoCapture(
+    with image: UIImage?,
+    expectLateResult: Bool = false
+  ) {
+    photoCaptureTimeoutTask?.cancel()
+    photoCaptureTimeoutTask = nil
+    guard pendingPhotoCaptureOrigin == .voice,
+          let continuation = pendingVoicePhotoCapture else { return }
+    pendingPhotoCaptureOrigin = nil
+    pendingVoicePhotoCapture = nil
+    if expectLateResult {
+      mustDiscardLatePhotoResult = true
+    }
+    continuation.resume(returning: image)
   }
 
   private func updateStatusFromState(_ state: StreamState, generation: UInt64) {

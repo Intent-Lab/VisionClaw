@@ -56,6 +56,24 @@ Gemini Live API (WebSocket)
 - **Phone mode** -- test the full pipeline using your phone camera instead of glasses
 - **WebRTC streaming** -- share your glasses POV live to a browser viewer
 
+### Personal OpenClaw copilot (iOS)
+
+The iOS sample also supports a secure, named glasses session on the same Wi-Fi:
+
+- say **Eva** to use the broker-owned OpenClaw glasses harness;
+- say **Codex** to list, inspect, or explicitly confirm a forked Codex task
+  continuation;
+- say **Meta** for a transparent handoff to the native Meta assistant.
+
+Backend credentials stay on the Mac. The iPhone pairs with a TLS-public-key
+pinned local broker using a short-lived QR offer, signed requests, one-shot
+scoped capabilities, and persistent revocation. Start with
+[the broker guide](broker/README.md) and read
+[the architecture and security model](GLASSES_SESSION_ARCHITECTURE.md).
+
+Remote internet routing is not included yet. Do not port-forward the broker;
+the planned remote path uses authenticated outbound connections on both sides.
+
 ---
 
 ## Quick Start (iOS)
@@ -168,9 +186,14 @@ Enable Developer Mode in the Meta AI app (same steps as iOS above), then:
 
 ---
 
-## Setup: OpenClaw (Optional)
+## Setup: OpenClaw (Optional, legacy direct mode)
 
 OpenClaw gives Gemini the ability to take real-world actions: send messages, search the web, manage lists, control smart home devices, and more. Without it, Gemini is voice + vision only.
+
+> This section describes the original direct Android/iOS integration. It
+> exposes OpenClaw on the LAN and stores a Gateway token on the phone. Do not
+> use it for the secure iOS Personal OpenClaw copilot. For that experience,
+> keep OpenClaw on loopback and follow the [broker guide](broker/README.md).
 
 ### 1. Install and configure OpenClaw
 
@@ -283,7 +306,9 @@ All source code is in `samples/CameraAccessAndroid/app/src/main/java/.../cameraa
 - **Input**: Phone mic -> AudioManager (PCM Int16, 16kHz mono; 40ms chunks on iOS, 100ms on Android) -> Gemini WebSocket
 - **Output**: Gemini WebSocket -> AudioManager playback queue -> Phone speaker
 - **iOS iPhone mode**: Uses `.voiceChat` audio session for echo cancellation + mic gating during AI speech
-- **iOS Glasses mode**: Uses `.videoChat` audio session (mic is on glasses, speaker is on phone -- no echo)
+- **iOS Glasses mode**: Uses `.videoChat` and Bluetooth HFP when both the
+  glasses microphone and speaker are available; the UI reports fallback to the
+  iPhone instead of claiming glasses audio
 - **Android**: Uses `VOICE_COMMUNICATION` audio source for built-in acoustic echo cancellation
 
 ### Video Pipeline
@@ -292,9 +317,10 @@ All source code is in `samples/CameraAccessAndroid/app/src/main/java/.../cameraa
 - **Phone**: Camera capture (30fps) -> latest-frame-only throttle to ~1fps -> 640px JPEG (40% quality) -> Gemini
 - **iOS AI mode**: switches glasses capture to the low profile while Gemini is active to protect audio and tool-response latency
 
-### Tool Calling
+### Tool Calling and Named Routing
 
-Gemini Live supports function calling. Both apps declare a single `execute` tool that routes everything through OpenClaw:
+Gemini Live supports function calling. Android and the legacy direct iOS mode
+declare a single `execute` tool that routes requests directly to OpenClaw:
 
 1. User says "Add eggs to my shopping list"
 2. Gemini speaks "Sure, adding that now" (verbal acknowledgment before tool call)
@@ -303,6 +329,14 @@ Gemini Live supports function calling. Both apps declare a single `execute` tool
 5. OpenClaw executes the task using its 56+ connected skills
 6. Result returns to Gemini via `toolResponse`
 7. Gemini speaks the confirmation
+
+The secure iOS Personal OpenClaw copilot uses the named registry instead:
+fresh microphone input authorizes one matching `Eva`, `Codex`, or `Meta`
+operation. Eva runs through the broker-owned `glasses` harness. Codex exposes
+bounded read operations and preparation; a continuation can execute only after
+the app presents its exact task and instruction for a physical Confirm action.
+Meta produces an explicit native-assistant handoff. Unknown or unavailable
+targets do not silently fall back to another backend.
 
 ### WebRTC Live Streaming
 

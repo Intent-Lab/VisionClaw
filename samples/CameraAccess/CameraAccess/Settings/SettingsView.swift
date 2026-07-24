@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
   @Environment(\.dismiss) private var dismiss
+  @EnvironmentObject private var brokerConnectionModel:
+    GlassesBrokerConnectionModel
   private let settings = SettingsManager.shared
 
   @State private var geminiAPIKey: String = ""
@@ -16,6 +18,7 @@ struct SettingsView: View {
   @State private var videoStreamingEnabled: Bool = true
   @State private var proactiveNotificationsEnabled: Bool = true
   @State private var showResetConfirmation = false
+  @State private var showForgetBrokerConfirmation = false
 
   var body: some View {
     NavigationView {
@@ -25,7 +28,7 @@ struct SettingsView: View {
             Text("API Key")
               .font(.caption)
               .foregroundColor(.secondary)
-            TextField("Enter Gemini API key", text: $geminiAPIKey)
+            SecureField("Enter Gemini API key", text: $geminiAPIKey)
               .autocapitalization(.none)
               .disableAutocorrection(true)
               .font(.system(.body, design: .monospaced))
@@ -38,7 +41,58 @@ struct SettingsView: View {
             .frame(minHeight: 200)
         }
 
-        Section(header: Text("OpenClaw"), footer: Text("Connect to an OpenClaw gateway running on your Mac for agentic tool-calling.")) {
+        Section(
+          header: Text("Personal Copilot"),
+          footer: Text(
+            "On your Mac, start the VisionClaw broker and create a pairing QR. Scan it with the iPhone Camera, then return here. The QR—not the nearby-device name—verifies your Mac."
+          )
+        ) {
+          HStack {
+            Label(
+              brokerConnectionModel.state.displayText,
+              systemImage: brokerConnectionModel.isSecureRoutingReady
+                ? "checkmark.shield.fill"
+                : "shield.slash"
+            )
+            Spacer()
+            if let name = brokerConnectionModel.pairedBrokerName {
+              Text(name)
+                .foregroundColor(.secondary)
+            }
+          }
+
+          if !brokerConnectionModel.nearbyBrokers.isEmpty,
+             !brokerConnectionModel.isSecureRoutingReady {
+            Label("VisionClaw Mac found nearby", systemImage: "wifi")
+              .foregroundColor(.secondary)
+          }
+
+          if brokerConnectionModel.isSecureRoutingReady {
+            Text("Say Eva for OpenClaw, Codex for task control, or Meta for the native-assistant handoff.")
+              .font(.footnote)
+              .foregroundColor(.secondary)
+
+          } else {
+            Text(
+              pairingGuidance
+            )
+              .font(.footnote)
+              .foregroundColor(.secondary)
+          }
+
+          if brokerConnectionModel.hasStoredPairing {
+            Button("Forget Mac Pairing", role: .destructive) {
+              showForgetBrokerConfirmation = true
+            }
+          }
+        }
+
+        Section(
+          header: Text("Legacy OpenClaw"),
+          footer: Text(
+            "Compatibility settings used only when the secure Personal Copilot broker is not paired."
+          )
+        ) {
           VStack(alignment: .leading, spacing: 4) {
             Text("Host")
               .font(.caption)
@@ -73,7 +127,7 @@ struct SettingsView: View {
             Text("Hook Token")
               .font(.caption)
               .foregroundColor(.secondary)
-            TextField("Hook token", text: $openClawHookToken)
+            SecureField("Hook token", text: $openClawHookToken)
               .autocapitalization(.none)
               .disableAutocorrection(true)
               .font(.system(.body, design: .monospaced))
@@ -83,7 +137,7 @@ struct SettingsView: View {
             Text("Gateway Token")
               .font(.caption)
               .foregroundColor(.secondary)
-            TextField("Gateway auth token", text: $openClawGatewayToken)
+            SecureField("Gateway auth token", text: $openClawGatewayToken)
               .autocapitalization(.none)
               .disableAutocorrection(true)
               .font(.system(.body, design: .monospaced))
@@ -147,8 +201,29 @@ struct SettingsView: View {
       } message: {
         Text("This will reset all settings to the values built into the app.")
       }
+      .confirmationDialog(
+        "Forget this Mac?",
+        isPresented: $showForgetBrokerConfirmation,
+        titleVisibility: .visible
+      ) {
+        Button("Forget Mac Pairing", role: .destructive) {
+          brokerConnectionModel.forgetPairing()
+        }
+        Button("Cancel", role: .cancel) {}
+      } message: {
+        Text(
+          "VisionClaw will delete the protected Mac record and return to the legacy connection until you pair again."
+        )
+      }
       .onAppear {
         loadCurrentValues()
+        brokerConnectionModel.startDiscovery()
+        Task {
+          await brokerConnectionModel.refreshReachability()
+        }
+      }
+      .onDisappear {
+        brokerConnectionModel.stopDiscovery()
       }
     }
   }
@@ -182,5 +257,17 @@ struct SettingsView: View {
     settings.speakerOutputEnabled = speakerOutputEnabled
     settings.videoStreamingEnabled = videoStreamingEnabled
     settings.proactiveNotificationsEnabled = proactiveNotificationsEnabled
+  }
+
+  private var pairingGuidance: String {
+    if case .blockedPairing = brokerConnectionModel.state {
+      return
+        "The protected pairing is unreadable and all external routing is blocked. Use Forget Mac Pairing before scanning another QR or returning to the legacy connection."
+    }
+    if brokerConnectionModel.hasStoredPairing {
+      return
+        "The pairing is saved, but the Mac is not ready. Start the broker. If access was revoked, forget this pairing before scanning a new QR."
+    }
+    return "Waiting for a secure pairing QR from your Mac."
   }
 }
