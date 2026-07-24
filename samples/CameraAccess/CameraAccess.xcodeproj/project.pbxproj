@@ -26,6 +26,12 @@
 		8FFD60542E849D0D0035E446 /* RegistrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFD60532E849D0D0035E446 /* RegistrationView.swift */; };
 		8FFD60602E84A2F70035E446 /* MainAppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFD605F2E84A2F70035E446 /* MainAppView.swift */; };
 		8FFD60612E84A2F70035E446 /* DebugMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFD605E2E84A2F70035E446 /* DebugMenuView.swift */; };
+		9D7CDADE2F7F15480001492F /* ChatHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7CDADD2F7F15480001492F /* ChatHistoryStore.swift */; };
+		9D7CDAE12F7F156A0001492F /* MMDuet2Service.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7CDADF2F7F156A0001492F /* MMDuet2Service.swift */; };
+		9D7CDAE72F7F15850001492F /* GalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7CDAE42F7F15850001492F /* GalleryView.swift */; };
+		9D7CDAE82F7F15850001492F /* PhotoCaptureStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7CDAE52F7F15850001492F /* PhotoCaptureStore.swift */; };
+		9D7CDAE92F7F15850001492F /* GalleryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7CDAE32F7F15850001492F /* GalleryDetailView.swift */; };
+		9D7CDAEA2F7F15850001492F /* CapturedPhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7CDAE22F7F15850001492F /* CapturedPhoto.swift */; };
 		9D8CD52F2F746BF600E5149E /* ChatTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D8CD52D2F746BF600E5149E /* ChatTranscriptView.swift */; };
 		9D8CD5302F746BF600E5149E /* ChatMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D8CD52C2F746BF600E5149E /* ChatMessage.swift */; };
 		9DD6CAAF2F3C426600ED7098 /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD6CAAD2F3C426600ED7098 /* Secrets.swift */; };
@@ -100,6 +106,12 @@
 		8FFD60532E849D0D0035E446 /* RegistrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistrationView.swift; sourceTree = "<group>"; };
 		8FFD605E2E84A2F70035E446 /* DebugMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugMenuView.swift; sourceTree = "<group>"; };
 		8FFD605F2E84A2F70035E446 /* MainAppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainAppView.swift; sourceTree = "<group>"; };
+		9D7CDADD2F7F15480001492F /* ChatHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryStore.swift; sourceTree = "<group>"; };
+		9D7CDADF2F7F156A0001492F /* MMDuet2Service.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MMDuet2Service.swift; sourceTree = "<group>"; };
+		9D7CDAE22F7F15850001492F /* CapturedPhoto.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturedPhoto.swift; sourceTree = "<group>"; };
+		9D7CDAE32F7F15850001492F /* GalleryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryDetailView.swift; sourceTree = "<group>"; };
+		9D7CDAE42F7F15850001492F /* GalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryView.swift; sourceTree = "<group>"; };
+		9D7CDAE52F7F15850001492F /* PhotoCaptureStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCaptureStore.swift; sourceTree = "<group>"; };
 		9D8CD52C2F746BF600E5149E /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		9D8CD52D2F746BF600E5149E /* ChatTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTranscriptView.swift; sourceTree = "<group>"; };
 		9DD6CAAD2F3C426600ED7098 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
@@ -209,6 +221,8 @@
 		8FD96B7D2E6F0A9800F56AB1 /* CameraAccess */ = {
 			isa = PBXGroup;
 			children = (
+				9D7CDAE62F7F15850001492F /* Gallery */,
+				9D7CDAE02F7F156A0001492F /* MMDuet2 */,
 				9D8CD52E2F746BF600E5149E /* Chat */,
 				9DD894B12F4047630090B9B9 /* Settings */,
 				9DD6CB042F3C637D00ED7098 /* WebRTC */,
@@ -249,9 +263,29 @@
 			path = MockDeviceKit;
 			sourceTree = "<group>";
 		};
+		9D7CDAE02F7F156A0001492F /* MMDuet2 */ = {
+			isa = PBXGroup;
+			children = (
+				9D7CDADF2F7F156A0001492F /* MMDuet2Service.swift */,
+			);
+			path = MMDuet2;
+			sourceTree = "<group>";
+		};
+		9D7CDAE62F7F15850001492F /* Gallery */ = {
+			isa = PBXGroup;
+			children = (
+				9D7CDAE22F7F15850001492F /* CapturedPhoto.swift */,
+				9D7CDAE32F7F15850001492F /* GalleryDetailView.swift */,
+				9D7CDAE42F7F15850001492F /* GalleryView.swift */,
+				9D7CDAE52F7F15850001492F /* PhotoCaptureStore.swift */,
+			);
+			path = Gallery;
+			sourceTree = "<group>";
+		};
 		9D8CD52E2F746BF600E5149E /* Chat */ = {
 			isa = PBXGroup;
 			children = (
+				9D7CDADD2F7F15480001492F /* ChatHistoryStore.swift */,
 				9D8CD52C2F746BF600E5149E /* ChatMessage.swift */,
 				9D8CD52D2F746BF600E5149E /* ChatTranscriptView.swift */,
 			);
@@ -415,6 +449,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				9D7CDADE2F7F15480001492F /* ChatHistoryStore.swift in Sources */,
 				8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */,
 				8FD96B812E6F0A9800F56AB1 /* HomeScreenView.swift in Sources */,
 				8F2D23802E856711002D0588 /* DebugMenuViewModel.swift in Sources */,
@@ -424,10 +459,15 @@
 				9DD6CB0E2F3C64F400ED7098 /* WebRTCOverlayView.swift in Sources */,
 				8FFD60352E8434070035E446 /* StatusText.swift in Sources */,
 				8FFD602C2E8433E20035E446 /* MockDeviceKitViewModel.swift in Sources */,
+				9D7CDAE72F7F15850001492F /* GalleryView.swift in Sources */,
+				9D7CDAE82F7F15850001492F /* PhotoCaptureStore.swift in Sources */,
+				9D7CDAE92F7F15850001492F /* GalleryDetailView.swift in Sources */,
+				9D7CDAEA2F7F15850001492F /* CapturedPhoto.swift in Sources */,
 				8FFD602D2E8433E20035E446 /* MockDeviceViewModel.swift in Sources */,
 				E6DA451D2E79A63100E3F688 /* MockDeviceCardView.swift in Sources */,
 				E6DA451E2E79A63100E3F688 /* CardView.swift in Sources */,
 				E6DA451F2E79A63100E3F688 /* MockDeviceKitView.swift in Sources */,
+				9D7CDAE12F7F156A0001492F /* MMDuet2Service.swift in Sources */,
 				8FD96B872E6F0A9800F56AB1 /* StreamSessionViewModel.swift in Sources */,
 				9DD6CC002F4A000000ED7098 /* VideoDecoder.swift in Sources */,
 				8FD96B882E6F0A9800F56AB1 /* StreamSessionView.swift in Sources */,
