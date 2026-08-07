@@ -116,7 +116,8 @@ class GeminiLiveService {
             }
         })
 
-        // Timeout after 15 seconds (use Timer so we don't block sendExecutor)
+        // Cancel any previous timer before creating a new one (prevents leaks on repeated connect())
+        timeoutTimer?.cancel()
         timeoutTimer = Timer().apply {
             schedule(object : TimerTask() {
                 override fun run() {
@@ -134,6 +135,7 @@ class GeminiLiveService {
     fun disconnect() {
         timeoutTimer?.cancel()
         timeoutTimer = null
+        sendExecutor.shutdownNow()
         webSocket?.close(1000, null)
         webSocket = null
         onToolCall = null
