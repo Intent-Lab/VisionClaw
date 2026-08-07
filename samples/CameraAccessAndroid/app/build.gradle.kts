@@ -76,6 +76,7 @@ dependencies {
   implementation(libs.datastore.preferences)
   implementation(libs.gson)
   implementation(libs.lifecycle.process)
+  implementation(libs.security.crypto)
   androidTestImplementation(libs.androidx.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)

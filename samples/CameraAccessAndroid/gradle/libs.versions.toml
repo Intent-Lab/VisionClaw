@@ -16,6 +16,7 @@ camerax = "1.4.1"
 datastore = "1.1.1"
 gson = "2.11.0"
 lifecycleProcess = "2.8.7"
+securityCrypto = "1.1.0-alpha06"
 
 [libraries]
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -41,6 +42,7 @@ camerax-view = { group = "androidx.camera", name = "camera-view", version.ref = 
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
 lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycleProcess" }
+security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
