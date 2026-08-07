@@ -89,9 +89,21 @@ fun HomeScreen(
             tint = AppColor.DeepBlue,
             modifier = Modifier.size(80.dp * LocalDensity.current.density),
         )
+        Text(
+            text = stringResource(R.string.home_app_title),
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            text = stringResource(R.string.home_app_tagline),
+            color = Color.Gray,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+        )
         Column(
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
           TipItem(
               iconResId = R.drawable.smart_glasses_icon,
@@ -104,7 +116,7 @@ fun HomeScreen(
               text = stringResource(R.string.home_tip_audio),
           )
           TipItem(
-              iconResId = R.drawable.walking_icon,
+              iconResId = R.drawable.tap_icon,
               title = stringResource(R.string.home_tip_hands_title),
               text = stringResource(R.string.home_tip_hands),
           )
