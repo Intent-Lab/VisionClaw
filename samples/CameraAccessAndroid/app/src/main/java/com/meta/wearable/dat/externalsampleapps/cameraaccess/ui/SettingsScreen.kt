@@ -43,6 +43,8 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
+    var useOpenAIRealtime by remember { mutableStateOf(SettingsManager.voiceProvider == "openai") }
+    var openaiAPIKey by remember { mutableStateOf(SettingsManager.openaiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
     var openClawHost by remember { mutableStateOf(SettingsManager.openClawHost) }
     var openClawPort by remember { mutableStateOf(SettingsManager.openClawPort.toString()) }
@@ -55,6 +57,8 @@ fun SettingsScreen(
 
     fun save() {
         SettingsManager.geminiAPIKey = geminiAPIKey.trim()
+        SettingsManager.voiceProvider = if (useOpenAIRealtime) "openai" else "gemini"
+        SettingsManager.openaiAPIKey = openaiAPIKey.trim()
         SettingsManager.geminiSystemPrompt = systemPrompt.trim()
         SettingsManager.openClawHost = openClawHost.trim()
         openClawPort.trim().toIntOrNull()?.let { SettingsManager.openClawPort = it }
@@ -67,6 +71,8 @@ fun SettingsScreen(
 
     fun reload() {
         geminiAPIKey = SettingsManager.geminiAPIKey
+        useOpenAIRealtime = SettingsManager.voiceProvider == "openai"
+        openaiAPIKey = SettingsManager.openaiAPIKey
         systemPrompt = SettingsManager.geminiSystemPrompt
         openClawHost = SettingsManager.openClawHost
         openClawPort = SettingsManager.openClawPort.toString()
@@ -105,6 +111,33 @@ fun SettingsScreen(
                 onValueChange = { geminiAPIKey = it },
                 label = "API Key",
                 placeholder = "Enter Gemini API key",
+            )
+
+            // Voice provider section
+            SectionHeader("Voice Provider")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("OpenAI Realtime (WebRTC)", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Use the OpenAI Realtime API over WebRTC instead of Gemini Live. Takes effect on next session.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = useOpenAIRealtime,
+                    onCheckedChange = { useOpenAIRealtime = it },
+                )
+            }
+            MonoTextField(
+                value = openaiAPIKey,
+                onValueChange = { openaiAPIKey = it },
+                label = "OpenAI API Key",
+                placeholder = "Enter OpenAI API key",
             )
 
             SectionHeader("System Prompt")
