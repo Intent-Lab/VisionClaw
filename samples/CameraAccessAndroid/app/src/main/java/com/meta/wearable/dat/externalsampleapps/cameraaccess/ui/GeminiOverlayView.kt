@@ -31,7 +31,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConnectionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.voice.VoiceConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolCallStatus
@@ -77,7 +77,7 @@ fun GeminiOverlay(
 
 @Composable
 fun GeminiStatusBar(
-    connectionState: GeminiConnectionState,
+    connectionState: VoiceConnectionState,
     openClawState: OpenClawConnectionState,
     modifier: Modifier = Modifier,
 ) {
@@ -88,11 +88,11 @@ fun GeminiStatusBar(
         StatusPill(
             label = "AI",
             color = when (connectionState) {
-                is GeminiConnectionState.Ready -> Color(0xFF4CAF50)
-                is GeminiConnectionState.Connecting,
-                is GeminiConnectionState.SettingUp -> Color(0xFFFF9800)
-                is GeminiConnectionState.Error -> Color(0xFFF44336)
-                is GeminiConnectionState.Disconnected -> Color(0xFF9E9E9E)
+                is VoiceConnectionState.Ready -> Color(0xFF4CAF50)
+                is VoiceConnectionState.Connecting,
+                is VoiceConnectionState.SettingUp -> Color(0xFFFF9800)
+                is VoiceConnectionState.Error -> Color(0xFFF44336)
+                is VoiceConnectionState.Disconnected -> Color(0xFF9E9E9E)
             },
         )
 

@@ -6,6 +6,9 @@ import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCall
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCallCancellation
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolDeclarations
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.voice.RealtimeVoiceService
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.voice.VoiceConnectionState
 import java.io.ByteArrayOutputStream
 import java.util.Timer
 import java.util.TimerTask
@@ -23,33 +26,27 @@ import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
 
-sealed class GeminiConnectionState {
-    data object Disconnected : GeminiConnectionState()
-    data object Connecting : GeminiConnectionState()
-    data object SettingUp : GeminiConnectionState()
-    data object Ready : GeminiConnectionState()
-    data class Error(val message: String) : GeminiConnectionState()
-}
-
-class GeminiLiveService {
+class GeminiLiveService : RealtimeVoiceService {
     companion object {
         private const val TAG = "GeminiLiveService"
     }
 
-    private val _connectionState = MutableStateFlow<GeminiConnectionState>(GeminiConnectionState.Disconnected)
-    val connectionState: StateFlow<GeminiConnectionState> = _connectionState.asStateFlow()
+    private val _connectionState = MutableStateFlow<VoiceConnectionState>(VoiceConnectionState.Disconnected)
+    override val connectionState: StateFlow<VoiceConnectionState> = _connectionState.asStateFlow()
 
     private val _isModelSpeaking = MutableStateFlow(false)
-    val isModelSpeaking: StateFlow<Boolean> = _isModelSpeaking.asStateFlow()
+    override val isModelSpeaking: StateFlow<Boolean> = _isModelSpeaking.asStateFlow()
 
-    var onAudioReceived: ((ByteArray) -> Unit)? = null
-    var onTurnComplete: (() -> Unit)? = null
-    var onInterrupted: (() -> Unit)? = null
-    var onDisconnected: ((String?) -> Unit)? = null
-    var onInputTranscription: ((String) -> Unit)? = null
-    var onOutputTranscription: ((String) -> Unit)? = null
-    var onToolCall: ((GeminiToolCall) -> Unit)? = null
-    var onToolCallCancellation: ((GeminiToolCallCancellation) -> Unit)? = null
+    override val managesOwnAudio: Boolean = false
+
+    override var onAudioReceived: ((ByteArray) -> Unit)? = null
+    override var onTurnComplete: (() -> Unit)? = null
+    override var onInterrupted: (() -> Unit)? = null
+    override var onDisconnected: ((String?) -> Unit)? = null
+    override var onInputTranscription: ((String) -> Unit)? = null
+    override var onOutputTranscription: ((String) -> Unit)? = null
+    override var onToolCall: ((GeminiToolCall) -> Unit)? = null
+    override var onToolCallCancellation: ((GeminiToolCallCancellation) -> Unit)? = null
 
     // Latency tracking
     private var lastUserSpeechEnd: Long = 0
@@ -65,22 +62,22 @@ class GeminiLiveService {
         .pingInterval(10, TimeUnit.SECONDS)
         .build()
 
-    fun connect(callback: (Boolean) -> Unit) {
+    override fun connect(callback: (Boolean) -> Unit) {
         val url = GeminiConfig.websocketURL()
         if (url == null) {
-            _connectionState.value = GeminiConnectionState.Error("No API key configured")
+            _connectionState.value = VoiceConnectionState.Error("No API key configured")
             callback(false)
             return
         }
 
-        _connectionState.value = GeminiConnectionState.Connecting
+        _connectionState.value = VoiceConnectionState.Connecting
         connectCallback = callback
 
         val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket opened")
-                _connectionState.value = GeminiConnectionState.SettingUp
+                _connectionState.value = VoiceConnectionState.SettingUp
                 sendSetupMessage()
             }
 
@@ -95,7 +92,7 @@ class GeminiLiveService {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 val msg = t.message ?: "Unknown error"
                 Log.e(TAG, "WebSocket failure: $msg")
-                _connectionState.value = GeminiConnectionState.Error(msg)
+                _connectionState.value = VoiceConnectionState.Error(msg)
                 _isModelSpeaking.value = false
                 resolveConnect(false)
                 onDisconnected?.invoke(msg)
@@ -103,7 +100,7 @@ class GeminiLiveService {
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "WebSocket closing: $code $reason")
-                _connectionState.value = GeminiConnectionState.Disconnected
+                _connectionState.value = VoiceConnectionState.Disconnected
                 _isModelSpeaking.value = false
                 resolveConnect(false)
                 onDisconnected?.invoke("Connection closed (code $code: $reason)")
@@ -111,7 +108,7 @@ class GeminiLiveService {
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d(TAG, "WebSocket closed: $code $reason")
-                _connectionState.value = GeminiConnectionState.Disconnected
+                _connectionState.value = VoiceConnectionState.Disconnected
                 _isModelSpeaking.value = false
             }
         })
@@ -120,10 +117,10 @@ class GeminiLiveService {
         timeoutTimer = Timer().apply {
             schedule(object : TimerTask() {
                 override fun run() {
-                    if (_connectionState.value == GeminiConnectionState.Connecting
-                        || _connectionState.value == GeminiConnectionState.SettingUp) {
+                    if (_connectionState.value == VoiceConnectionState.Connecting
+                        || _connectionState.value == VoiceConnectionState.SettingUp) {
                         Log.e(TAG, "Connection timed out")
-                        _connectionState.value = GeminiConnectionState.Error("Connection timed out")
+                        _connectionState.value = VoiceConnectionState.Error("Connection timed out")
                         resolveConnect(false)
                     }
                 }
@@ -131,20 +128,20 @@ class GeminiLiveService {
         }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         timeoutTimer?.cancel()
         timeoutTimer = null
         webSocket?.close(1000, null)
         webSocket = null
         onToolCall = null
         onToolCallCancellation = null
-        _connectionState.value = GeminiConnectionState.Disconnected
+        _connectionState.value = VoiceConnectionState.Disconnected
         _isModelSpeaking.value = false
         resolveConnect(false)
     }
 
-    fun sendAudio(data: ByteArray) {
-        if (_connectionState.value != GeminiConnectionState.Ready) return
+    override fun sendAudio(data: ByteArray) {
+        if (_connectionState.value != VoiceConnectionState.Ready) return
         sendExecutor.execute {
             val base64 = Base64.encodeToString(data, Base64.NO_WRAP)
             val json = JSONObject().apply {
@@ -159,8 +156,8 @@ class GeminiLiveService {
         }
     }
 
-    fun sendVideoFrame(bitmap: Bitmap) {
-        if (_connectionState.value != GeminiConnectionState.Ready) return
+    override fun sendVideoFrame(bitmap: Bitmap) {
+        if (_connectionState.value != VoiceConnectionState.Ready) return
         sendExecutor.execute {
             val baos = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, GeminiConfig.VIDEO_JPEG_QUALITY, baos)
@@ -177,14 +174,23 @@ class GeminiLiveService {
         }
     }
 
-    fun sendToolResponse(response: JSONObject) {
+    override fun sendToolResponse(callId: String, name: String, result: ToolResult) {
+        val response = JSONObject().apply {
+            put("toolResponse", JSONObject().apply {
+                put("functionResponses", JSONArray().put(JSONObject().apply {
+                    put("id", callId)
+                    put("name", name)
+                    put("response", result.toJSON())
+                }))
+            })
+        }
         sendExecutor.execute {
             webSocket?.send(response.toString())
         }
     }
 
-    fun sendTextMessage(text: String) {
-        if (_connectionState.value != GeminiConnectionState.Ready) return
+    override fun sendTextMessage(text: String) {
+        if (_connectionState.value != VoiceConnectionState.Ready) return
         sendExecutor.execute {
             val json = JSONObject().apply {
                 put("clientContent", JSONObject().apply {
@@ -258,7 +264,7 @@ class GeminiLiveService {
 
             // Setup complete
             if (json.has("setupComplete")) {
-                _connectionState.value = GeminiConnectionState.Ready
+                _connectionState.value = VoiceConnectionState.Ready
                 resolveConnect(true)
                 return
             }
@@ -267,7 +273,7 @@ class GeminiLiveService {
             if (json.has("goAway")) {
                 val goAway = json.getJSONObject("goAway")
                 val seconds = goAway.optJSONObject("timeLeft")?.optInt("seconds", 0) ?: 0
-                _connectionState.value = GeminiConnectionState.Disconnected
+                _connectionState.value = VoiceConnectionState.Disconnected
                 _isModelSpeaking.value = false
                 onDisconnected?.invoke("Server closing (time left: ${seconds}s)")
                 return

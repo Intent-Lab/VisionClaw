@@ -52,6 +52,7 @@ Gemini Live API (WebSocket)
 
 **Key pieces:**
 - **Gemini Live** -- real-time voice + vision AI over WebSocket (native audio, not STT-first)
+- **OpenAI Realtime (Android)** -- optional alternate voice backend over WebRTC (Opus, built-in AEC, full-duplex barge-in); switch providers in Settings
 - **OpenClaw** (optional) -- local gateway that gives Gemini access to 56+ tools and all your connected apps
 - **Phone mode** -- test the full pipeline using your phone camera instead of glasses
 - **WebRTC streaming** -- share your glasses POV live to a browser viewer
@@ -262,6 +263,8 @@ All source code is in `samples/CameraAccessAndroid/app/src/main/java/.../cameraa
 | `gemini/GeminiLiveService.kt` | OkHttp WebSocket client for Gemini Live API |
 | `gemini/AudioManager.kt` | AudioRecord (16kHz) + AudioTrack (24kHz) |
 | `gemini/GeminiSessionViewModel.kt` | Session lifecycle, tool call wiring, UI state |
+| `voice/RealtimeVoiceService.kt` | Provider-neutral voice session interface + factory |
+| `voice/openai/OpenAIRealtimeService.kt` | OpenAI Realtime API over WebRTC (audio + data channel) |
 | `openclaw/ToolCallModels.kt` | Tool declarations, data classes |
 | `openclaw/OpenClawBridge.kt` | OkHttp HTTP client for OpenClaw gateway |
 | `openclaw/ToolCallRouter.kt` | Routes Gemini tool calls to OpenClaw |
@@ -277,6 +280,14 @@ All source code is in `samples/CameraAccessAndroid/app/src/main/java/.../cameraa
 - **iOS iPhone mode**: Uses `.voiceChat` audio session for echo cancellation + mic gating during AI speech
 - **iOS Glasses mode**: Uses `.videoChat` audio session (mic is on glasses, speaker is on phone -- no echo)
 - **Android**: Uses `VOICE_COMMUNICATION` audio source for built-in acoustic echo cancellation
+- **Android, OpenAI Realtime provider**: WebRTC owns mic and speaker end to end (Opus, jitter buffer, echo cancellation inside the peer connection); the PCM pipeline above stays idle
+
+#### Voice Providers (Android)
+
+Settings -> Voice Provider switches between:
+
+- **Gemini Live** (default) -- WebSocket, PCM audio pumped by `AudioManager`, continuous ~1fps vision frames
+- **OpenAI Realtime** -- WebRTC via the ephemeral-key flow (`/v1/realtime/client_secrets` then SDP exchange with `/v1/realtime/calls`); model/tool events flow over the `oai-events` data channel. Vision is per-turn: the latest camera frame is attached as an image item when you start speaking, instead of a continuous stream. Requires an OpenAI API key in Settings.
 
 ### Video Pipeline
 

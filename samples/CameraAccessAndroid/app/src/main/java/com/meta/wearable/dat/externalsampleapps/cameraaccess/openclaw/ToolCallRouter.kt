@@ -4,8 +4,6 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 
 class ToolCallRouter(
     private val bridge: OpenClawBridge,
@@ -21,7 +19,7 @@ class ToolCallRouter(
 
     fun handleToolCall(
         call: GeminiFunctionCall,
-        sendResponse: (JSONObject) -> Unit
+        sendResponse: (callId: String, name: String, result: ToolResult) -> Unit
     ) {
         val callId = call.id
         val callName = call.name
@@ -35,7 +33,7 @@ class ToolCallRouter(
                 "Tool execution is temporarily unavailable after $consecutiveFailures consecutive failures. " +
                 "Please tell the user you cannot complete this action right now and suggest they check their OpenClaw gateway connection."
             )
-            sendResponse(buildToolResponse(callId, callName, errorResult))
+            sendResponse(callId, callName, errorResult)
             return
         }
 
@@ -51,8 +49,7 @@ class ToolCallRouter(
                     is ToolResult.Failure -> consecutiveFailures++
                 }
 
-                val response = buildToolResponse(callId, callName, result)
-                sendResponse(response)
+                sendResponse(callId, callName, result)
             } else {
                 Log.d(TAG, "Task $callId was cancelled, skipping response")
             }
@@ -81,21 +78,5 @@ class ToolCallRouter(
         }
         inFlightJobs.clear()
         consecutiveFailures = 0
-    }
-
-    private fun buildToolResponse(
-        callId: String,
-        name: String,
-        result: ToolResult
-    ): JSONObject {
-        return JSONObject().apply {
-            put("toolResponse", JSONObject().apply {
-                put("functionResponses", JSONArray().put(JSONObject().apply {
-                    put("id", callId)
-                    put("name", name)
-                    put("response", result.toJSON())
-                }))
-            })
-        }
     }
 }

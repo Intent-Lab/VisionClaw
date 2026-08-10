@@ -17,6 +17,15 @@ object SettingsManager {
         get() = prefs.getString("geminiAPIKey", null) ?: Secrets.geminiAPIKey
         set(value) = prefs.edit().putString("geminiAPIKey", value).apply()
 
+    // "gemini" (Live API over WebSocket) or "openai" (Realtime API over WebRTC)
+    var voiceProvider: String
+        get() = prefs.getString("voiceProvider", null) ?: "gemini"
+        set(value) = prefs.edit().putString("voiceProvider", value).apply()
+
+    var openaiAPIKey: String
+        get() = prefs.getString("openaiAPIKey", null) ?: ""
+        set(value) = prefs.edit().putString("openaiAPIKey", value).apply()
+
     var geminiSystemPrompt: String
         get() = prefs.getString("geminiSystemPrompt", null) ?: DEFAULT_SYSTEM_PROMPT
         set(value) = prefs.edit().putString("geminiSystemPrompt", value).apply()
