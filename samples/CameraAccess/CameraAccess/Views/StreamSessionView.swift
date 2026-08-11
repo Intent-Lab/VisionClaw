@@ -42,7 +42,9 @@ struct StreamSessionView: View {
       if captureSource == .iPhoneCamera {
         LiveKitStreamView(session: liveKit)
       } else if viewModel.isStreaming {
-        StreamView(viewModel: viewModel)
+        // Glasses are just another camera: same call screen, same agent, with
+        // DAT frames bridged into the room via pushGlassesFrame.
+        LiveKitStreamView(session: liveKit)
       } else if let wearablesViewModel {
         if wearablesViewModel.registrationState == .registered || wearablesViewModel.hasMockDevice {
           NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel)
@@ -54,8 +56,23 @@ struct StreamSessionView: View {
       }
     }
     .task {
+      viewModel.onDecodedFrame = { [weak liveKit] pixelBuffer in
+        liveKit?.pushGlassesFrame(pixelBuffer)
+      }
       if captureSource == .iPhoneCamera {
         await liveKit.start()
+      }
+    }
+    .onChange(of: viewModel.isStreaming) { streaming in
+      // Glasses mode: the call rides the DAT stream's lifecycle -- frames
+      // start flowing, the room opens; the stream ends, the call ends.
+      guard captureSource == .glasses else { return }
+      Task {
+        if streaming {
+          await liveKit.start()
+        } else if liveKit.isActive {
+          await liveKit.stop()
+        }
       }
     }
     .onChange(of: intelligenceRaw) { _ in

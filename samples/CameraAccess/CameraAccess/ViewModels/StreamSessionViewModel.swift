@@ -112,11 +112,16 @@ class StreamSessionViewModel: ObservableObject {
     attachListeners()
   }
 
+  /// Bridge to the LiveKit call: every decoded glasses frame is also handed
+  /// here, so the room publishes exactly what the glasses see.
+  var onDecodedFrame: ((CVPixelBuffer) -> Void)?
+
   private func setupVideoDecoder() {
     videoDecoder.setFrameCallback { [weak self] decodedFrame in
       Task { @MainActor [weak self] in
         guard let self else { return }
         let pixelBuffer = decodedFrame.pixelBuffer
+        self.onDecodedFrame?(pixelBuffer)
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
@@ -193,6 +198,7 @@ class StreamSessionViewModel: ObservableObject {
               }
             }
           } else if let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            self.onDecodedFrame?(pixelBuffer)
             // Raw pixel buffer - convert directly via CPU CIContext
             let width = CVPixelBufferGetWidth(pixelBuffer)
             let height = CVPixelBufferGetHeight(pixelBuffer)

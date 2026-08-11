@@ -33,6 +33,19 @@ final class LiveKitSession: NSObject, ObservableObject {
 
   @Published private(set) var state: State = .disconnected
   @Published private(set) var agentStatus: AgentStatus = .none
+
+  /// True when this call's video comes from the glasses (DAT bridge) instead
+  /// of the phone camera. Decided at start() from the persisted capture source.
+  @Published private(set) var usingGlassesSource = false
+
+  /// Live caption from the transcription text streams (agent and user speech).
+  struct Caption: Equatable {
+    let text: String
+    let isAgent: Bool
+  }
+
+  @Published private(set) var caption: Caption?
+  private var captionClearTask: Task<Void, Never>?
   @Published private(set) var localVideoTrack: LocalVideoTrack?
   /// Camera-only preview while no call is active. The camera IS this app;
   /// hanging up stops the listening, not the seeing.
@@ -149,8 +162,17 @@ final class LiveKitSession: NSObject, ObservableObject {
   /// between calls. Handed off to the room on connect (one owner at a time).
   func startPreview() async {
     guard state == .disconnected || isFailed, previewTrack == nil else { return }
-    let track = LocalVideoTrack.createCameraTrack(
-      options: CameraCaptureOptions(position: .back))
+    let track: LocalVideoTrack
+    if SettingsManager.shared.captureSource == .glasses {
+      // Glasses preview is a buffer track fed by pushGlassesFrame; there is
+      // no capture device to open.
+      track = LocalVideoTrack.createBufferTrack(name: "glasses-preview", source: .camera)
+      glassesCapturerBox.capturer = track.capturer as? BufferCapturer
+    } else {
+      track = LocalVideoTrack.createCameraTrack(
+        options: CameraCaptureOptions(position: .back))
+      glassesCapturerBox.capturer = nil
+    }
     do {
       try await track.start()
       previewTrack = track
@@ -158,6 +180,24 @@ final class LiveKitSession: NSObject, ObservableObject {
     } catch {
       NSLog("[LiveKit] preview camera unavailable: %@", error.localizedDescription)
     }
+  }
+
+  /// Holds the live glasses BufferCapturer outside actor isolation: frames
+  /// arrive at 24fps from the DAT decoder's context, and a per-frame hop to
+  /// the main actor would be pure overhead. BufferCapturer.capture is
+  /// thread-safe; a stale capturer after track teardown drops frames harmlessly.
+  private final class GlassesCapturerBox: @unchecked Sendable {
+    var capturer: BufferCapturer?
+  }
+
+  private let glassesCapturerBox = GlassesCapturerBox()
+
+  /// Glasses frames from the DAT decoder land here and flow into whichever
+  /// buffer track is live (call or preview). Freeze works unchanged: muting
+  /// the publication stops delivery to the room while the grabber holds the
+  /// pinned frame.
+  nonisolated func pushGlassesFrame(_ pixelBuffer: CVPixelBuffer) {
+    glassesCapturerBox.capturer?.capture(pixelBuffer)
   }
 
   private func stopPreview() async {
@@ -176,6 +216,8 @@ final class LiveKitSession: NSObject, ObservableObject {
     state = .connecting
     await stopPreview()
 
+    usingGlassesSource = SettingsManager.shared.captureSource == .glasses
+
     do {
       let ticket = try await fetchTicket()
       try await room.connect(url: ticket.url, token: ticket.token)
@@ -183,18 +225,29 @@ final class LiveKitSession: NSObject, ObservableObject {
       // Camera failure (simulator, permission denied) degrades to voice-only
       // rather than killing the call.
       do {
-        // A video-call SDK defaults to the selfie camera; this app is a pair
-        // of eyes on the world, so it opens on the back camera.
-        try await room.localParticipant.setCamera(
-          enabled: true,
-          captureOptions: CameraCaptureOptions(position: .back))
-        localVideoTrack = room.localParticipant.localVideoTracks
-          .compactMap { $0.track as? LocalVideoTrack }
-          .first
+        if usingGlassesSource {
+          // Glasses frames arrive via pushGlassesFrame; publish a buffer
+          // track with camera source so mute/freeze/agent logic is identical.
+          let track = LocalVideoTrack.createBufferTrack(name: "glasses", source: .camera)
+          try await track.start()
+          _ = try await room.localParticipant.publish(videoTrack: track)
+          localVideoTrack = track
+          glassesCapturerBox.capturer = track.capturer as? BufferCapturer
+        } else {
+          // A video-call SDK defaults to the selfie camera; this app is a pair
+          // of eyes on the world, so it opens on the back camera.
+          try await room.localParticipant.setCamera(
+            enabled: true,
+            captureOptions: CameraCaptureOptions(position: .back))
+          localVideoTrack = room.localParticipant.localVideoTracks
+            .compactMap { $0.track as? LocalVideoTrack }
+            .first
+        }
         attachGrabber(to: localVideoTrack)
       } catch {
         NSLog("[LiveKit] camera unavailable, voice-only: %@", error.localizedDescription)
       }
+      registerCaptionHandler()
       state = .connected
       resetZoom()
       refreshAgentStatus()
@@ -214,7 +267,39 @@ final class LiveKitSession: NSObject, ObservableObject {
     agentStatus = .none
     resetZoom()
     frozenFrame = nil
+    caption = nil
+    captionClearTask?.cancel()
     await startPreview()
+  }
+
+  // MARK: - Captions (transcription text streams)
+
+  /// The agents framework publishes live transcriptions of both sides on the
+  /// "lk.transcription" topic; each utterance segment is one stream, growing
+  /// chunk by chunk. Registration is per-room and survives reconnects, so a
+  /// second register on redial throws -- ignored deliberately.
+  private func registerCaptionHandler() {
+    Task { [weak self] in
+      guard let room = self?.room else { return }
+      try? await room.registerTextStreamHandler(for: "lk.transcription") { [weak self] reader, identity in
+        let isAgent = identity.stringValue.hasPrefix("agent")
+        var text = ""
+        for try await chunk in reader {
+          text += chunk
+          await self?.showCaption(text, isAgent: isAgent)
+        }
+      }
+    }
+  }
+
+  private func showCaption(_ text: String, isAgent: Bool) {
+    guard !text.isEmpty else { return }
+    caption = Caption(text: text, isAgent: isAgent)
+    captionClearTask?.cancel()
+    captionClearTask = Task { [weak self] in
+      try? await Task.sleep(nanoseconds: 4_000_000_000)
+      if !Task.isCancelled { self?.caption = nil }
+    }
   }
 
   private var isFailed: Bool {

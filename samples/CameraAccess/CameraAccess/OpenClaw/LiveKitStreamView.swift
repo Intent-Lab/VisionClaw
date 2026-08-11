@@ -25,7 +25,7 @@ struct LiveKitStreamView: View {
             Task { await session.toggleFreeze() }
           }
           .overlay(alignment: .topLeading) {
-            if session.zoomFactor > 1.05 {
+            if session.zoomFactor > 1.05 && !session.usingGlassesSource {
               Text(String(format: "%.1fx", session.zoomFactor))
                 .font(.system(.footnote, design: .rounded).weight(.semibold))
                 .foregroundStyle(.white)
@@ -89,6 +89,27 @@ struct LiveKitStreamView: View {
           Spacer()
         }
         .animation(.easeInOut(duration: 0.2), value: session.agentStatus)
+      }
+
+      // Live captions: agent speech plain, user speech dimmed. Interim text
+      // updates in place; a finished utterance lingers four seconds.
+      if let caption = session.caption {
+        VStack {
+          Spacer()
+          Text(caption.text)
+            .font(.subheadline)
+            .foregroundStyle(caption.isAgent ? .white : .white.opacity(0.65))
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .truncationMode(.head)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 24)
+            .padding(.bottom, 116)
+        }
+        .allowsHitTesting(false)
+        .transition(.opacity)
       }
 
       VStack {
