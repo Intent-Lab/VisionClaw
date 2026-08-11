@@ -164,6 +164,15 @@ class LiveKitSessionViewModel(
     private var glassesSession: StreamSession? = null
     private val glassesFeedJobs = mutableListOf<Job>()
 
+    // Wi-Fi Direct link negotiation between phone and glasses is flaky in
+    // dense RF; when it fails the stream starves on BLE and dies. Rather than
+    // a permanent "Waiting" that needs a manual back-out, restart the feed
+    // after a stall. Recovery resets the budget; three failures rest.
+    private var glassesRetryJob: Job? = null
+    private var glassesRetryCount = 0
+    private val glassesStallMs = 10_000L
+    private val glassesMaxRetries = 3
+
     // Capturer of whichever glasses track is current (preview or call); the
     // DAT collector pushes into it. A disposed capturer drops pushes, so a
     // stale reference during track handoff is harmless.
@@ -506,11 +515,39 @@ class LiveKitSessionViewModel(
             session.state.collect { sessionState ->
                 Log.i(TAG, "glasses session state: $sessionState")
                 _uiState.update { it.copy(glassesStreaming = sessionState == StreamSessionState.STREAMING) }
+                if (sessionState == StreamSessionState.STREAMING) {
+                    glassesRetryCount = 0
+                    glassesRetryJob?.cancel()
+                    glassesRetryJob = null
+                } else {
+                    scheduleGlassesRetry()
+                }
             }
         }
     }
 
+    private fun scheduleGlassesRetry() {
+        if (glassesRetryJob?.isActive == true) return
+        glassesRetryJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(glassesStallMs)
+            if (glassesSession == null || uiState.value.glassesStreaming) return@launch
+            if (glassesRetryCount >= glassesMaxRetries) {
+                Log.w(TAG, "glasses feed stalled; retry budget exhausted")
+                return@launch
+            }
+            glassesRetryCount++
+            Log.i(TAG, "glasses feed stalled ${glassesStallMs}ms; restart ${glassesRetryCount}/$glassesMaxRetries")
+            // Clear the handle first so stopGlassesFeed doesn't cancel the
+            // coroutine that is performing the restart.
+            glassesRetryJob = null
+            stopGlassesFeed()
+            ensureGlassesFeed()
+        }
+    }
+
     private fun stopGlassesFeed() {
+        glassesRetryJob?.cancel()
+        glassesRetryJob = null
         if (glassesSession == null) return
         glassesFeedJobs.forEach { it.cancel() }
         glassesFeedJobs.clear()
