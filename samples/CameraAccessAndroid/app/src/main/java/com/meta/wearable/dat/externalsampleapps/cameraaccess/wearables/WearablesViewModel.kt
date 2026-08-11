@@ -55,6 +55,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     if (monitoringStarted) {
       return
     }
+    WearablesInit.ensure(getApplication())
     monitoringStarted = true
 
     // Monitor device selector for active device
@@ -117,10 +118,12 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
   }
 
   fun startRegistration(activity: Activity) {
+    WearablesInit.ensure(activity)
     Wearables.startRegistration(activity)
   }
 
   fun startUnregistration(activity: Activity) {
+    WearablesInit.ensure(activity)
     Wearables.startUnregistration(activity)
   }
 
@@ -154,12 +157,8 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     }
   }
 
-  fun navigateToPhoneMode() {
-    _uiState.update { it.copy(isStreaming = true, isPhoneMode = true) }
-  }
-
   fun navigateToDeviceSelection() {
-    _uiState.update { it.copy(isStreaming = false, isPhoneMode = false) }
+    _uiState.update { it.copy(isStreaming = false) }
   }
 
   fun showSettings() {

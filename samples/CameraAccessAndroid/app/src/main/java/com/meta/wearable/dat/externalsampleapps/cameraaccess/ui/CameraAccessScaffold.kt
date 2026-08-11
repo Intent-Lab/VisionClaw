@@ -24,6 +24,8 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -54,9 +56,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +74,16 @@ fun CameraAccessScaffold(
     modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
+  val liveKitViewModel: LiveKitSessionViewModel = composeViewModel()
+  val streamViewModel: StreamViewModel =
+      composeViewModel(
+          factory =
+              StreamViewModel.Factory(
+                  application = (LocalActivity.current as ComponentActivity).application,
+                  wearablesViewModel = viewModel,
+              ),
+      )
   val snackbarHostState = remember { SnackbarHostState() }
   val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -78,6 +95,27 @@ fun CameraAccessScaffold(
     }
   }
 
+  // Swap capture pipelines live when the Settings choice changes: entering
+  // glasses mode releases the phone camera and hangs up the LiveKit call;
+  // entering phone mode stops any running glasses stream. The next stint in
+  // phone mode auto-starts a fresh call.
+  LaunchedEffect(captureSource) {
+    when (captureSource) {
+      CaptureSource.GLASSES -> {
+        liveKitViewModel.leave()
+        // Initializes the DAT SDK on first use (no-op afterwards) so phone
+        // mode never pays its startup cost.
+        viewModel.startMonitoring()
+      }
+      CaptureSource.PHONE -> {
+        if (uiState.isStreaming) {
+          streamViewModel.stopStream()
+          viewModel.navigateToDeviceSelection()
+        }
+      }
+    }
+  }
+
   Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     Box(modifier = Modifier.fillMaxSize()) {
       when {
@@ -85,10 +123,16 @@ fun CameraAccessScaffold(
             SettingsScreen(
                 onBack = { viewModel.hideSettings() },
             )
+        // Phone mode is the app's front door: no onboarding, no intermediate
+        // screen -- the camera preview + call button IS the home screen.
+        // Glasses mode keeps the DAT registration/streaming flow.
+        captureSource == CaptureSource.PHONE ->
+            LiveKitStreamScreen(
+                onOpenSettings = { viewModel.showSettings() },
+            )
         uiState.isStreaming ->
             StreamScreen(
                 wearablesViewModel = viewModel,
-                isPhoneMode = uiState.isPhoneMode,
             )
         uiState.isRegistered ->
             NonStreamScreen(

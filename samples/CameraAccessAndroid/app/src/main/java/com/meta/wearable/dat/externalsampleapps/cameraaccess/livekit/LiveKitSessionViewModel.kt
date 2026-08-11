@@ -1,0 +1,513 @@
+package com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit
+
+import android.Manifest
+import android.app.Application
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.util.Log
+import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.viewModelScope
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.GatewayApi
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.IntelligenceEngine
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import io.livekit.android.LiveKit
+import io.livekit.android.events.RoomEvent
+import io.livekit.android.events.collect
+import io.livekit.android.room.Room
+import io.livekit.android.room.participant.Participant
+import io.livekit.android.room.track.CameraPosition
+import io.livekit.android.room.track.LocalVideoTrack
+import io.livekit.android.room.track.LocalVideoTrackOptions
+import io.livekit.android.room.track.Track
+import io.livekit.android.room.track.video.CameraCapturerUtils
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import livekit.org.webrtc.CameraXHelper
+import livekit.org.webrtc.VideoFrame
+import livekit.org.webrtc.VideoSink
+import livekit.org.webrtc.getCameraX
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+
+sealed class SessionState {
+    data object Disconnected : SessionState()
+    data object Connecting : SessionState()
+    data object Connected : SessionState()
+    data class Failed(val message: String) : SessionState()
+}
+
+/**
+ * What the agent is doing right now, surfaced so a dead worker is visible
+ * instead of an empty room that politely ignores you. Driven by agent
+ * presence in the room plus the standard "lk.agent.state" attribute the
+ * agents framework publishes (listening / thinking / speaking).
+ */
+enum class AgentStatus {
+    NONE, // no active call
+    WAITING, // call is up, agent hasn't joined the room
+    STARTING, // agent joined, model session still initializing
+    LISTENING,
+    THINKING,
+    SPEAKING,
+    LEFT, // agent was here and disconnected mid-call
+}
+
+data class LiveKitUiState(
+    val state: SessionState = SessionState.Disconnected,
+    val agentStatus: AgentStatus = AgentStatus.NONE,
+    val localVideoTrack: LocalVideoTrack? = null,
+    // Camera-only preview while no call is active. The camera IS this app;
+    // hanging up stops the listening, not the seeing.
+    val previewTrack: LocalVideoTrack? = null,
+    val frozenFrame: Bitmap? = null,
+    val zoomFactor: Float = 1f,
+) {
+    val isActive: Boolean
+        get() = state == SessionState.Connected || state == SessionState.Connecting
+
+    val displayTrack: LocalVideoTrack?
+        get() = localVideoTrack ?: previewTrack
+}
+
+/**
+ * The entire voice+vision client, post-migration: join a LiveKit room, publish
+ * mic and camera, subscribe to the agent's audio. Everything the direct
+ * connection hand-rolled -- echo cancellation, interruption, turn-taking,
+ * reconnection -- lives in WebRTC and the server-side agent now. What remains
+ * on the phone is a room ticket and two track toggles.
+ */
+@OptIn(ExperimentalCamera2Interop::class)
+class LiveKitSessionViewModel(
+    application: Application,
+) : AndroidViewModel(application) {
+
+    companion object {
+        private const val TAG = "LiveKitSession"
+        private const val AGENT_STATE_ATTRIBUTE = "lk.agent.state"
+        private const val MAX_ZOOM = 8f
+        private const val FROZEN_JPEG_QUALITY = 90
+    }
+
+    private val _uiState = MutableStateFlow(LiveKitUiState())
+    val uiState: StateFlow<LiveKitUiState> = _uiState.asStateFlow()
+
+    // CameraX-backed capture so zoom can go through CameraControl.
+    private val cameraProvider = CameraXHelper.createCameraProvider(ProcessLifecycleOwner.get())
+
+    val room: Room = LiveKit.create(application).apply {
+        // A video-call SDK defaults to the selfie camera; this app is a pair
+        // of eyes on the world, so it opens on the back camera.
+        videoTrackCaptureDefaults = LocalVideoTrackOptions(position = CameraPosition.BACK)
+    }
+
+    private val frameGrabber = FrameGrabber()
+    private var grabberTrack: LocalVideoTrack? = null
+
+    private val httpClient = OkHttpClient.Builder()
+        .callTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    init {
+        if (cameraProvider.isSupported(application)) {
+            CameraCapturerUtils.registerCameraProvider(cameraProvider)
+        }
+        // Room events arrive on SDK coroutines; each handler re-derives agent
+        // status from the room, so ordering races collapse into "recompute
+        // from current truth".
+        viewModelScope.launch {
+            room.events.collect { event ->
+                when (event) {
+                    is RoomEvent.ParticipantConnected -> refreshAgentStatus()
+                    is RoomEvent.ParticipantDisconnected -> {
+                        if (event.participant.kind == Participant.Kind.AGENT &&
+                            _uiState.value.state == SessionState.Connected
+                        ) {
+                            _uiState.update { it.copy(agentStatus = AgentStatus.LEFT) }
+                        } else {
+                            refreshAgentStatus()
+                        }
+                    }
+                    is RoomEvent.ParticipantAttributesChanged -> {
+                        if (event.participant.kind == Participant.Kind.AGENT) {
+                            refreshAgentStatus()
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    private fun refreshAgentStatus() {
+        _uiState.update { state ->
+            if (state.state != SessionState.Connected) {
+                return@update state.copy(agentStatus = AgentStatus.NONE)
+            }
+            val agent = room.remoteParticipants.values.firstOrNull { it.kind == Participant.Kind.AGENT }
+            val status = if (agent == null) {
+                if (state.agentStatus == AgentStatus.LEFT) AgentStatus.LEFT else AgentStatus.WAITING
+            } else {
+                when (agent.attributes[AGENT_STATE_ATTRIBUTE]) {
+                    "listening" -> AgentStatus.LISTENING
+                    "thinking" -> AgentStatus.THINKING
+                    "speaking" -> AgentStatus.SPEAKING
+                    // "initializing", "idle", or the attribute not yet set
+                    else -> AgentStatus.STARTING
+                }
+            }
+            state.copy(agentStatus = status)
+        }
+    }
+
+    // MARK: Call lifecycle
+
+    // The engine the current call was dialed with, so a settings change can be
+    // detected and applied by redialing.
+    private var connectedEngine: IntelligenceEngine? = null
+    private var autoStarted = false
+
+    fun start() {
+        val current = _uiState.value.state
+        if (current != SessionState.Disconnected && current !is SessionState.Failed) return
+        viewModelScope.launch { connectInternal() }
+    }
+
+    /**
+     * Phone mode joins the room on sight -- camera, mic and the assistant all
+     * come up together (mirrors iOS StreamSessionView's launch task). Runs
+     * once per stint in phone mode; returns whether a start was initiated.
+     * Declines (without consuming the one-shot) until the runtime permissions
+     * exist, so the first-ever launch auto-starts right after the grant
+     * instead of failing into a dead call.
+     */
+    fun autoStartIfNeeded(): Boolean {
+        if (autoStarted) return false
+        val granted = ContextCompat.checkSelfPermission(
+            getApplication(),
+            Manifest.permission.RECORD_AUDIO,
+        ) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                getApplication(),
+                Manifest.permission.CAMERA,
+            ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return false
+        autoStarted = true
+        start()
+        return true
+    }
+
+    /**
+     * The brain is chosen at session start (room-token metadata), so a live
+     * call redials itself to apply an engine switch -- the user flips a toggle
+     * in Settings and seconds later the other model picks up.
+     */
+    fun redialIfEngineChanged() {
+        val selected = SettingsManager.intelligenceEngine
+        if (_uiState.value.state != SessionState.Connected) return
+        if (connectedEngine == null || connectedEngine == selected) return
+        viewModelScope.launch {
+            disconnectInternal()
+            connectInternal()
+        }
+    }
+
+    private suspend fun connectInternal() {
+        if (!SettingsManager.isGatewayConfigured) {
+            _uiState.update { it.copy(state = SessionState.Failed("Gateway not configured. Check Settings.")) }
+            return
+        }
+        _uiState.update { it.copy(state = SessionState.Connecting) }
+        stopPreview()
+        try {
+            val engine = SettingsManager.intelligenceEngine
+            val ticket = fetchTicket(engine)
+            room.connect(ticket.url, ticket.token)
+            connectedEngine = engine
+            room.localParticipant.setMicrophoneEnabled(true)
+            // Camera failure (emulator, permission denied) degrades to
+            // voice-only rather than killing the call.
+            try {
+                room.localParticipant.setCameraEnabled(true)
+                val track = room.localParticipant
+                    .getTrackPublication(Track.Source.CAMERA)?.track as? LocalVideoTrack
+                attachGrabber(track)
+                _uiState.update { it.copy(localVideoTrack = track) }
+            } catch (e: Exception) {
+                Log.w(TAG, "camera unavailable, voice-only: ${e.message}")
+            }
+            _uiState.update { it.copy(state = SessionState.Connected, zoomFactor = 1f) }
+            refreshAgentStatus()
+        } catch (e: Exception) {
+            Log.w(TAG, "call failed: ${e.message}")
+            _uiState.update {
+                it.copy(
+                    state = SessionState.Failed(e.message ?: "connection failed"),
+                    agentStatus = AgentStatus.NONE,
+                    localVideoTrack = null,
+                )
+            }
+            room.disconnect()
+            // Even a failed call leaves the user with eyes.
+            startPreview()
+        }
+    }
+
+    fun stop() {
+        viewModelScope.launch {
+            disconnectInternal()
+            startPreview()
+        }
+    }
+
+    private fun disconnectInternal() {
+        room.disconnect()
+        attachGrabber(null)
+        connectedEngine = null
+        _uiState.update {
+            it.copy(
+                state = SessionState.Disconnected,
+                agentStatus = AgentStatus.NONE,
+                localVideoTrack = null,
+                frozenFrame = null,
+                zoomFactor = 1f,
+            )
+        }
+    }
+
+    /**
+     * Full teardown when leaving phone mode: hang up AND release the camera.
+     * The next stint in phone mode auto-starts again.
+     */
+    fun leave() {
+        autoStarted = false
+        viewModelScope.launch {
+            disconnectInternal()
+            stopPreview()
+            _uiState.update { LiveKitUiState() }
+        }
+    }
+
+    // MARK: Preview (local, unpublished camera between calls)
+
+    fun startPreview() {
+        val state = _uiState.value
+        val idle = state.state == SessionState.Disconnected || state.state is SessionState.Failed
+        if (!idle || state.previewTrack != null) return
+        try {
+            val track = room.localParticipant.createVideoTrack(
+                options = LocalVideoTrackOptions(position = CameraPosition.BACK),
+            )
+            track.startCapture()
+            attachGrabber(track)
+            _uiState.update { it.copy(previewTrack = track, zoomFactor = 1f) }
+        } catch (e: Exception) {
+            Log.w(TAG, "preview camera unavailable: ${e.message}")
+        }
+    }
+
+    private fun stopPreview() {
+        val track = _uiState.value.previewTrack ?: return
+        _uiState.update { it.copy(previewTrack = null) }
+        if (grabberTrack == track) attachGrabber(null)
+        try {
+            track.stopCapture()
+            track.dispose()
+        } catch (e: Exception) {
+            Log.w(TAG, "preview stop failed: ${e.message}")
+        }
+    }
+
+    // MARK: Freeze (pin a frame for the model to refer to)
+
+    // While frozen, the screen shows the pinned frame and the published video
+    // is muted: the model receives no newer frames, so the pinned one stays
+    // the most recent thing it has seen -- "this" means the frame the user
+    // pinned.
+
+    fun toggleFreeze() {
+        if (_uiState.value.frozenFrame != null) unfreeze() else freeze()
+    }
+
+    fun freeze() {
+        if (_uiState.value.frozenFrame != null) return
+        frameGrabber.requestFrame { bitmap ->
+            if (bitmap == null) return@requestFrame
+            viewModelScope.launch(Dispatchers.Main) {
+                if (_uiState.value.frozenFrame != null) return@launch
+                _uiState.update { it.copy(frozenFrame = bitmap) }
+                if (_uiState.value.state == SessionState.Connected) {
+                    room.localParticipant.getTrackPublication(Track.Source.CAMERA)?.muted = true
+                }
+            }
+        }
+    }
+
+    fun unfreeze() {
+        if (_uiState.value.frozenFrame == null) return
+        _uiState.update { it.copy(frozenFrame = null) }
+        if (_uiState.value.state == SessionState.Connected) {
+            room.localParticipant.getTrackPublication(Track.Source.CAMERA)?.muted = false
+        }
+    }
+
+    private fun attachGrabber(track: LocalVideoTrack?) {
+        grabberTrack?.removeRenderer(frameGrabber)
+        grabberTrack = track
+        track?.addRenderer(frameGrabber)
+    }
+
+    // MARK: Zoom
+
+    /**
+     * Zoom applied at the sensor through whichever camera track is live (call
+     * or preview), so what you pinch into is what the model sees. Capped at
+     * 8x: past that the lens is upscaling, not resolving.
+     */
+    fun zoomBy(factor: Float) {
+        val track = _uiState.value.displayTrack ?: return
+        val camera = track.capturer.getCameraX()?.value ?: return
+        val zoomState = camera.cameraInfo.zoomState.value ?: return
+        val floor = maxOf(zoomState.minZoomRatio, 1f)
+        val ceiling = minOf(zoomState.maxZoomRatio, MAX_ZOOM)
+        val target = (_uiState.value.zoomFactor * factor).coerceIn(floor, ceiling)
+        if (target == _uiState.value.zoomFactor) return
+        camera.cameraControl.setZoomRatio(target)
+        _uiState.update { it.copy(zoomFactor = target) }
+    }
+
+    // MARK: Room ticket
+
+    private data class Ticket(val url: String, val room: String, val token: String)
+
+    /**
+     * The gateway holds the LiveKit secret and mints a short-lived per-user
+     * room JWT. The engine choice (which realtime model answers) rides along
+     * and comes back inside the token as participant metadata for the worker.
+     */
+    private suspend fun fetchTicket(engine: IntelligenceEngine): Ticket = withContext(Dispatchers.IO) {
+        val baseUrl = SettingsManager.gatewayBaseUrl.trimEnd('/')
+        val body = JSONObject()
+            .put("engine", engine.value)
+            .toString()
+            .toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url("$baseUrl/livekit-token")
+            .header("Authorization", "Bearer ${SettingsManager.gatewayToken}")
+            .post(body)
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw IOException(GatewayApi.errorMessage(text) ?: "gateway error (${response.code})")
+            }
+            val json = JSONObject(text)
+            Ticket(
+                url = json.getString("url"),
+                room = json.optString("room"),
+                token = json.getString("token"),
+            )
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        attachGrabber(null)
+        stopPreview()
+        room.disconnect()
+        room.release()
+        CameraCapturerUtils.unregisterCameraProvider(cameraProvider)
+    }
+
+    /**
+     * One-shot frame capture so a freeze pins exactly what is on screen.
+     * Conversion to Bitmap happens only when a pin is taken.
+     */
+    private class FrameGrabber : VideoSink {
+        private val pending = AtomicReference<((Bitmap?) -> Unit)?>(null)
+
+        fun requestFrame(callback: (Bitmap?) -> Unit) {
+            pending.set(callback)
+        }
+
+        override fun onFrame(frame: VideoFrame) {
+            val callback = pending.getAndSet(null) ?: return
+            val bitmap = try {
+                videoFrameToBitmap(frame)
+            } catch (t: Throwable) {
+                Log.w(TAG, "frame conversion failed: ${t.message}")
+                null
+            }
+            callback(bitmap)
+        }
+
+        private fun videoFrameToBitmap(frame: VideoFrame): Bitmap? {
+            val i420 = frame.buffer.toI420() ?: return null
+            try {
+                val width = i420.width
+                val height = i420.height
+                val chromaWidth = (width + 1) / 2
+                val chromaHeight = (height + 1) / 2
+                val nv21 = ByteArray(width * height + 2 * chromaWidth * chromaHeight)
+
+                val dataY = i420.dataY.duplicate()
+                for (row in 0 until height) {
+                    dataY.position(row * i420.strideY)
+                    dataY.get(nv21, row * width, width)
+                }
+                val dataU = i420.dataU.duplicate()
+                val dataV = i420.dataV.duplicate()
+                val rowU = ByteArray(chromaWidth)
+                val rowV = ByteArray(chromaWidth)
+                var offset = width * height
+                for (row in 0 until chromaHeight) {
+                    dataU.position(row * i420.strideU)
+                    dataU.get(rowU, 0, chromaWidth)
+                    dataV.position(row * i420.strideV)
+                    dataV.get(rowV, 0, chromaWidth)
+                    for (col in 0 until chromaWidth) {
+                        nv21[offset++] = rowV[col]
+                        nv21[offset++] = rowU[col]
+                    }
+                }
+
+                val jpegBytes = ByteArrayOutputStream().use { stream ->
+                    YuvImage(nv21, ImageFormat.NV21, width, height, null)
+                        .compressToJpeg(Rect(0, 0, width, height), FROZEN_JPEG_QUALITY, stream)
+                    stream.toByteArray()
+                }
+                val bitmap = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size) ?: return null
+
+                // The sensor delivers landscape buffers; renderers apply the
+                // frame's rotation tag at display time. Converting raw pixels
+                // skips that step, so apply it here or every portrait pin
+                // comes out sideways.
+                if (frame.rotation == 0) return bitmap
+                val matrix = Matrix().apply { postRotate(frame.rotation.toFloat()) }
+                return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            } finally {
+                i420.release()
+            }
+        }
+    }
+}

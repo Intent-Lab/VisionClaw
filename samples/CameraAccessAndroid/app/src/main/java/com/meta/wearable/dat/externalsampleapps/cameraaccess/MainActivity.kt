@@ -20,9 +20,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 import androidx.activity.viewModels
+import androidx.lifecycle.ViewModelProvider
 import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSessionViewModel
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.CameraAccessScaffold
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
@@ -72,11 +75,16 @@ class MainActivity : ComponentActivity() {
 
     // First, ensure the app has necessary Android permissions
     checkPermissions {
-      // Initialize the DAT SDK once the permissions are granted
-      Wearables.initialize(this)
-
-      // Start observing Wearables state after SDK is initialized
-      viewModel.startMonitoring()
+      // The DAT SDK starts lazily so phone mode never pays its startup cost:
+      // startMonitoring runs Wearables.initialize via WearablesInit, and the
+      // scaffold triggers the same path when the user switches to glasses.
+      if (SettingsManager.captureSource == CaptureSource.GLASSES) {
+        viewModel.startMonitoring()
+      } else {
+        // First-ever launch: the phone screen composed before the grant and
+        // its auto-start declined; retry now that the permissions exist.
+        ViewModelProvider(this)[LiveKitSessionViewModel::class.java].autoStartIfNeeded()
+      }
     }
 
     setContent {
