@@ -1,7 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
 import android.view.HapticFeedbackConstants
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
@@ -76,9 +75,6 @@ import livekit.org.webrtc.RendererCommon
 fun LiveKitStreamScreen(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
-    // Glasses mode is entered from the DAT connection flow, so back returns
-    // there; phone mode is the app's root and back exits like iOS.
-    onExitGlasses: (() -> Unit)? = null,
     viewModel: LiveKitSessionViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -90,10 +86,6 @@ fun LiveKitStreamScreen(
             viewModel.redialIfEngineChanged()
             viewModel.startPreview()
         }
-    }
-
-    if (onExitGlasses != null) {
-        BackHandler { onExitGlasses() }
     }
 
     // Haptics mirror iOS's sensoryFeedback grammar and key off state changes,

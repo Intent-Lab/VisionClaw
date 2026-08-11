@@ -6,18 +6,16 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// CameraAccessScaffold - DAT Application Navigation Orchestrator
+// CameraAccessScaffold - Navigation Orchestrator
 //
-// This scaffold demonstrates a typical DAT application navigation pattern based on device
-// registration and streaming states from the DAT API.
-//
-// DAT State-Based Navigation:
-// - HomeScreen: When NOT registered (uiState.isRegistered = false) Shows initial registration UI
-//   calling Wearables.startRegistration()
-// - NonStreamScreen: When registered (uiState.isRegistered = true) but not streaming Shows device
-//   selection, permission checking, and pre-streaming setup
-// - StreamScreen: When actively streaming (uiState.isStreaming = true) Shows live video from
-//   StreamSession.videoStream and photo capture UI
+// Routing is driven by the capture source setting plus DAT registration state:
+// - Phone mode: LiveKitStreamScreen is the root -- camera preview + call button,
+//   no onboarding.
+// - Glasses mode, registered (or mock device): the same LiveKitStreamScreen with
+//   glasses frames as the video source; DAT streaming auto-starts, no
+//   start-choice interstitial.
+// - Glasses mode, NOT registered: HomeScreen shows the registration UI calling
+//   Wearables.startRegistration().
 //
 // The scaffold also provides a debug menu (in DEBUG builds) that gives access to
 // MockDeviceKitScreen for testing DAT functionality without physical devices.
@@ -108,6 +106,21 @@ fun CameraAccessScaffold(
     previousSource = captureSource
   }
 
+  // Glasses mode never shows a start-choice page: entering it with registered
+  // glasses (or a mock device) runs the DAT permission flow automatically and
+  // the call screen's "Waiting for glasses video" placeholder is the loading
+  // state. One attempt per entry into glasses mode, so a denied permission
+  // surfaces once through the snackbar instead of looping.
+  var glassesStartAttempted by remember { mutableStateOf(false) }
+  LaunchedEffect(captureSource, uiState.isRegistered) {
+    if (captureSource == CaptureSource.PHONE) {
+      glassesStartAttempted = false
+    } else if (uiState.isRegistered && !uiState.isStreaming && !glassesStartAttempted) {
+      glassesStartAttempted = true
+      viewModel.navigateToStreaming(onRequestWearablesPermission)
+    }
+  }
+
   Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     Box(modifier = Modifier.fillMaxSize()) {
       when {
@@ -121,22 +134,14 @@ fun CameraAccessScaffold(
             LiveKitStreamScreen(
                 onOpenSettings = { viewModel.showSettings() },
             )
-        // Glasses mode: once the DAT flow reports streaming is authorized,
-        // the SAME call screen runs with glasses frames as the video source.
-        uiState.isStreaming ->
+        // Glasses mode with registered glasses: the SAME call screen, with
+        // glasses frames as the video source, is the root -- streaming
+        // auto-starts, so there is no start-choice interstitial.
+        uiState.isRegistered ->
             LiveKitStreamScreen(
                 onOpenSettings = { viewModel.showSettings() },
-                onExitGlasses = {
-                  liveKitViewModel.leave()
-                  viewModel.navigateToDeviceSelection()
-                },
             )
-        // Below here is glasses onboarding/connection only.
-        uiState.isRegistered ->
-            NonStreamScreen(
-                viewModel = viewModel,
-                onRequestWearablesPermission = onRequestWearablesPermission,
-            )
+        // Unregistered glasses mode: the connect screen.
         else ->
             HomeScreen(
                 viewModel = viewModel,
