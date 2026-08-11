@@ -60,6 +60,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSess
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.SessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.GlassesIssue
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
@@ -75,6 +76,9 @@ import livekit.org.webrtc.RendererCommon
 fun LiveKitStreamScreen(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    // Glasses condition rendered inline in the placeholder area; the app has
+    // one voice, so glasses state never arrives as system alarm styling.
+    glassesIssue: GlassesIssue? = null,
     viewModel: LiveKitSessionViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -143,19 +147,32 @@ fun LiveKitStreamScreen(
             uiState.frozenFrame == null && uiState.state != SessionState.Connecting &&
             uiState.state !is SessionState.Failed
         ) {
+            val (title, caption) = when (glassesIssue) {
+                GlassesIssue.MetaAiMissing ->
+                    "Meta AI app required" to "Install it to connect your glasses."
+                GlassesIssue.PermissionDenied ->
+                    "Glasses permission needed" to "Allow it in the Meta AI app."
+                is GlassesIssue.DeviceUpdateRequired ->
+                    "Glasses update required" to
+                        "Device '${glassesIssue.deviceName}' requires an update to work with this app."
+                GlassesIssue.Reconnecting ->
+                    "Reconnecting to glasses" to "Video will appear when your glasses start streaming."
+                null ->
+                    "Waiting for glasses video" to "Video will appear when your glasses start streaming."
+            }
             Column(
                 modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "Waiting for glasses video",
+                    text = title,
                     color = Color.White,
                     fontSize = 17.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "Video will appear when your glasses start streaming.",
+                    text = caption,
                     color = Color.White.copy(alpha = 0.7f),
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,

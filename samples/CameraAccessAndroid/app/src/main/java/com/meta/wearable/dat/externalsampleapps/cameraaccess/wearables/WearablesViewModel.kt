@@ -110,8 +110,12 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                   metadata.compatibility ==
                       com.meta.wearable.dat.core.types.DeviceCompatibility.DEVICE_UPDATE_REQUIRED
               ) {
-                val deviceName = metadata.name.ifEmpty { deviceId }
-                setRecentError("Device '$deviceName' requires an update to work with this app")
+                val deviceName = metadata.name.ifEmpty { deviceId.toString() }
+                // Glasses state renders inline on the call screen, not as an
+                // alarm-styled snackbar.
+                _uiState.update {
+                  it.copy(glassesIssue = GlassesIssue.DeviceUpdateRequired(deviceName))
+                }
               }
             }
           }
@@ -134,29 +138,42 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
       quietIfUnavailable: Boolean = false,
   ) {
     viewModelScope.launch {
+      _uiState.update { it.copy(glassesIssue = null) }
       val permission = Permission.CAMERA // Camera permission is required for streaming
       val result = Wearables.checkPermissionStatus(permission)
 
       // Handle the result
       result.onFailure { error, _ ->
-        // Under auto-start, asleep/disconnected glasses are a normal waiting
-        // condition, not an error -- the call screen's placeholder is the
-        // user-facing state and the attempt re-arms when a device appears.
-        // Anything else (Meta AI missing, timeouts, internal errors) still
-        // surfaces through the snackbar.
-        val deviceUnavailable = error == PermissionError.NO_DEVICE ||
-            error == PermissionError.NO_DEVICE_WITH_CONNECTION
-        if (quietIfUnavailable && deviceUnavailable) {
-          Log.i(TAG, "glasses unavailable, waiting for a device: ${error.description}")
-        } else {
+        // Under auto-start the call screen's placeholder is the user-facing
+        // surface, so glasses conditions render there as typed states: asleep
+        // or disconnected glasses are the plain waiting state, the rest get a
+        // state-specific line. The snackbar remains only for the manual flow.
+        if (!quietIfUnavailable) {
           setRecentError("Permission check error: ${error.description}")
+          return@launch
+        }
+        when (error) {
+          PermissionError.NO_DEVICE,
+          PermissionError.NO_DEVICE_WITH_CONNECTION -> {
+            Log.i(TAG, "glasses unavailable, waiting for a device: ${error.description}")
+          }
+          PermissionError.META_AI_NOT_INSTALLED -> {
+            _uiState.update { it.copy(glassesIssue = GlassesIssue.MetaAiMissing) }
+          }
+          PermissionError.CONNECTION_ERROR,
+          PermissionError.REQUEST_IN_PROGRESS,
+          PermissionError.REQUEST_TIMEOUT,
+          PermissionError.INTERNAL_ERROR -> {
+            Log.i(TAG, "glasses connection issue: ${error.description}")
+            _uiState.update { it.copy(glassesIssue = GlassesIssue.Reconnecting) }
+          }
         }
         return@launch
       }
 
       val permissionStatus = result.getOrNull()
       if (permissionStatus == PermissionStatus.Granted) {
-        _uiState.update { it.copy(isStreaming = true) }
+        _uiState.update { it.copy(isStreaming = true, glassesIssue = null) }
         return@launch
       }
 
@@ -164,17 +181,21 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
       val requestedPermissionStatus = onRequestWearablesPermission(permission)
       when (requestedPermissionStatus) {
         PermissionStatus.Denied -> {
-          setRecentError("Permission denied")
+          if (quietIfUnavailable) {
+            _uiState.update { it.copy(glassesIssue = GlassesIssue.PermissionDenied) }
+          } else {
+            setRecentError("Permission denied")
+          }
         }
         PermissionStatus.Granted -> {
-          _uiState.update { it.copy(isStreaming = true) }
+          _uiState.update { it.copy(isStreaming = true, glassesIssue = null) }
         }
       }
     }
   }
 
   fun navigateToDeviceSelection() {
-    _uiState.update { it.copy(isStreaming = false) }
+    _uiState.update { it.copy(isStreaming = false, glassesIssue = null) }
   }
 
   fun showSettings() {

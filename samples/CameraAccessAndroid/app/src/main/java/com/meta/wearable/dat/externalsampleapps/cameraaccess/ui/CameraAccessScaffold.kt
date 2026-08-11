@@ -141,6 +141,7 @@ fun CameraAccessScaffold(
         uiState.isRegistered ->
             LiveKitStreamScreen(
                 onOpenSettings = { viewModel.showSettings() },
+                glassesIssue = uiState.glassesIssue,
             )
         // Unregistered glasses mode: the connect screen.
         else ->
