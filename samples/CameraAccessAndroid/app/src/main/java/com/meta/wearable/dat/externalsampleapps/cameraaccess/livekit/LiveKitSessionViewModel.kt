@@ -16,9 +16,20 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.meta.wearable.dat.camera.StreamSession
+import com.meta.wearable.dat.camera.startStreamSession
+import com.meta.wearable.dat.camera.types.StreamConfiguration
+import com.meta.wearable.dat.camera.types.StreamSessionState
+import com.meta.wearable.dat.camera.types.VideoQuality
+import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
+import com.meta.wearable.dat.core.selectors.DeviceSelector
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.GatewayApi
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.IntelligenceEngine
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesInit
 import io.livekit.android.LiveKit
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
@@ -34,6 +45,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,6 +94,10 @@ data class LiveKitUiState(
     val previewTrack: LocalVideoTrack? = null,
     val frozenFrame: Bitmap? = null,
     val zoomFactor: Float = 1f,
+    // Video published from the glasses stream instead of the phone camera.
+    // The rest of the call (mic, speaker, agent) is identical.
+    val isGlassesSource: Boolean = false,
+    val glassesStreaming: Boolean = false,
 ) {
     val isActive: Boolean
         get() = state == SessionState.Connected || state == SessionState.Connecting
@@ -123,6 +139,17 @@ class LiveKitSessionViewModel(
 
     private val frameGrabber = FrameGrabber()
     private var grabberTrack: LocalVideoTrack? = null
+
+    // MARK: Glasses feed (DAT stream -> LiveKit bridge)
+
+    private val glassesSelector: DeviceSelector = AutoDeviceSelector()
+    private var glassesSession: StreamSession? = null
+    private val glassesFeedJobs = mutableListOf<Job>()
+
+    // Capturer of whichever glasses track is current (preview or call); the
+    // DAT collector pushes into it. A disposed capturer drops pushes, so a
+    // stale reference during track handoff is harmless.
+    @Volatile private var glassesCapturer: GlassesVideoCapturer? = null
 
     private val httpClient = OkHttpClient.Builder()
         .callTimeout(20, TimeUnit.SECONDS)
@@ -203,14 +230,20 @@ class LiveKitSessionViewModel(
      */
     fun autoStartIfNeeded(): Boolean {
         if (autoStarted) return false
+        // The phone camera needs CAMERA; glasses video does not (mic stays
+        // the phone's in both modes).
+        val cameraNeeded = SettingsManager.captureSource == CaptureSource.PHONE
         val granted = ContextCompat.checkSelfPermission(
             getApplication(),
             Manifest.permission.RECORD_AUDIO,
         ) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(
-                getApplication(),
-                Manifest.permission.CAMERA,
-            ) == PackageManager.PERMISSION_GRANTED
+            (
+                !cameraNeeded ||
+                    ContextCompat.checkSelfPermission(
+                        getApplication(),
+                        Manifest.permission.CAMERA,
+                    ) == PackageManager.PERMISSION_GRANTED
+                )
         if (!granted) return false
         autoStarted = true
         start()
@@ -237,7 +270,8 @@ class LiveKitSessionViewModel(
             _uiState.update { it.copy(state = SessionState.Failed("Gateway not configured. Check Settings.")) }
             return
         }
-        _uiState.update { it.copy(state = SessionState.Connecting) }
+        val glasses = SettingsManager.captureSource == CaptureSource.GLASSES
+        _uiState.update { it.copy(state = SessionState.Connecting, isGlassesSource = glasses) }
         stopPreview()
         try {
             val engine = SettingsManager.intelligenceEngine
@@ -245,16 +279,29 @@ class LiveKitSessionViewModel(
             room.connect(ticket.url, ticket.token)
             connectedEngine = engine
             room.localParticipant.setMicrophoneEnabled(true)
-            // Camera failure (emulator, permission denied) degrades to
-            // voice-only rather than killing the call.
+            // Video failure (emulator, permission denied, glasses hiccup)
+            // degrades to voice-only rather than killing the call.
             try {
-                room.localParticipant.setCameraEnabled(true)
-                val track = room.localParticipant
-                    .getTrackPublication(Track.Source.CAMERA)?.track as? LocalVideoTrack
+                val track = if (glasses) {
+                    ensureGlassesFeed()
+                    val capturer = GlassesVideoCapturer()
+                    val glassesTrack = room.localParticipant.createVideoTrack(
+                        name = "glasses",
+                        capturer = capturer,
+                    )
+                    glassesCapturer = capturer
+                    glassesTrack.startCapture()
+                    room.localParticipant.publishVideoTrack(glassesTrack)
+                    glassesTrack
+                } else {
+                    room.localParticipant.setCameraEnabled(true)
+                    room.localParticipant
+                        .getTrackPublication(Track.Source.CAMERA)?.track as? LocalVideoTrack
+                }
                 attachGrabber(track)
                 _uiState.update { it.copy(localVideoTrack = track) }
             } catch (e: Exception) {
-                Log.w(TAG, "camera unavailable, voice-only: ${e.message}")
+                Log.w(TAG, "video unavailable, voice-only: ${e.message}")
             }
             _uiState.update { it.copy(state = SessionState.Connected, zoomFactor = 1f) }
             refreshAgentStatus()
@@ -296,33 +343,45 @@ class LiveKitSessionViewModel(
     }
 
     /**
-     * Full teardown when leaving phone mode: hang up AND release the camera.
-     * The next stint in phone mode auto-starts again.
+     * Full teardown when leaving the current capture mode: hang up AND
+     * release the video source. The next stint auto-starts again.
      */
     fun leave() {
         autoStarted = false
         viewModelScope.launch {
             disconnectInternal()
             stopPreview()
+            stopGlassesFeed()
+            glassesCapturer = null
             _uiState.update { LiveKitUiState() }
         }
     }
 
-    // MARK: Preview (local, unpublished camera between calls)
+    // MARK: Preview (local, unpublished video between calls)
 
     fun startPreview() {
         val state = _uiState.value
         val idle = state.state == SessionState.Disconnected || state.state is SessionState.Failed
         if (!idle || state.previewTrack != null) return
+        val glasses = SettingsManager.captureSource == CaptureSource.GLASSES
         try {
-            val track = room.localParticipant.createVideoTrack(
-                options = LocalVideoTrackOptions(position = CameraPosition.BACK),
-            )
+            val track = if (glasses) {
+                ensureGlassesFeed()
+                val capturer = GlassesVideoCapturer()
+                room.localParticipant.createVideoTrack(
+                    name = "glasses_preview",
+                    capturer = capturer,
+                ).also { glassesCapturer = capturer }
+            } else {
+                room.localParticipant.createVideoTrack(
+                    options = LocalVideoTrackOptions(position = CameraPosition.BACK),
+                )
+            }
             track.startCapture()
             attachGrabber(track)
-            _uiState.update { it.copy(previewTrack = track, zoomFactor = 1f) }
+            _uiState.update { it.copy(previewTrack = track, zoomFactor = 1f, isGlassesSource = glasses) }
         } catch (e: Exception) {
-            Log.w(TAG, "preview camera unavailable: ${e.message}")
+            Log.w(TAG, "preview video unavailable: ${e.message}")
         }
     }
 
@@ -336,6 +395,58 @@ class LiveKitSessionViewModel(
         } catch (e: Exception) {
             Log.w(TAG, "preview stop failed: ${e.message}")
         }
+    }
+
+    // MARK: Glasses feed
+
+    /**
+     * Starts the DAT streaming session that produces glasses frames and fans
+     * them into whichever LiveKit track is current. Kept alive across calls
+     * and Settings visits (like the phone camera preview); torn down by
+     * leave(). The foreground service keeps frames flowing when the screen
+     * locks, matching the old DAT streaming path.
+     */
+    private fun ensureGlassesFeed() {
+        if (glassesSession != null) return
+        WearablesInit.ensure(getApplication())
+        StreamingService.start(getApplication())
+        val session = Wearables.startStreamSession(
+            getApplication(),
+            glassesSelector,
+            StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
+        )
+        glassesSession = session
+        // Conversion is a plain memcpy but runs per frame; keep it off main.
+        glassesFeedJobs += viewModelScope.launch(Dispatchers.Default) {
+            var frames = 0L
+            session.videoStream.collect { frame ->
+                if (frames == 0L || frames % 100 == 0L) {
+                    Log.i(TAG, "glasses frame #$frames ${frame.width}x${frame.height}")
+                }
+                frames++
+                glassesCapturer?.pushI420(frame.buffer, frame.width, frame.height)
+            }
+        }
+        glassesFeedJobs += viewModelScope.launch {
+            session.state.collect { sessionState ->
+                Log.i(TAG, "glasses session state: $sessionState")
+                _uiState.update { it.copy(glassesStreaming = sessionState == StreamSessionState.STREAMING) }
+            }
+        }
+    }
+
+    private fun stopGlassesFeed() {
+        if (glassesSession == null) return
+        glassesFeedJobs.forEach { it.cancel() }
+        glassesFeedJobs.clear()
+        try {
+            glassesSession?.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "glasses session close failed: ${e.message}")
+        }
+        glassesSession = null
+        StreamingService.stop(getApplication())
+        _uiState.update { it.copy(glassesStreaming = false) }
     }
 
     // MARK: Freeze (pin a frame for the model to refer to)
@@ -385,6 +496,8 @@ class LiveKitSessionViewModel(
      * 8x: past that the lens is upscaling, not resolving.
      */
     fun zoomBy(factor: Float) {
+        // Glasses have no camera control; zoom is a phone-camera feature.
+        if (_uiState.value.isGlassesSource) return
         val track = _uiState.value.displayTrack ?: return
         val camera = track.capturer.getCameraX()?.value ?: return
         val zoomState = camera.cameraInfo.zoomState.value ?: return
@@ -434,6 +547,7 @@ class LiveKitSessionViewModel(
         super.onCleared()
         attachGrabber(null)
         stopPreview()
+        stopGlassesFeed()
         room.disconnect()
         room.release()
         CameraCapturerUtils.unregisterCameraProvider(cameraProvider)

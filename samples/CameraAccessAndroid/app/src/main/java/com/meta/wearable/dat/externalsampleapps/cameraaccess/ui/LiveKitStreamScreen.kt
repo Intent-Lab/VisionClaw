@@ -1,5 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -66,6 +67,9 @@ import livekit.org.webrtc.RendererCommon
 fun LiveKitStreamScreen(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    // Glasses mode is entered from the DAT connection flow, so back returns
+    // there; phone mode is the app's root and back exits like iOS.
+    onExitGlasses: (() -> Unit)? = null,
     viewModel: LiveKitSessionViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -79,21 +83,56 @@ fun LiveKitStreamScreen(
         }
     }
 
+    if (onExitGlasses != null) {
+        BackHandler { onExitGlasses() }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         val track = uiState.displayTrack
         if (track != null) {
+            // Pinch zoom drives the phone camera; glasses have no camera
+            // control, so the gesture is not installed for them.
+            val zoomModifier = if (uiState.isGlassesSource) {
+                Modifier
+            } else {
+                Modifier.pointerInput(Unit) {
+                    detectTransformGestures { _, _, zoom, _ -> viewModel.zoomBy(zoom) }
+                }
+            }
             VideoTrackView(
                 room = viewModel.room,
                 track = track,
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, _, zoom, _ -> viewModel.zoomBy(zoom) }
-                    }
+                    .then(zoomModifier)
                     .pointerInput(Unit) {
                         detectTapGestures(onLongPress = { viewModel.toggleFreeze() })
                     },
             )
+        }
+
+        if (uiState.isGlassesSource && !uiState.glassesStreaming &&
+            uiState.frozenFrame == null && uiState.state != SessionState.Connecting &&
+            uiState.state !is SessionState.Failed
+        ) {
+            Column(
+                modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Waiting for glasses video",
+                    color = Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "Video will appear when your glasses start streaming.",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
 
         if (uiState.zoomFactor > 1.05f) {
