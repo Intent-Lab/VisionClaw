@@ -217,14 +217,18 @@ class StreamSessionViewModel: ObservableObject {
     errorListenerToken = streamSession.errorPublisher.listen { [weak self] error in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        // Suppress device-not-found errors when user hasn't started streaming yet
-        if self.streamingStatus == .stopped {
-          if case .deviceNotConnected = error { return }
-          if case .deviceNotFound = error { return }
-        }
-        let newErrorMessage = formatStreamingError(error)
-        if newErrorMessage != self.errorMessage {
-          showError(newErrorMessage)
+        // One voice: glasses-state conditions render as placeholder text on
+        // the call screen, never as alert dialogs. Sleeping/absent glasses are
+        // a plain wait; everything else maps to a typed issue.
+        switch error {
+        case .deviceNotConnected, .deviceNotFound:
+          self.glassesIssue = nil
+        case .hingesClosed:
+          self.glassesIssue = .hingesClosed
+        case .permissionDenied:
+          self.glassesIssue = .permissionNeeded
+        default:
+          self.glassesIssue = .reconnecting
         }
       }
     }
@@ -242,9 +246,21 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
+  /// Glasses-state conditions the call screen's placeholder can name --
+  /// the app's own voice, replacing the sample's alert dialogs.
+  enum GlassesIssue: Equatable {
+    case sdkUnavailable
+    case permissionNeeded
+    case hingesClosed
+    case reconnecting
+  }
+
+  @Published var glassesIssue: GlassesIssue?
+
   func handleStartStreaming() async {
+    glassesIssue = nil
     guard let wearables else {
-      showError("The glasses SDK is not available on this device.")
+      glassesIssue = .sdkUnavailable
       return
     }
     let permission = Permission.camera
@@ -259,9 +275,16 @@ class StreamSessionViewModel: ObservableObject {
         await startSession()
         return
       }
-      showError("Permission denied")
+      glassesIssue = .permissionNeeded
     } catch {
-      showError("Permission error: \(error.description)")
+      // Sleeping or out-of-range glasses are a wait state, not an error.
+      let text = String(describing: error).lowercased()
+      if text.contains("powered off") || text.contains("disconnected") || text.contains("no device") {
+        NSLog("[Stream] glasses unavailable, waiting: %@", String(describing: error))
+        glassesIssue = nil
+      } else {
+        glassesIssue = .reconnecting
+      }
     }
   }
 
@@ -301,6 +324,7 @@ class StreamSessionViewModel: ObservableObject {
       streamingStatus = .waiting
     case .streaming:
       streamingStatus = .streaming
+      glassesIssue = nil
     }
   }
 

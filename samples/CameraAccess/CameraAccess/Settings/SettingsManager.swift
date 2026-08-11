@@ -124,6 +124,13 @@ final class SettingsManager {
     set { defaults.set(newValue.rawValue, forKey: CaptureSource.defaultsKey) }
   }
 
+  static let showCaptionsKey = "showCaptions"
+
+  var showCaptions: Bool {
+    get { defaults.object(forKey: Self.showCaptionsKey) as? Bool ?? true }
+    set { defaults.set(newValue, forKey: Self.showCaptionsKey) }
+  }
+
   /// Cloud by default: the hosted gateway needs nothing installed and keeps
   /// working with the phone away from home, which self-hosting cannot do.
   var agentBackend: AgentBackend {

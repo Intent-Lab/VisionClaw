@@ -49,6 +49,7 @@ struct SettingsView: View {
   // key and swaps the capture pipeline live.
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
   @AppStorage(IntelligenceEngine.defaultsKey) private var intelligenceRaw = IntelligenceEngine.gemini.rawValue
+  @AppStorage(SettingsManager.showCaptionsKey) private var showCaptions = true
 
   var body: some View {
     NavigationView {
@@ -73,6 +74,7 @@ struct SettingsView: View {
             }
           }
           .pickerStyle(.segmented)
+          Toggle("Show captions", isOn: $showCaptions)
         }
 
         // Cloud gateway is the only backend now.

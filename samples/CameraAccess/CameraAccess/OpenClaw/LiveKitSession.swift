@@ -188,7 +188,12 @@ final class LiveKitSession: NSObject, ObservableObject {
   /// thread-safe; a stale capturer after track teardown drops frames harmlessly.
   private final class GlassesCapturerBox: @unchecked Sendable {
     var capturer: BufferCapturer?
+    var sawFrame = false
   }
+
+  /// Flips on the first glasses frame; the call screen shows its waiting
+  /// placeholder until then.
+  @Published private(set) var hasGlassesFrame = false
 
   private let glassesCapturerBox = GlassesCapturerBox()
 
@@ -198,6 +203,10 @@ final class LiveKitSession: NSObject, ObservableObject {
   /// pinned frame.
   nonisolated func pushGlassesFrame(_ pixelBuffer: CVPixelBuffer) {
     glassesCapturerBox.capturer?.capture(pixelBuffer)
+    if !glassesCapturerBox.sawFrame {
+      glassesCapturerBox.sawFrame = true
+      Task { @MainActor in self.hasGlassesFrame = true }
+    }
   }
 
   private func stopPreview() async {
@@ -269,6 +278,8 @@ final class LiveKitSession: NSObject, ObservableObject {
     frozenFrame = nil
     caption = nil
     captionClearTask?.cancel()
+    glassesCapturerBox.sawFrame = false
+    hasGlassesFrame = false
     await startPreview()
   }
 
@@ -293,7 +304,7 @@ final class LiveKitSession: NSObject, ObservableObject {
   }
 
   private func showCaption(_ text: String, isAgent: Bool) {
-    guard !text.isEmpty else { return }
+    guard !text.isEmpty, SettingsManager.shared.showCaptions else { return }
     caption = Caption(text: text, isAgent: isAgent)
     captionClearTask?.cancel()
     captionClearTask = Task { [weak self] in

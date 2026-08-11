@@ -7,6 +7,9 @@ import SwiftUI
 /// that now live (solved) inside WebRTC and the agent worker.
 struct LiveKitStreamView: View {
   @ObservedObject var session: LiveKitSession
+  /// Title + caption shown while a glasses call has no frames yet -- the
+  /// app's own voice for glasses-state conditions (never alert dialogs).
+  var glassesPlaceholder: (title: String, caption: String)? = nil
   @State private var showSettings = false
 
   var body: some View {
@@ -37,6 +40,19 @@ struct LiveKitStreamView: View {
             }
           }
       }
+      if session.usingGlassesSource && !session.hasGlassesFrame, let ph = glassesPlaceholder {
+        VStack(spacing: 8) {
+          Text(ph.title)
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(.white)
+          Text(ph.caption)
+            .font(.subheadline)
+            .foregroundStyle(.white.opacity(0.7))
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 32)
+      }
+
       if case .failed(let why) = session.state {
         VStack(spacing: 12) {
           Text("Not connected").font(.headline).foregroundStyle(.white)

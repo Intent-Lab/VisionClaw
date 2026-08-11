@@ -32,6 +32,21 @@ struct StreamSessionView: View {
     CaptureSource(rawValue: captureSourceRaw) ?? .iPhoneCamera
   }
 
+  private var glassesPlaceholder: (title: String, caption: String) {
+    switch viewModel.glassesIssue {
+    case .sdkUnavailable:
+      return ("Glasses unavailable", "The glasses SDK is not available on this device.")
+    case .permissionNeeded:
+      return ("Glasses permission needed", "Allow it in the Meta AI app.")
+    case .hingesClosed:
+      return ("Glasses folded", "Open the hinges to start streaming.")
+    case .reconnecting:
+      return ("Reconnecting to glasses", "Video will appear when your glasses start streaming.")
+    case nil:
+      return ("Waiting for glasses video", "Video will appear when your glasses start streaming.")
+    }
+  }
+
   init(wearables: WearablesInterface?, wearablesVM: WearablesViewModel?) {
     self.wearables = wearables
     self.wearablesViewModel = wearablesVM
@@ -45,17 +60,23 @@ struct StreamSessionView: View {
       } else if viewModel.isStreaming {
         // Glasses are just another camera: same call screen, same agent, with
         // DAT frames bridged into the room via pushGlassesFrame.
-        LiveKitStreamView(session: liveKit)
+        LiveKitStreamView(session: liveKit, glassesPlaceholder: glassesPlaceholder)
       } else if let wearablesViewModel {
         if wearablesViewModel.registrationState == .registered || wearablesViewModel.hasMockDevice {
           // No start-choice interstitial: registered glasses go straight to
-          // the call screen, auto-starting the stream once per entry. The
-          // connecting overlay covers DAT bring-up.
-          LiveKitStreamView(session: liveKit)
+          // the call screen, auto-starting the stream once per entry, then
+          // re-attempting on a slow cadence while the glasses are asleep --
+          // the placeholder is the only voice for the wait.
+          LiveKitStreamView(session: liveKit, glassesPlaceholder: glassesPlaceholder)
             .task {
               guard !glassesAutoStarted else { return }
               glassesAutoStarted = true
-              await viewModel.handleStartStreaming()
+              for _ in 0..<4 {
+                await viewModel.handleStartStreaming()
+                if viewModel.isStreaming { break }
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                if viewModel.isStreaming || captureSource != .glasses { break }
+              }
             }
         } else {
           HomeScreenView(viewModel: wearablesViewModel)
