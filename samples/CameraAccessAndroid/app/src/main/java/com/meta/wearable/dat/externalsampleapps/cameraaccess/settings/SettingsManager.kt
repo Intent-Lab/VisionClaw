@@ -80,6 +80,10 @@ object SettingsManager {
         get() = IntelligenceEngine.fromValue(prefs.getString("intelligenceEngine", null))
         set(value) = prefs.edit().putString("intelligenceEngine", value.value).apply()
 
+    var showCaptions: Boolean
+        get() = prefs.getBoolean("showCaptions", true)
+        set(value) = prefs.edit().putBoolean("showCaptions", value).apply()
+
     var webrtcSignalingURL: String
         get() = prefs.getString("webrtcSignalingURL", null) ?: DEFAULT_SIGNALING_URL
         set(value) = prefs.edit().putString("webrtcSignalingURL", value).apply()

@@ -28,6 +28,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -80,6 +81,7 @@ private fun SettingsMainScreen(
 ) {
     val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
     var intelligenceEngine by remember { mutableStateOf(SettingsManager.intelligenceEngine) }
+    var showCaptions by remember { mutableStateOf(SettingsManager.showCaptions) }
     var gatewayStatus by remember { mutableStateOf<GatewayStatus>(GatewayStatus.Checking) }
     var showResetDialog by remember { mutableStateOf(false) }
 
@@ -159,6 +161,20 @@ private fun SettingsMainScreen(
                     "Google Gemini Live. Applies to the next call."
                 },
             )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Show captions", style = MaterialTheme.typography.bodyLarge)
+                Switch(
+                    checked = showCaptions,
+                    onCheckedChange = {
+                        showCaptions = it
+                        SettingsManager.showCaptions = it
+                    },
+                )
+            }
 
             // Gateway status + navigation rows
             SectionHeader("Gateway")
@@ -195,6 +211,7 @@ private fun SettingsMainScreen(
                 TextButton(onClick = {
                     SettingsManager.resetAll()
                     intelligenceEngine = SettingsManager.intelligenceEngine
+                    showCaptions = SettingsManager.showCaptions
                     showResetDialog = false
                 }) {
                     Text("Reset", color = Color.Red)

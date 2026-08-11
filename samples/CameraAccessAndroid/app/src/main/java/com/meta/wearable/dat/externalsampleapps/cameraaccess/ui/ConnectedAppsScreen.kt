@@ -1,8 +1,8 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
-import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -177,11 +177,12 @@ fun ConnectedAppsScreen(
                                 TextButton(
                                     enabled = app.available,
                                     onClick = {
-                                        val intent = Intent(
-                                            Intent.ACTION_VIEW,
-                                            Uri.parse(GatewayApi.connectUrl(app.id)),
-                                        )
-                                        context.startActivity(intent)
+                                        // In-app OAuth: a Custom Tab keeps the
+                                        // dance inside the app; ON_RESUME
+                                        // refreshes the list when it closes.
+                                        CustomTabsIntent.Builder()
+                                            .build()
+                                            .launchUrl(context, Uri.parse(GatewayApi.connectUrl(app.id)))
                                     },
                                 ) {
                                     Text("Connect")

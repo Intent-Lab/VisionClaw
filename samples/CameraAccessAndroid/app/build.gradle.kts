@@ -71,6 +71,7 @@ dependencies {
   implementation(libs.webrtc)
   implementation(libs.livekit.android)
   implementation(libs.livekit.android.camerax)
+  implementation(libs.androidx.browser)
   implementation(libs.camerax.core)
   implementation(libs.camerax.camera2)
   implementation(libs.camerax.lifecycle)

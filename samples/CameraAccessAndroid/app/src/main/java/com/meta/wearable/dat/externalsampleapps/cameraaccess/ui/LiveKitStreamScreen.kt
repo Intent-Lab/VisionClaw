@@ -1,7 +1,11 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,17 +45,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.AgentStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.Caption
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.SessionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
@@ -85,6 +94,33 @@ fun LiveKitStreamScreen(
 
     if (onExitGlasses != null) {
         BackHandler { onExitGlasses() }
+    }
+
+    // Haptics mirror iOS's sensoryFeedback grammar and key off state changes,
+    // not button presses, so programmatic transitions buzz too. The null
+    // previous value swallows the initial composition (e.g. remounting from
+    // Settings mid-call must not re-buzz).
+    val view = LocalView.current
+    var previousState by remember { mutableStateOf<SessionState?>(null) }
+    LaunchedEffect(uiState.state) {
+        val previous = previousState
+        previousState = uiState.state
+        if (previous == null || previous == uiState.state) return@LaunchedEffect
+        when (uiState.state) {
+            SessionState.Connected -> view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+            is SessionState.Failed -> view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+            else -> {}
+        }
+    }
+    val isFrozen = uiState.frozenFrame != null
+    var previousFrozen by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(isFrozen) {
+        val previous = previousFrozen
+        previousFrozen = isFrozen
+        if (previous == null || previous == isFrozen) return@LaunchedEffect
+        view.performHapticFeedback(
+            if (isFrozen) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.CLOCK_TICK,
+        )
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
@@ -252,6 +288,23 @@ fun LiveKitStreamScreen(
             )
         }
 
+        // Captions, above the buttons: the most recent utterance, updating in
+        // place as chunks arrive. Final segments linger in the view model for
+        // a few seconds; this only animates the fade.
+        var lastCaption by remember { mutableStateOf<Caption?>(null) }
+        uiState.caption?.let { lastCaption = it }
+        AnimatedVisibility(
+            visible = uiState.caption != null && SettingsManager.showCaptions,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(start = 24.dp, end = 24.dp, bottom = 104.dp),
+        ) {
+            lastCaption?.let { caption -> CaptionBubble(caption) }
+        }
+
         // Shutter front and center: pinning what you see is the primary act.
         Box(
             modifier = Modifier
@@ -277,6 +330,36 @@ fun LiveKitStreamScreen(
             )
         }
     }
+}
+
+/**
+ * The most recent utterance, speaker-differentiated: agent text plain white,
+ * user text dimmed italic. Compose has no head-ellipsize for multiline text,
+ * so a long segment keeps its tail (the newest words) behind a leading
+ * ellipsis, capped at two lines.
+ */
+@Composable
+private fun CaptionBubble(
+    caption: Caption,
+    modifier: Modifier = Modifier,
+) {
+    val display = if (caption.text.length > 90) {
+        "…" + caption.text.takeLast(90).trimStart()
+    } else {
+        caption.text
+    }
+    Text(
+        text = display,
+        color = if (caption.fromAgent) Color.White else Color.White.copy(alpha = 0.75f),
+        fontStyle = if (caption.fromAgent) FontStyle.Normal else FontStyle.Italic,
+        fontSize = 15.sp,
+        textAlign = TextAlign.Center,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }
 
 /** Renders a local video track full-bleed through the SDK's TextureView. */

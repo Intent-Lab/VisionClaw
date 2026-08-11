@@ -46,6 +46,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -85,6 +86,18 @@ enum class AgentStatus {
     LEFT, // agent was here and disconnected mid-call
 }
 
+/**
+ * One transcribed utterance from the "lk.transcription" text stream. Interim
+ * segments update in place (same segment id); a final segment lingers briefly
+ * and then clears.
+ */
+data class Caption(
+    val segmentId: String,
+    val text: String,
+    val fromAgent: Boolean,
+    val isFinal: Boolean,
+)
+
 data class LiveKitUiState(
     val state: SessionState = SessionState.Disconnected,
     val agentStatus: AgentStatus = AgentStatus.NONE,
@@ -98,6 +111,7 @@ data class LiveKitUiState(
     // The rest of the call (mic, speaker, agent) is identical.
     val isGlassesSource: Boolean = false,
     val glassesStreaming: Boolean = false,
+    val caption: Caption? = null,
 ) {
     val isActive: Boolean
         get() = state == SessionState.Connected || state == SessionState.Connecting
@@ -123,6 +137,10 @@ class LiveKitSessionViewModel(
         private const val AGENT_STATE_ATTRIBUTE = "lk.agent.state"
         private const val MAX_ZOOM = 8f
         private const val FROZEN_JPEG_QUALITY = 90
+        private const val TRANSCRIPTION_TOPIC = "lk.transcription"
+        private const val TRANSCRIPTION_FINAL_ATTRIBUTE = "lk.transcription_final"
+        private const val TRANSCRIPTION_SEGMENT_ATTRIBUTE = "lk.segment_id"
+        private const val CAPTION_LINGER_MS = 4000L
     }
 
     private val _uiState = MutableStateFlow(LiveKitUiState())
@@ -181,6 +199,61 @@ class LiveKitSessionViewModel(
                         }
                     }
                     else -> {}
+                }
+            }
+        }
+        registerTranscriptionHandler()
+    }
+
+    // MARK: Captions (agents transcription text streams)
+
+    private var captionClearJob: Job? = null
+
+    /**
+     * The agents worker publishes live transcriptions as text streams on
+     * "lk.transcription": one stream per segment, chunks arriving
+     * incrementally; the same segment id repeats across interim streams until
+     * one carries lk.transcription_final. Handlers are per-Room and survive
+     * disconnects, so this registers exactly once.
+     */
+    private fun registerTranscriptionHandler() {
+        room.registerTextStreamHandler(TRANSCRIPTION_TOPIC) { receiver, fromIdentity ->
+            val attributes = receiver.info.attributes
+            val segmentId = attributes[TRANSCRIPTION_SEGMENT_ATTRIBUTE] ?: receiver.info.id
+            val isFinal = attributes[TRANSCRIPTION_FINAL_ATTRIBUTE]?.toBoolean() ?: false
+            val fromAgent = room.remoteParticipants[fromIdentity]?.kind == Participant.Kind.AGENT ||
+                fromIdentity.value.startsWith("agent-")
+            Log.d(
+                TAG,
+                "transcription stream ${receiver.info.id} segment=$segmentId from=${fromIdentity.value} " +
+                    "agent=$fromAgent final=$isFinal attrs=$attributes",
+            )
+            viewModelScope.launch {
+                val builder = StringBuilder()
+                try {
+                    receiver.flow.collect { chunk ->
+                        builder.append(chunk)
+                        updateCaption(segmentId, builder.toString(), fromAgent, isFinal = false)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "transcription stream ${receiver.info.id} failed: ${e.message}")
+                }
+                Log.d(TAG, "transcription segment $segmentId done final=$isFinal len=${builder.length}")
+                updateCaption(segmentId, builder.toString(), fromAgent, isFinal = isFinal)
+            }
+        }
+        Log.d(TAG, "transcription handler registered for topic $TRANSCRIPTION_TOPIC")
+    }
+
+    private fun updateCaption(segmentId: String, text: String, fromAgent: Boolean, isFinal: Boolean) {
+        if (text.isBlank()) return
+        captionClearJob?.cancel()
+        _uiState.update { it.copy(caption = Caption(segmentId, text, fromAgent, isFinal)) }
+        if (isFinal) {
+            captionClearJob = viewModelScope.launch {
+                delay(CAPTION_LINGER_MS)
+                _uiState.update { state ->
+                    if (state.caption?.segmentId == segmentId) state.copy(caption = null) else state
                 }
             }
         }
@@ -331,6 +404,7 @@ class LiveKitSessionViewModel(
         room.disconnect()
         attachGrabber(null)
         connectedEngine = null
+        captionClearJob?.cancel()
         _uiState.update {
             it.copy(
                 state = SessionState.Disconnected,
@@ -338,6 +412,7 @@ class LiveKitSessionViewModel(
                 localVideoTrack = null,
                 frozenFrame = null,
                 zoomFactor = 1f,
+                caption = null,
             )
         }
     }

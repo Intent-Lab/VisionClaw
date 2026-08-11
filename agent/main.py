@@ -331,6 +331,10 @@ def build_llm(engine: str):
     return google.beta.realtime.RealtimeModel(
         model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025"),
         voice=os.environ.get("GEMINI_VOICE", "Puck"),
+        # Off unless asked: these feed the lk.transcription text streams that
+        # drive the clients' live captions.
+        input_audio_transcription=genai_types.AudioTranscriptionConfig(),
+        output_audio_transcription=genai_types.AudioTranscriptionConfig(),
     )
 
 
