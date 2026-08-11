@@ -17,8 +17,6 @@
 // - Glasses mode, NOT registered: HomeScreen shows the registration UI calling
 //   Wearables.startRegistration().
 //
-// The scaffold also provides a debug menu (in DEBUG builds) that gives access to
-// MockDeviceKitScreen for testing DAT functionality without physical devices.
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
@@ -31,19 +29,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,7 +51,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
@@ -74,7 +67,6 @@ fun CameraAccessScaffold(
   val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
   val liveKitViewModel: LiveKitSessionViewModel = composeViewModel()
   val snackbarHostState = remember { SnackbarHostState() }
-  val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
   // Observe camera permission errors and show snackbar
   LaunchedEffect(uiState.recentError) {
@@ -112,13 +104,22 @@ fun CameraAccessScaffold(
   // state. One attempt per entry into glasses mode, so a denied permission
   // surfaces once through the snackbar instead of looping.
   var glassesStartAttempted by remember { mutableStateOf(false) }
-  LaunchedEffect(captureSource, uiState.isRegistered) {
+  var previousDeviceAvailable by remember { mutableStateOf(false) }
+  LaunchedEffect(captureSource, uiState.isRegistered, uiState.hasActiveDevice) {
     if (captureSource == CaptureSource.PHONE) {
       glassesStartAttempted = false
-    } else if (uiState.isRegistered && !uiState.isStreaming && !glassesStartAttempted) {
-      glassesStartAttempted = true
-      viewModel.navigateToStreaming(onRequestWearablesPermission)
+    } else {
+      // Glasses waking up (no device -> device) re-arms the single attempt,
+      // so auto-start follows availability transitions instead of looping.
+      if (uiState.hasActiveDevice && !previousDeviceAvailable) {
+        glassesStartAttempted = false
+      }
+      if (uiState.isRegistered && !uiState.isStreaming && !glassesStartAttempted) {
+        glassesStartAttempted = true
+        viewModel.navigateToStreaming(onRequestWearablesPermission, quietIfUnavailable = true)
+      }
     }
+    previousDeviceAvailable = uiState.hasActiveDevice
   }
 
   Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

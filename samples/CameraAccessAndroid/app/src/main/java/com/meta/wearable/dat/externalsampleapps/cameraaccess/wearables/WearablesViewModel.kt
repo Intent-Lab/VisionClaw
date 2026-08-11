@@ -18,6 +18,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 
 import android.app.Activity
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meta.wearable.dat.core.Wearables
@@ -25,6 +26,7 @@ import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.types.DeviceIdentifier
 import com.meta.wearable.dat.core.types.Permission
+import com.meta.wearable.dat.core.types.PermissionError
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
@@ -127,14 +129,28 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     Wearables.startUnregistration(activity)
   }
 
-  fun navigateToStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
+  fun navigateToStreaming(
+      onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
+      quietIfUnavailable: Boolean = false,
+  ) {
     viewModelScope.launch {
       val permission = Permission.CAMERA // Camera permission is required for streaming
       val result = Wearables.checkPermissionStatus(permission)
 
       // Handle the result
       result.onFailure { error, _ ->
-        setRecentError("Permission check error: ${error.description}")
+        // Under auto-start, asleep/disconnected glasses are a normal waiting
+        // condition, not an error -- the call screen's placeholder is the
+        // user-facing state and the attempt re-arms when a device appears.
+        // Anything else (Meta AI missing, timeouts, internal errors) still
+        // surfaces through the snackbar.
+        val deviceUnavailable = error == PermissionError.NO_DEVICE ||
+            error == PermissionError.NO_DEVICE_WITH_CONNECTION
+        if (quietIfUnavailable && deviceUnavailable) {
+          Log.i(TAG, "glasses unavailable, waiting for a device: ${error.description}")
+        } else {
+          setRecentError("Permission check error: ${error.description}")
+        }
         return@launch
       }
 
