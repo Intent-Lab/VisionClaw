@@ -8,10 +8,8 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess
 
-import android.Manifest.permission.BLUETOOTH
 import android.Manifest.permission.BLUETOOTH_CONNECT
 import android.Manifest.permission.CAMERA
-import android.Manifest.permission.INTERNET
 import android.Manifest.permission.RECORD_AUDIO
 import android.os.Bundle
 import android.view.WindowManager
@@ -37,8 +35,11 @@ import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
   companion object {
+    // Runtime permissions only: legacy BLUETOOTH and INTERNET are install-time
+    // grants that the runtime dialog reports as "denied" on modern Android,
+    // which made an all-of-them check fail (and snackbar) on every launch.
     val PERMISSIONS: Array<String> = arrayOf(
-        BLUETOOTH, BLUETOOTH_CONNECT, INTERNET, RECORD_AUDIO, CAMERA,
+        BLUETOOTH_CONNECT, RECORD_AUDIO, CAMERA,
     )
   }
 
@@ -97,12 +98,20 @@ class MainActivity : ComponentActivity() {
 
   fun checkPermissions(onPermissionsGranted: () -> Unit) {
     registerForActivityResult(RequestMultiplePermissions()) { permissionsResult ->
-          val granted = permissionsResult.entries.all { it.value }
-          if (granted) {
+          // Only the current mode's needs gate startup: phone calls need
+          // camera + mic; the Bluetooth grant matters only for glasses.
+          val needed =
+              if (SettingsManager.captureSource == CaptureSource.GLASSES) {
+                listOf(CAMERA, RECORD_AUDIO, BLUETOOTH_CONNECT)
+              } else {
+                listOf(CAMERA, RECORD_AUDIO)
+              }
+          val missing = needed.filter { permissionsResult[it] == false }
+          if (missing.isEmpty()) {
             onPermissionsGranted()
           } else {
             viewModel.setRecentError(
-                "Allow All Permissions (Bluetooth, Bluetooth Connect, Internet, Microphone, Camera)"
+                "Missing permissions: " + missing.joinToString { it.substringAfterLast('.') }
             )
           }
         }
