@@ -26,6 +26,7 @@ struct StreamSessionView: View {
   @StateObject private var liveKit = LiveKitSession()
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
   @AppStorage(IntelligenceEngine.defaultsKey) private var intelligenceRaw = IntelligenceEngine.gemini.rawValue
+  @State private var glassesAutoStarted = false
 
   private var captureSource: CaptureSource {
     CaptureSource(rawValue: captureSourceRaw) ?? .iPhoneCamera
@@ -47,7 +48,15 @@ struct StreamSessionView: View {
         LiveKitStreamView(session: liveKit)
       } else if let wearablesViewModel {
         if wearablesViewModel.registrationState == .registered || wearablesViewModel.hasMockDevice {
-          NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel)
+          // No start-choice interstitial: registered glasses go straight to
+          // the call screen, auto-starting the stream once per entry. The
+          // connecting overlay covers DAT bring-up.
+          LiveKitStreamView(session: liveKit)
+            .task {
+              guard !glassesAutoStarted else { return }
+              glassesAutoStarted = true
+              await viewModel.handleStartStreaming()
+            }
         } else {
           HomeScreenView(viewModel: wearablesViewModel)
         }
@@ -87,6 +96,7 @@ struct StreamSessionView: View {
       }
     }
     .onChange(of: captureSourceRaw) { newRaw in
+      glassesAutoStarted = false
       Task {
         if CaptureSource(rawValue: newRaw) == .iPhoneCamera {
           if viewModel.isStreaming { await viewModel.stopSession() }
