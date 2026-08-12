@@ -125,6 +125,7 @@ export async function runTurn(
 
   const parts: string[] = [];
   let timedOut = false;
+  let sawError = false;
 
   const drain = (async () => {
     for await (const event of stream) {
@@ -133,8 +134,11 @@ export async function runTurn(
           if (block.type === "text") parts.push(block.text);
         }
       } else if (event.type === "session.error") {
-        parts.push("Something went wrong while working on that. Try again in a moment.");
-        break;
+        // Error events can be transient and precede a successful answer;
+        // keep draining and let a terminal status end the turn. Only if the
+        // stream ends with no text at all does this become the user's answer.
+        console.error("[turn] session.error event:", JSON.stringify(event).slice(0, 500));
+        sawError = true;
       } else if (event.type === "session.status_terminated") {
         break;
       } else if (event.type === "session.status_idle") {
@@ -144,6 +148,9 @@ export async function runTurn(
         if (stop?.type !== "requires_action") break;
         if (!(await resolvePendingAction(sessionId, stop.event_ids ?? []))) break;
       }
+    }
+    if (parts.length === 0 && sawError) {
+      parts.push("Something went wrong while working on that. Try again in a moment.");
     }
     return parts.join("\n\n").trim();
   })();
@@ -190,6 +197,7 @@ export async function runTurnStreaming(
   await sendUserTurn(sessionId, userText, contextNotes);
 
   const parts: string[] = [];
+  let sawError = false;
   // event_id -> content index -> text already emitted from deltas
   const previews = new Map<string, Map<number, string>>();
   let currentEventId: string | null = null;
@@ -227,10 +235,9 @@ export async function runTurnStreaming(
       const full = blockTexts.join("\n").trim();
       if (full) parts.push(full);
     } else if (event.type === "session.error") {
-      const msg = "Something went wrong while working on that. Try again in a moment.";
-      emit(msg);
-      parts.push(msg);
-      break;
+      // Transient error events can precede a successful answer; keep draining.
+      console.error("[turn] session.error event:", JSON.stringify(event).slice(0, 500));
+      sawError = true;
     } else if (event.type === "session.status_terminated") {
       break;
     } else if (event.type === "session.status_idle") {
@@ -240,6 +247,11 @@ export async function runTurnStreaming(
     }
   }
 
+  if (parts.length === 0 && sawError) {
+    const msg = "Something went wrong while working on that. Try again in a moment.";
+    emit(msg);
+    parts.push(msg);
+  }
   return parts.join("\n\n").trim();
 }
 
