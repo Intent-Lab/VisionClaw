@@ -107,6 +107,19 @@ struct LiveKitStreamView: View {
         .animation(.easeInOut(duration: 0.2), value: session.agentStatus)
       }
 
+      // Agent-authored card (show_card tool): floats over the upper half,
+      // latest card wins, swipe up or tap the X to dismiss.
+      if let card = session.card {
+        VStack {
+          AgentCardView(card: card) { session.dismissCard() }
+            .padding(.top, 96)
+            .padding(.horizontal, 20)
+          Spacer()
+        }
+        .transition(.opacity)
+        .animation(.easeInOut(duration: 0.2), value: card.uuid)
+      }
+
       // Live captions: agent speech plain, user speech dimmed. Interim text
       // updates in place; a finished utterance lingers four seconds.
       if let caption = session.caption {
@@ -169,6 +182,98 @@ struct LiveKitStreamView: View {
     }
     .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
     .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+  }
+}
+
+/// Native renderer for the agent's typed cards. Unknown types degrade to the
+/// info layout; fallback_text carries accessibility.
+struct AgentCardView: View {
+  let card: LiveKitSession.UICard
+  let onDismiss: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .top) {
+        if let title = card.title {
+          Text(title)
+            .font(.headline)
+            .foregroundStyle(.white)
+        }
+        Spacer()
+        Button(action: onDismiss) {
+          Image(systemName: "xmark")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.6))
+            .padding(6)
+        }
+      }
+      ScrollView {
+        VStack(alignment: .leading, spacing: 10) {
+          if let value = card.value {
+            Text(value)
+              .font(.system(size: 40, weight: .bold, design: .rounded))
+              .foregroundStyle(.white)
+          }
+          if let body = card.body {
+            Text(body)
+              .font(.subheadline)
+              .foregroundStyle(.white.opacity(0.75))
+          }
+          if card.type == "image", let urlString = card.imageURL, let url = URL(string: urlString) {
+            AsyncImage(url: url) { image in
+              image.resizable().aspectRatio(contentMode: .fit)
+            } placeholder: {
+              ProgressView().tint(.white)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+          }
+          ForEach(Array(card.facts.enumerated()), id: \.offset) { _, fact in
+            HStack(alignment: .firstTextBaseline) {
+              Text(fact.label)
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.6))
+              Spacer()
+              Text(fact.value)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.trailing)
+            }
+          }
+          ForEach(Array(card.items.enumerated()), id: \.offset) { _, item in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+              if let glyph = item.glyph, !glyph.isEmpty {
+                Text(glyph).font(.footnote)
+              }
+              VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                  .font(.footnote.weight(.medium))
+                  .foregroundStyle(.white)
+                if let subtitle = item.subtitle {
+                  Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.6))
+                }
+              }
+              Spacer()
+              if let trailing = item.trailing {
+                Text(trailing)
+                  .font(.footnote)
+                  .foregroundStyle(.white.opacity(0.8))
+              }
+            }
+          }
+        }
+      }
+      .frame(maxHeight: 320)
+    }
+    .padding(14)
+    .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 18))
+    .accessibilityLabel(card.fallbackText)
+    .gesture(
+      DragGesture(minimumDistance: 30).onEnded { drag in
+        if drag.translation.height < -30 { onDismiss() }
+      }
+    )
   }
 }
 

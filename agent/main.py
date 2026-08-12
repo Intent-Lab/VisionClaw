@@ -54,6 +54,12 @@ For quick factual lookups -- weather, sports scores, stock prices, news, opening
 current facts about the world -- use quick_search. It answers in a couple of seconds;
 just relay the result. This includes looking up things you can see on camera.
 
+Whenever your answer contains data with visual structure -- weather, forecasts,
+schedules, scores, prices, lists, comparisons, step-by-step results -- you MUST call
+show_card with the essentials in the same turn as your spoken answer. Card first or
+alongside, then speak a short summary; never read the card aloud row by row. One card
+per answer; reuse its uuid to update it.
+
 For anything requiring action or multi-step work -- messages, lists, reminders, calendars,
 research, smart home -- use the execute tool. Speak a brief natural acknowledgment BEFORE
 calling it, never call it silently. Results may arrive as a follow-up; relay them as the
@@ -338,6 +344,57 @@ def build_llm(engine: str):
     )
 
 
+# Card protocol v1: typed templates the voice model fills, published as JSON on
+# the "vc.ui" text-stream topic. Clients render natively; an unknown type
+# degrades to info; the same uuid replaces a card in place. This schema is the
+# single source of truth for worker and both clients.
+CARD_TOOL_SCHEMA = {
+    "name": "show_card",
+    "description": (
+        "Display a visual card on the user's screen alongside your speech. Use it when visual "
+        "structure genuinely helps: weather, forecasts, schedules, scores, prices, lists, "
+        "comparisons, task results. Keep cards skeletal -- they support what you say, never "
+        "replace it. Reusing a uuid updates that card in place instead of adding a new one."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "uuid": {"type": "string", "description": "Stable card id; reuse it to update the card in place."},
+            "type": {"type": "string", "enum": ["info", "list", "image"]},
+            "title": {"type": "string"},
+            "value": {"type": "string", "description": "One big highlighted value, e.g. '91°F' or '$189.44'."},
+            "body": {"type": "string", "description": "One short supporting sentence."},
+            "facts": {
+                "type": "array",
+                "description": "Label/value rows (info cards): forecast days, stats, key fields.",
+                "items": {
+                    "type": "object",
+                    "properties": {"label": {"type": "string"}, "value": {"type": "string"}},
+                    "required": ["label", "value"],
+                },
+            },
+            "items": {
+                "type": "array",
+                "description": "Rows for list cards: schedules, results, tasks.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "glyph": {"type": "string", "description": "Optional single leading character."},
+                        "title": {"type": "string"},
+                        "subtitle": {"type": "string"},
+                        "trailing": {"type": "string", "description": "Right-aligned text, e.g. a time or price."},
+                    },
+                    "required": ["title"],
+                },
+            },
+            "image_url": {"type": "string", "description": "https image URL (image cards only)."},
+            "fallback_text": {"type": "string", "description": "One plain-text line summarizing the card."},
+        },
+        "required": ["uuid", "type", "fallback_text"],
+    },
+}
+
+
 def _watch_video(ctx: JobContext, holder: FrameHolder) -> None:
     """Keep holder current with the user's camera. Runs beside the realtime
     model's own video consumption; this copy exists so tool calls can attach
@@ -383,13 +440,74 @@ async def entrypoint(ctx: JobContext):
     frames = FrameHolder()
     _watch_video(ctx, frames)
 
+    # Flat scalar signature: the Gemini realtime plugin silently drops
+    # raw-schema tools when building provider declarations, and nested object
+    # params risk $ref-style schemas the converters mangle. Rows travel as
+    # JSON-in-string; the wire payload (vc.ui) keeps the CARD_TOOL_SCHEMA shape.
+    async def _show_card(
+        uuid: str,
+        card_type: str,
+        fallback_text: str,
+        title: str | None = None,
+        value: str | None = None,
+        body: str | None = None,
+        facts_json: str | None = None,
+        items_json: str | None = None,
+        image_url: str | None = None,
+    ) -> str:
+        """Display a visual card on the user's screen alongside your speech. Use it whenever
+        your answer has visual structure: weather, forecasts, schedules, scores, prices,
+        lists, comparisons. Keep it skeletal -- the card supports what you say.
+
+        card_type: one of "info", "list", "image".
+        fallback_text: one plain-text line summarizing the card.
+        value: one big highlighted value, e.g. "91°F".
+        facts_json: JSON array of {"label","value"} rows, e.g.
+          '[{"label":"Wed","value":"91° / 63°"},{"label":"Thu","value":"85° / 61°"}]'.
+        items_json: JSON array of {"title","subtitle","trailing","glyph"} rows (title required).
+        Reusing a uuid updates that card in place."""
+
+        def rows(raw: str | None) -> list:
+            if not raw:
+                return []
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, list) else []
+            except json.JSONDecodeError:
+                logger.warning("show_card: bad rows json: %s", raw[:120])
+                return []
+
+        card = {
+            "uuid": uuid,
+            "version": 1,
+            "type": card_type if card_type in ("info", "list", "image") else "info",
+            "title": title,
+            "value": value,
+            "body": body,
+            "facts": rows(facts_json),
+            "items": rows(items_json),
+            "image_url": image_url,
+            "fallback_text": fallback_text,
+        }
+        payload = json.dumps({k: v for k, v in card.items() if v is not None})
+        if len(payload) > 16_384:
+            return "Card too large -- show fewer rows."
+        await ctx.room.local_participant.send_text(payload, topic="vc.ui")
+        logger.info(
+            "show_card: user=%s type=%s uuid=%s bytes=%d",
+            user_id, card["type"], uuid, len(payload),
+        )
+        return "Card shown. Continue speaking naturally."
+
+    show_card = function_tool(_show_card, name="show_card")
+
     session = AgentSession(
         llm=build_llm(engine),
         userdata=Userdata(user_id=user_id, frames=frames),
     )
 
     await session.start(
-        agent=Agent(instructions=INSTRUCTIONS, tools=[execute, quick_search]),
+        agent=Agent(instructions=INSTRUCTIONS, tools=[execute, quick_search, show_card]),
         room=ctx.room,
         # Video is opt-in (RoomInputOptions.video_enabled defaults to False);
         # without this the model gets no frames and hallucinates a scene when

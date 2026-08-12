@@ -46,6 +46,39 @@ final class LiveKitSession: NSObject, ObservableObject {
 
   @Published private(set) var caption: Caption?
   private var captionClearTask: Task<Void, Never>?
+
+  /// A typed card from the agent's show_card tool (vc.ui topic). One card at a
+  /// time; the same uuid replaces content in place; dismissal sticks until the
+  /// agent publishes again.
+  struct UICard: Equatable {
+    struct Fact: Equatable {
+      let label: String
+      let value: String
+    }
+
+    struct Item: Equatable {
+      let glyph: String?
+      let title: String
+      let subtitle: String?
+      let trailing: String?
+    }
+
+    let uuid: String
+    let type: String
+    let title: String?
+    let value: String?
+    let body: String?
+    let facts: [Fact]
+    let items: [Item]
+    let imageURL: String?
+    let fallbackText: String
+  }
+
+  @Published private(set) var card: UICard?
+
+  func dismissCard() {
+    card = nil
+  }
   @Published private(set) var localVideoTrack: LocalVideoTrack?
   /// Camera-only preview while no call is active. The camera IS this app;
   /// hanging up stops the listening, not the seeing.
@@ -257,6 +290,7 @@ final class LiveKitSession: NSObject, ObservableObject {
         NSLog("[LiveKit] camera unavailable, voice-only: %@", error.localizedDescription)
       }
       registerCaptionHandler()
+      registerCardHandler()
       state = .connected
       resetZoom()
       refreshAgentStatus()
@@ -278,6 +312,7 @@ final class LiveKitSession: NSObject, ObservableObject {
     frozenFrame = nil
     caption = nil
     captionClearTask?.cancel()
+    card = nil
     glassesCapturerBox.sawFrame = false
     hasGlassesFrame = false
     await startPreview()
@@ -301,6 +336,49 @@ final class LiveKitSession: NSObject, ObservableObject {
         }
       }
     }
+  }
+
+  private func registerCardHandler() {
+    Task { [weak self] in
+      guard let room = self?.room else { return }
+      try? await room.registerTextStreamHandler(for: "vc.ui") { [weak self] reader, _ in
+        let json = try await reader.readAll()
+        await self?.handleCardJSON(json)
+      }
+    }
+  }
+
+  private func handleCardJSON(_ json: String) {
+    guard let data = json.data(using: .utf8),
+          let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+          let uuid = dict["uuid"] as? String,
+          let type = dict["type"] as? String
+    else {
+      NSLog("[LiveKit] ignoring malformed card payload (%d bytes)", json.count)
+      return
+    }
+    let facts = ((dict["facts"] as? [[String: Any]]) ?? []).compactMap { f -> UICard.Fact? in
+      guard let label = f["label"] as? String, let value = f["value"] as? String else { return nil }
+      return UICard.Fact(label: label, value: value)
+    }
+    let items = ((dict["items"] as? [[String: Any]]) ?? []).compactMap { i -> UICard.Item? in
+      guard let title = i["title"] as? String else { return nil }
+      return UICard.Item(
+        glyph: i["glyph"] as? String,
+        title: title,
+        subtitle: i["subtitle"] as? String,
+        trailing: i["trailing"] as? String)
+    }
+    card = UICard(
+      uuid: uuid,
+      type: type,
+      title: dict["title"] as? String,
+      value: dict["value"] as? String,
+      body: dict["body"] as? String,
+      facts: facts,
+      items: items,
+      imageURL: dict["image_url"] as? String,
+      fallbackText: (dict["fallback_text"] as? String) ?? "")
   }
 
   private func showCaption(_ text: String, isAgent: Bool) {

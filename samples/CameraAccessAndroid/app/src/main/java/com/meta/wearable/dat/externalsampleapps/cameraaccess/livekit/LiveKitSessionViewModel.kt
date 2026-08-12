@@ -98,6 +98,36 @@ data class Caption(
     val isFinal: Boolean,
 )
 
+/**
+ * A generative UI card published by the agent's show_card tool on the "vc.ui"
+ * text-stream topic. Schema source of truth: CARD_TOOL_SCHEMA in
+ * agent/main.py. Unknown types render as info; unknown versions render
+ * best-effort from whichever fields are present.
+ */
+data class UiCard(
+    val uuid: String,
+    val version: Int,
+    val type: String,
+    val title: String?,
+    val value: String?,
+    val body: String?,
+    val facts: List<CardFact>,
+    val items: List<CardItem>,
+    val imageUrl: String?,
+    val fallbackText: String,
+    // Fetched lazily for image cards; arrives via a state update.
+    val image: Bitmap? = null,
+)
+
+data class CardFact(val label: String, val value: String)
+
+data class CardItem(
+    val glyph: String?,
+    val title: String,
+    val subtitle: String?,
+    val trailing: String?,
+)
+
 data class LiveKitUiState(
     val state: SessionState = SessionState.Disconnected,
     val agentStatus: AgentStatus = AgentStatus.NONE,
@@ -112,6 +142,7 @@ data class LiveKitUiState(
     val isGlassesSource: Boolean = false,
     val glassesStreaming: Boolean = false,
     val caption: Caption? = null,
+    val card: UiCard? = null,
 ) {
     val isActive: Boolean
         get() = state == SessionState.Connected || state == SessionState.Connecting
@@ -138,6 +169,7 @@ class LiveKitSessionViewModel(
         private const val MAX_ZOOM = 8f
         private const val FROZEN_JPEG_QUALITY = 90
         private const val TRANSCRIPTION_TOPIC = "lk.transcription"
+        private const val CARD_TOPIC = "vc.ui"
         private const val TRANSCRIPTION_FINAL_ATTRIBUTE = "lk.transcription_final"
         private const val TRANSCRIPTION_SEGMENT_ATTRIBUTE = "lk.segment_id"
         private const val CAPTION_LINGER_MS = 4000L
@@ -212,6 +244,120 @@ class LiveKitSessionViewModel(
             }
         }
         registerTranscriptionHandler()
+        registerCardHandler()
+    }
+
+    // MARK: Generative UI cards (agent show_card tool, "vc.ui" text streams)
+
+    private var dismissedCardUuid: String? = null
+
+    /**
+     * Each stream carries one complete JSON card payload. The same uuid
+     * replaces that card in place; a dismissal holds until any new publish
+     * arrives. Handlers are per-Room and survive disconnects, so this
+     * registers exactly once.
+     */
+    private fun registerCardHandler() {
+        room.registerTextStreamHandler(CARD_TOPIC) { receiver, _ ->
+            viewModelScope.launch {
+                val builder = StringBuilder()
+                try {
+                    receiver.flow.collect { chunk -> builder.append(chunk) }
+                } catch (e: Exception) {
+                    Log.w(TAG, "card stream ${receiver.info.id} failed: ${e.message}")
+                    return@launch
+                }
+                handleCardPayload(builder.toString())
+            }
+        }
+        Log.d(TAG, "card handler registered for topic $CARD_TOPIC")
+    }
+
+    private fun handleCardPayload(payload: String) {
+        val card = try {
+            parseCard(JSONObject(payload))
+        } catch (e: Exception) {
+            null
+        }
+        if (card == null) {
+            Log.w(TAG, "malformed card payload ignored (${payload.length} bytes)")
+            return
+        }
+        Log.d(TAG, "card received uuid=${card.uuid} type=${card.type} bytes=${payload.length}")
+        // Any new publish (same or different uuid) supersedes a dismissal.
+        dismissedCardUuid?.let { Log.d(TAG, "card dismissal of $it superseded by new publish") }
+        dismissedCardUuid = null
+        _uiState.update { it.copy(card = card) }
+        card.imageUrl?.let { url -> fetchCardImage(card.uuid, url) }
+    }
+
+    private fun parseCard(json: JSONObject): UiCard? {
+        val uuid = json.optString("uuid").takeIf { it.isNotEmpty() } ?: return null
+        val facts = json.optJSONArray("facts")?.let { array ->
+            (0 until array.length()).mapNotNull { index ->
+                val fact = array.optJSONObject(index) ?: return@mapNotNull null
+                val label = fact.optString("label")
+                val value = fact.optString("value")
+                if (label.isEmpty() && value.isEmpty()) null else CardFact(label, value)
+            }
+        } ?: emptyList()
+        val items = json.optJSONArray("items")?.let { array ->
+            (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                val title = item.optString("title").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                CardItem(
+                    glyph = item.optString("glyph").takeIf { it.isNotEmpty() },
+                    title = title,
+                    subtitle = item.optString("subtitle").takeIf { it.isNotEmpty() },
+                    trailing = item.optString("trailing").takeIf { it.isNotEmpty() },
+                )
+            }
+        } ?: emptyList()
+        return UiCard(
+            uuid = uuid,
+            version = json.optInt("version", 1),
+            type = json.optString("type", "info"),
+            title = json.optString("title").takeIf { it.isNotEmpty() },
+            value = json.optString("value").takeIf { it.isNotEmpty() },
+            body = json.optString("body").takeIf { it.isNotEmpty() },
+            facts = facts,
+            items = items,
+            imageUrl = json.optString("image_url").takeIf { it.startsWith("http") },
+            fallbackText = json.optString("fallback_text"),
+        )
+    }
+
+    fun dismissCard() {
+        val uuid = _uiState.value.card?.uuid ?: return
+        dismissedCardUuid = uuid
+        Log.d(TAG, "card dismissed uuid=$uuid")
+        _uiState.update { it.copy(card = null) }
+    }
+
+    private fun fetchCardImage(uuid: String, url: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bitmap = try {
+                httpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "card image fetch failed: HTTP ${response.code}")
+                        null
+                    } else {
+                        response.body?.bytes()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "card image fetch failed: ${e.message}")
+                null
+            } ?: return@launch
+            _uiState.update { state ->
+                val card = state.card
+                if (card?.uuid == uuid && card.imageUrl == url) {
+                    state.copy(card = card.copy(image = bitmap))
+                } else {
+                    state
+                }
+            }
+        }
     }
 
     // MARK: Captions (agents transcription text streams)
@@ -414,6 +560,7 @@ class LiveKitSessionViewModel(
         attachGrabber(null)
         connectedEngine = null
         captionClearJob?.cancel()
+        dismissedCardUuid = null
         _uiState.update {
             it.copy(
                 state = SessionState.Disconnected,
@@ -422,6 +569,7 @@ class LiveKitSessionViewModel(
                 frozenFrame = null,
                 zoomFactor = 1f,
                 caption = null,
+                card = null,
             )
         }
     }

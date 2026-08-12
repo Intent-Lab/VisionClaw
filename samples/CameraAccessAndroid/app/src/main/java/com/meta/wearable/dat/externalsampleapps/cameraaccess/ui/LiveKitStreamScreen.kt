@@ -2,7 +2,9 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
@@ -11,21 +13,27 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -43,8 +51,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -59,6 +73,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.Caption
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.SessionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.UiCard
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.GlassesIssue
 import io.livekit.android.renderer.TextureViewRenderer
@@ -297,6 +312,29 @@ fun LiveKitStreamScreen(
             )
         }
 
+        // Generative UI card from the agent's show_card tool: one card at a
+        // time floating over the upper portion, below the status pill, clear
+        // of the gear and the bottom controls. A new uuid replaces with a
+        // quick fade; the same uuid updates in place.
+        var lastUiCard by remember { mutableStateOf<UiCard?>(null) }
+        uiState.card?.let { lastUiCard = it }
+        AnimatedVisibility(
+            visible = uiState.card != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 64.dp),
+        ) {
+            lastUiCard?.let { held ->
+                UiCardView(
+                    card = uiState.card ?: held,
+                    onDismiss = { viewModel.dismissCard() },
+                )
+            }
+        }
+
         // Captions, above the buttons: the most recent utterance, updating in
         // place as chunks arrive. Final segments linger in the view model for
         // a few seconds; this only animates the fade.
@@ -337,6 +375,156 @@ fun LiveKitStreamScreen(
                 onStart = { viewModel.start() },
                 onStop = { viewModel.stop() },
             )
+        }
+    }
+}
+
+/**
+ * One generative card, rendered from whichever schema fields are present so
+ * unknown types and future versions degrade to an info layout; a card with
+ * nothing renderable shows its fallback text. Dismiss via the corner X or a
+ * swipe up. Internally scrollable past ~45% of the screen height.
+ */
+@Composable
+private fun UiCardView(
+    card: UiCard,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.45f).dp
+    val dismissThreshold = with(LocalDensity.current) { 64.dp.toPx() }
+    // New uuid = quick fade in of the replacement; same uuid = in-place
+    // content update with no re-animation (the effect key doesn't change).
+    val alpha = remember { Animatable(1f) }
+    LaunchedEffect(card.uuid) {
+        alpha.snapTo(0f)
+        alpha.animateTo(1f, animationSpec = tween(200))
+    }
+    val hasContent = card.title != null || card.value != null || card.body != null ||
+        card.facts.isNotEmpty() || card.items.isNotEmpty() || card.image != null
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth(0.9f)
+            .heightIn(max = maxCardHeight)
+            .graphicsLayer { this.alpha = alpha.value }
+            .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(20.dp))
+            .pointerInput(Unit) {
+                var dragTotal = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { dragTotal = 0f },
+                    onVerticalDrag = { _, dragAmount -> dragTotal += dragAmount },
+                    onDragEnd = { if (dragTotal < -dismissThreshold) onDismiss() },
+                )
+            }
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 16.dp)
+            .semantics { contentDescription = card.fallbackText },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = card.title.orEmpty(),
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(top = 6.dp),
+            )
+            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Dismiss card",
+                    tint = Color.White.copy(alpha = 0.7f),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(end = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (!hasContent) {
+                Text(
+                    text = card.fallbackText,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                )
+            }
+            card.value?.let {
+                Text(
+                    text = it,
+                    color = Color.White,
+                    fontSize = 34.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            card.body?.let {
+                Text(
+                    text = it,
+                    color = Color.White.copy(alpha = 0.75f),
+                    fontSize = 13.sp,
+                )
+            }
+            card.image?.let {
+                Image(
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = card.fallbackText,
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp)),
+                )
+            }
+            card.facts.forEach { fact ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = fact.label,
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 13.sp,
+                    )
+                    Text(
+                        text = fact.value,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.padding(start = 12.dp),
+                    )
+                }
+            }
+            card.items.forEach { item ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    item.glyph?.let {
+                        Text(
+                            text = it,
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            modifier = Modifier.padding(end = 10.dp),
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = item.title, color = Color.White, fontSize = 14.sp)
+                        item.subtitle?.let {
+                            Text(text = it, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                        }
+                    }
+                    item.trailing?.let {
+                        Text(
+                            text = it,
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
