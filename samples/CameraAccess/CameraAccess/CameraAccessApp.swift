@@ -56,16 +56,100 @@ struct VisionRootView: View {
   /// `-openSettings` presents Settings at launch, so screens can be captured
   /// on a simulator with no GUI to tap through.
   @State private var showSettings = ProcessInfo.processInfo.arguments.contains("-openSettings")
+  /// Builds ship without a gateway token (it is per-person identity), so an
+  /// install with none configured sees only the access-code gate.
+  @State private var needsAccessCode =
+    SettingsManager.shared.agentBackend == .cloud && !GeminiConfig.isAgentConfigured
 
   var body: some View {
     Group {
-      if let wearables {
+      if needsAccessCode {
+        AccessCodeView(onUnlocked: { needsAccessCode = false })
+      } else if let wearables {
         GlassesCapableRootView(wearables: wearables)
       } else {
         StreamSessionView(wearables: nil, wearablesVM: nil)
       }
     }
     .sheet(isPresented: $showSettings) { SettingsView() }
+  }
+}
+
+/// First-launch gate: verifies the entered code against the gateway before
+/// unlocking, because a typo saved silently would surface later as a 401 that
+/// looks like a server outage.
+struct AccessCodeView: View {
+  let onUnlocked: () -> Void
+  @State private var code = ""
+  @State private var checking = false
+  @State private var error: String?
+
+  var body: some View {
+    VStack(spacing: 12) {
+      Spacer()
+      Text("VisionClaw")
+        .font(.title)
+        .fontWeight(.semibold)
+      Text("Enter your access code to get started. Each code is a personal identity, so ask whoever shared the app for yours.")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+      TextField("Access code", text: $code)
+        .textFieldStyle(.roundedBorder)
+        .autocorrectionDisabled()
+        .textInputAutocapitalization(.never)
+        .disabled(checking)
+        .padding(.top, 20)
+      if let error {
+        Text(error)
+          .font(.footnote)
+          .foregroundStyle(.red)
+          .multilineTextAlignment(.center)
+      }
+      Button(action: submit) {
+        if checking {
+          ProgressView()
+            .frame(maxWidth: .infinity)
+        } else {
+          Text("Continue")
+            .frame(maxWidth: .infinity)
+        }
+      }
+      .buttonStyle(.borderedProminent)
+      .disabled(code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || checking)
+      Spacer()
+    }
+    .padding(.horizontal, 32)
+  }
+
+  private func submit() {
+    guard !checking else { return }
+    checking = true
+    error = nil
+    let token = code.trimmingCharacters(in: .whitespacesAndNewlines)
+    SettingsManager.shared.cloudGatewayToken = token
+    Task {
+      defer { checking = false }
+      guard let url = URL(string: "\(SettingsManager.shared.cloudGatewayURL)/apps") else {
+        error = "Gateway URL is invalid. Fix it in Settings."
+        return
+      }
+      var request = URLRequest(url: url)
+      request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+      do {
+        let (_, response) = try await URLSession.shared.data(for: request)
+        switch (response as? HTTPURLResponse)?.statusCode {
+        case 200:
+          onUnlocked()
+        case 401, 403:
+          error = "That code was not recognized. Check it and try again."
+        default:
+          error = "The server had a problem. Try again in a moment."
+        }
+      } catch {
+        self.error = "Could not reach the server. Check your connection and try again."
+      }
+    }
   }
 }
 

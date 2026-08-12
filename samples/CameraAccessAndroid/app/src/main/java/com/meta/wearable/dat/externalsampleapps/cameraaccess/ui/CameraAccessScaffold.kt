@@ -67,6 +67,19 @@ fun CameraAccessScaffold(
   val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
   val liveKitViewModel: LiveKitSessionViewModel = composeViewModel()
   val snackbarHostState = remember { SnackbarHostState() }
+  // Builds ship without a gateway token (it is per-person identity), so an
+  // install with none configured sees only the access-code gate. Re-checked
+  // when Settings closes because the token can be edited or reset there.
+  var tokenConfigured by remember { mutableStateOf(SettingsManager.isGatewayConfigured) }
+  LaunchedEffect(uiState.isSettingsVisible) {
+    if (!uiState.isSettingsVisible) {
+      tokenConfigured = SettingsManager.isGatewayConfigured
+    }
+  }
+  if (!tokenConfigured) {
+    AccessCodeScreen(onUnlocked = { tokenConfigured = true }, modifier = modifier)
+    return
+  }
 
   // Observe camera permission errors and show snackbar
   LaunchedEffect(uiState.recentError) {

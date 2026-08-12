@@ -188,9 +188,10 @@ private fun SettingsMainScreen(
             }
             NavigationRow("Connected Apps") { onOpen(SettingsSubScreen.CONNECTED_APPS) }
             NavigationRow("Recent Tasks") { onOpen(SettingsSubScreen.RECENT_TASKS) }
-            // The URL and token ship with working defaults, so most people
-            // never need to see them; surfacing them as primary fields made a
-            // configured setup look like one awaiting setup.
+            // The URL ships with a working default and the token is captured
+            // on first launch, so most people never need to see them;
+            // surfacing them as primary fields made a configured setup look
+            // like one awaiting setup.
             NavigationRow("Gateway settings") { onOpen(SettingsSubScreen.GATEWAY) }
 
             // Reset
