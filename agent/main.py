@@ -24,7 +24,8 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import aiohttp
 from google import genai
@@ -94,10 +95,65 @@ def encode_latest_frame(holder: FrameHolder) -> str | None:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+class Tracer:
+    """Interaction trace for the deployment study: what the user said, what the
+    voice model said, and what actions ran. Text only BY DESIGN -- events must
+    never carry frames or base64 image payloads (the gateway strips image-like
+    fields as a second line of defense). Events batch to the gateway; a failed
+    delivery drops that batch rather than ever stalling the voice loop."""
+
+    FLUSH_AFTER = 20
+    FLUSH_SECONDS = 5.0
+    MAX_FIELD_CHARS = 2000
+
+    def __init__(self, user_id: str) -> None:
+        self.user_id = user_id
+        self._events: list[dict] = []
+        self._lock = asyncio.Lock()
+
+    def emit(self, event_type: str, **fields) -> None:
+        event: dict = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "type": event_type,
+        }
+        for key, value in fields.items():
+            if isinstance(value, str) and len(value) > self.MAX_FIELD_CHARS:
+                value = value[: self.MAX_FIELD_CHARS] + "...[truncated]"
+            event[key] = value
+        self._events.append(event)
+        if len(self._events) >= self.FLUSH_AFTER:
+            t = asyncio.create_task(self.flush())
+            _relay_tasks.add(t)
+            t.add_done_callback(_relay_tasks.discard)
+
+    async def flush(self) -> None:
+        async with self._lock:
+            if not self._events:
+                return
+            batch, self._events = self._events, []
+            try:
+                async with aiohttp.ClientSession() as http:
+                    async with http.post(
+                        f"{_gateway_url()}/trace",
+                        headers=_gateway_headers(self.user_id),
+                        json={"events": batch},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        resp.raise_for_status()
+            except Exception:
+                logger.exception("trace flush failed: user=%s dropped=%d", self.user_id, len(batch))
+
+    async def pump(self) -> None:
+        while True:
+            await asyncio.sleep(self.FLUSH_SECONDS)
+            await self.flush()
+
+
 @dataclass
 class Userdata:
     user_id: str
     frames: FrameHolder
+    tracer: Tracer = field(default_factory=lambda: Tracer("unknown"))
 
 
 _search_client: genai.Client | None = None
@@ -130,11 +186,19 @@ async def quick_search(ctx: RunContext[Userdata], query: str) -> str:
         )
     except Exception:
         logger.exception("quick_search failed: user=%s query=%r", ctx.userdata.user_id, query[:120])
+        ctx.userdata.tracer.emit("agent_action", tool="quick_search", query=query, error=True)
         return "The quick search failed. Offer to try again, or use execute for a deeper attempt."
     text = (resp.text or "").strip()
     logger.info(
         "quick_search: user=%s query=%r latency_s=%.2f len=%d",
         ctx.userdata.user_id, query[:120], time.monotonic() - t0, len(text),
+    )
+    ctx.userdata.tracer.emit(
+        "agent_action",
+        tool="quick_search",
+        query=query,
+        result=text[:500],
+        latency_s=round(time.monotonic() - t0, 2),
     )
     return text or "The search returned nothing useful; try execute for a deeper attempt."
 
@@ -238,6 +302,9 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
         "execute start: user=%s attach_view=%s image_kb=%d task=%r",
         ctx.userdata.user_id, attach_view, len(image_b64 or "") * 3 // 4096, task[:200],
     )
+    # The trace records THAT a frame was attached, never the frame itself.
+    tracer = ctx.userdata.tracer
+    tracer.emit("agent_action", tool="execute", task=task, attached_view=bool(image_b64))
     task_start = time.monotonic()
     job = asyncio.ensure_future(_gateway_execute(ctx.userdata.user_id, task, image_b64))
     done, _ = await asyncio.wait({job}, timeout=QUICK_ANSWER_S)
@@ -246,6 +313,13 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
         logger.info(
             "execute quick result: user=%s len=%d agent_task_time_s=%.1f",
             ctx.userdata.user_id, len(result), time.monotonic() - task_start,
+        )
+        tracer.emit(
+            "agent_action_result",
+            tool="execute",
+            task=task[:200],
+            result=result[:500],
+            agent_task_time_s=round(time.monotonic() - task_start, 1),
         )
         return result
 
@@ -284,6 +358,7 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
             )
             result = None
         if result is None:
+            tracer.emit("agent_action_result", tool="execute", task=task[:200], error=True)
             instructions = (
                 "The background task failed. Tell the user briefly and offer to try again."
             )
@@ -295,6 +370,7 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
                 "execute deferred past gateway wait: user=%s elapsed_s=%.1f",
                 user_id, time.monotonic() - task_start,
             )
+            tracer.emit("agent_action_result", tool="execute", task=task[:200], deferred=True)
             instructions = (
                 "The background task is taking longer than expected and is still running. "
                 "Tell the user briefly; the result will be delivered when it's ready, "
@@ -304,6 +380,13 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
             logger.info(
                 "execute late result: user=%s len=%d agent_task_time_s=%.1f",
                 user_id, len(result), time.monotonic() - task_start,
+            )
+            tracer.emit(
+                "agent_action_result",
+                tool="execute",
+                task=task[:200],
+                result=result[:500],
+                agent_task_time_s=round(time.monotonic() - task_start, 1),
             )
             instructions = (
                 "The result of the earlier background task just arrived. Relay it naturally "
@@ -440,6 +523,17 @@ async def entrypoint(ctx: JobContext):
     frames = FrameHolder()
     _watch_video(ctx, frames)
 
+    tracer = Tracer(user_id)
+    tracer.emit("session_start", engine=engine, room=ctx.room.name)
+    pump = asyncio.create_task(tracer.pump())
+
+    async def _finish_trace() -> None:
+        pump.cancel()
+        tracer.emit("session_end")
+        await tracer.flush()
+
+    ctx.add_shutdown_callback(_finish_trace)
+
     # Flat scalar signature: the Gemini realtime plugin silently drops
     # raw-schema tools when building provider declarations, and nested object
     # params risk $ref-style schemas the converters mangle. Rows travel as
@@ -497,14 +591,37 @@ async def entrypoint(ctx: JobContext):
             "show_card: user=%s type=%s uuid=%s bytes=%d",
             user_id, card["type"], uuid, len(payload),
         )
+        tracer.emit(
+            "agent_action",
+            tool="show_card",
+            card_type=card["type"],
+            title=title,
+            fallback_text=fallback_text,
+        )
         return "Card shown. Continue speaking naturally."
 
     show_card = function_tool(_show_card, name="show_card")
 
     session = AgentSession(
         llm=build_llm(engine),
-        userdata=Userdata(user_id=user_id, frames=frames),
+        userdata=Userdata(user_id=user_id, frames=frames, tracer=tracer),
     )
+
+    # The transcript pair the study runs on: final ASR of what the user said,
+    # and the voice model's spoken reply (from output transcription). Items with
+    # no text (tool plumbing, handoffs) are skipped.
+    @session.on("conversation_item_added")
+    def _on_conversation_item(ev) -> None:
+        item = ev.item
+        role = getattr(item, "role", None)
+        text = (getattr(item, "text_content", None) or "").strip()
+        if not text or role not in ("user", "assistant"):
+            return
+        tracer.emit(
+            "user_utterance" if role == "user" else "agent_utterance",
+            text=text,
+            interrupted=bool(getattr(item, "interrupted", False)),
+        )
 
     await session.start(
         agent=Agent(instructions=INSTRUCTIONS, tools=[execute, quick_search, show_card]),

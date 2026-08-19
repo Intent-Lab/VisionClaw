@@ -1,5 +1,6 @@
 import type { WebSocket } from "ws";
 import { saveStore, userResources } from "./store.js";
+import { appendTrace } from "./trace.js";
 
 /**
  * Registry of connected app sockets per user, plus helpers that emit events in
@@ -65,6 +66,7 @@ export async function queuePending(userId: string, text: string): Promise<void> 
   if (user.pendingNotifications.length > MAX_PENDING) {
     user.pendingNotifications = user.pendingNotifications.slice(-MAX_PENDING);
   }
+  appendTrace(userId, [{ type: "result_parked", text: text.slice(0, 300) }]);
   await saveStore();
 }
 
@@ -73,6 +75,7 @@ export async function drainPending(userId: string): Promise<string[]> {
   const pending = user.pendingNotifications ?? [];
   if (pending.length === 0) return [];
   user.pendingNotifications = [];
+  appendTrace(userId, [{ type: "parked_delivered", count: pending.length }]);
   await saveStore();
   return pending;
 }

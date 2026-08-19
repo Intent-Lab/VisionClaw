@@ -7,6 +7,7 @@ import { initStore, saveStore, userResources } from "./store.js";
 import { ensureUser } from "./provision.js";
 import { runTurn, runTurnStreaming, queueContext, drainContext } from "./turn.js";
 import { registerSocket, notifyUser, queuePending, drainPending } from "./notify.js";
+import { appendTrace, readTrace } from "./trace.js";
 import { registerConnectRoutes } from "./connect.js";
 
 initStore(config.storePath);
@@ -347,6 +348,34 @@ app.get("/tasks", async (req, res) => {
     .reverse()
     .map((t) => ({ id: `task_${t.ts}`, ts: t.ts, prompt: t.prompt, result: t.result }));
   res.json({ tasks });
+});
+
+// Interaction trace: what the user said, what the voice model said, what
+// actions ran. The voice worker batches events here; text only -- image-like
+// fields are stripped in appendTrace, never stored.
+app.post("/trace", (req, res) => {
+  const userId = userFromRequest(req);
+  if (!userId) {
+    res.status(401).json({ error: { message: "invalid or missing gateway token" } });
+    return;
+  }
+  const events = req.body?.events;
+  if (!Array.isArray(events) || events.length === 0) {
+    res.status(400).json({ error: { message: "events array is required" } });
+    return;
+  }
+  res.status(200).json({ accepted: appendTrace(userId, events) });
+});
+
+app.get("/trace", async (req, res) => {
+  const userId = userFromRequest(req);
+  if (!userId) {
+    res.status(401).json({ error: { message: "invalid or missing gateway token" } });
+    return;
+  }
+  const limit = Math.min(Number(req.query.limit ?? 200) || 200, 1000);
+  const since = typeof req.query.since === "string" ? req.query.since : undefined;
+  res.json({ events: await readTrace(userId, limit, since) });
 });
 
 // Voice-session context handoff (summaries, what the user is looking at).
