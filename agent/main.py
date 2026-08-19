@@ -54,13 +54,16 @@ You can see live video. Answer visual questions directly from what you see.
 
 For quick factual lookups -- weather, sports scores, stock prices, news, opening hours,
 current facts about the world -- use quick_search. It answers in a couple of seconds;
-just relay the result. This includes looking up things you can see on camera.
+just relay the result. This includes looking up things you can see on camera. A basic
+result card appears on screen automatically; when the answer has real structure
+(forecast days, scores, prices, comparisons), upgrade it by calling show_card with
+uuid "search" and structured facts or items rows -- same uuid, so it replaces the
+basic card instead of stacking.
 
-Whenever your answer contains data with visual structure -- weather, forecasts,
-schedules, scores, prices, lists, comparisons, step-by-step results -- you MUST call
-show_card with the essentials in the same turn as your spoken answer. Card first or
-alongside, then speak a short summary; never read the card aloud row by row. One card
-per answer; reuse its uuid to update it.
+Whenever an answer you composed yourself has visual structure -- schedules, lists,
+comparisons, step-by-step results -- call show_card with the essentials in the same
+turn as your spoken answer. Card first or alongside, then speak a short summary; never
+read the card aloud row by row. One card per answer; reuse its uuid to update it.
 
 For notes and lists, use the note tools directly -- they are instant. "Remember this" or
 "note that down" is save_note; "add milk to my shopping list" is save_note with
@@ -209,6 +212,8 @@ async def quick_search(ctx: RunContext[Userdata], query: str) -> str:
         result=text[:500],
         latency_s=round(time.monotonic() - t0, 2),
     )
+    if text:
+        await _push_search_card(ctx, query, text)
     return text or "The search returned nothing useful; try execute for a deeper attempt."
 
 
@@ -292,6 +297,42 @@ async def _drain_pending(user_id: str) -> list[str]:
     except Exception:
         logger.exception("pending drain failed: user=%s", user_id)
         return []
+
+
+def _card_text(raw: str, limit: int) -> str:
+    """Markdown-ish search prose -> plain card text."""
+    text = re.sub(r"[*_`#]+", "", raw)
+    text = re.sub(r"[ \t]+", " ", text).strip()
+    return text if len(text) <= limit else text[: limit - 3].rsplit(" ", 1)[0] + "..."
+
+
+async def _push_search_card(ctx: RunContext[Userdata], query: str, answer: str) -> None:
+    """Deterministic baseline card for every search answer -- the model may
+    replace it with a richer structured card under the same uuid, but a result
+    is never invisible just because the model skipped show_card."""
+    room = ctx.userdata.room
+    if room is None:
+        return
+    try:
+        card = {
+            "uuid": "search",
+            "version": 1,
+            "type": "info",
+            "title": _card_text(query, 60),
+            "body": _card_text(answer, 350),
+            "fallback_text": _card_text(answer, 100),
+        }
+        await _publish_card(room, card)
+        ctx.userdata.tracer.emit(
+            "agent_action",
+            tool="show_card",
+            card_type="info",
+            title=card["title"],
+            fallback_text=card["fallback_text"],
+            auto=True,
+        )
+    except Exception:
+        logger.exception("search card publish failed: user=%s", ctx.userdata.user_id)
 
 
 async def _publish_card(room: rtc.Room, card: dict) -> None:
