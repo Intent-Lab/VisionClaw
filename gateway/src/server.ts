@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import express from "express";
 import { WebSocketServer, type WebSocket } from "ws";
 import { config } from "./config.js";
@@ -414,6 +415,23 @@ app.delete("/notes", async (req, res) => {
     }
   }
   res.status(404).json({ error: { message: "no note matched" } });
+});
+
+// Trace dashboard: sessions list + per-call timeline over /trace. Static, no
+// auth of its own -- the token typed into the page is what talks to the API.
+app.get("/dashboard", (_req, res) => {
+  res.sendFile(path.resolve("public/dashboard.html"));
+});
+
+// Participant roster for the dashboard's picker. Service token only: a user
+// token names one user and has no business enumerating the others.
+app.get("/users", (req, res) => {
+  const bearer = req.header("authorization")?.slice("Bearer ".length).trim();
+  if (!config.serviceToken || bearer !== config.serviceToken) {
+    res.status(401).json({ error: { message: "service token required" } });
+    return;
+  }
+  res.json({ users: [...new Set(config.tokens.values())] });
 });
 
 // Interaction trace: what the user said, what the voice model said, what

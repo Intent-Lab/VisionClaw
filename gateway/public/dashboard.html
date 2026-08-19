@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionClaw Trace</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --border: #e2e5ea; --text: #1a1d21;
+    --muted: #667085; --accent: #2563eb; --user: #2563eb; --agent: #059669;
+    --tool: #b45309; --card: #7c3aed; --sys: #98a2b3; --hover: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101418; --panel: #171c22; --border: #2a323c; --text: #e6e9ec;
+      --muted: #8b94a1; --accent: #60a5fa; --user: #60a5fa; --agent: #34d399;
+      --tool: #fbbf24; --card: #a78bfa; --sys: #5b6470; --hover: #1f262e;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 14px/1.5 -apple-system, "SF Pro Text", Roboto, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 15px; font-weight: 600; margin-right: 8px; }
+  header input, header select {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 5px 9px;
+  }
+  #token { width: 240px; }
+  header button {
+    font: inherit; padding: 5px 14px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--accent); color: #fff; cursor: pointer;
+  }
+  header label { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 5px; }
+  #status { color: var(--muted); font-size: 13px; margin-left: auto; }
+  #summary {
+    display: flex; gap: 18px; padding: 8px 16px; font-size: 13px; color: var(--muted);
+    background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  #summary b { color: var(--text); font-weight: 600; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #sessions {
+    width: 290px; overflow-y: auto; border-right: 1px solid var(--border); background: var(--panel);
+  }
+  .session {
+    padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  .session:hover { background: var(--hover); }
+  .session.active { background: var(--hover); box-shadow: inset 3px 0 0 var(--accent); }
+  .session .when { font-weight: 600; font-size: 13px; }
+  .session .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  #timeline { flex: 1; overflow-y: auto; padding: 14px 20px; }
+  .ev { display: flex; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .ev .ts { color: var(--muted); font-size: 12px; width: 62px; flex: none; padding-top: 2px; font-variant-numeric: tabular-nums; }
+  .ev .tag {
+    flex: none; width: 58px; text-align: center; font-size: 11px; font-weight: 600;
+    border-radius: 5px; padding: 2px 0; height: fit-content; margin-top: 1px; color: #fff;
+  }
+  .ev .body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .ev .body .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; white-space: pre-wrap; }
+  .ev.t-user .tag { background: var(--user); }
+  .ev.t-agent .tag { background: var(--agent); }
+  .ev.t-tool .tag { background: var(--tool); }
+  .ev.t-card .tag { background: var(--card); }
+  .ev.t-sys .tag { background: var(--sys); }
+  .ev .toolname { font-weight: 600; }
+  .ev details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  .pill { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 10px; padding: 0 8px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VisionClaw Trace</h1>
+  <input id="token" type="password" placeholder="Access token" autocomplete="off">
+  <select id="user" title="Participant (service token only)" hidden></select>
+  <button id="load">Load</button>
+  <label><input type="checkbox" id="auto"> auto-refresh</label>
+  <input id="filter" placeholder="Filter text" style="width:150px">
+  <span id="status"></span>
+</header>
+<div id="summary" hidden></div>
+<main>
+  <div id="sessions"></div>
+  <div id="timeline"><div class="empty">Enter your access token and press Load.</div></div>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let events = [], groups = [], selected = -1, timer = null;
+
+// #t=<token> in the fragment: never sent to the server; stored then stripped
+// from the address bar so a shared link does not keep the secret on screen.
+const hashToken = new URLSearchParams(location.hash.slice(1)).get("t");
+if (hashToken) {
+  localStorage.setItem("vcDashToken", hashToken);
+  history.replaceState(null, "", location.pathname);
+}
+$("token").value = localStorage.getItem("vcDashToken") || "";
+
+function headers() {
+  const h = { Authorization: "Bearer " + $("token").value.trim() };
+  const u = $("user").value;
+  if (!$("user").hidden && u) h["X-User-Id"] = u;
+  return h;
+}
+
+async function loadUsers() {
+  try {
+    const r = await fetch("/users", { headers: { Authorization: "Bearer " + $("token").value.trim() } });
+    if (!r.ok) { $("user").hidden = true; return; }
+    const { users } = await r.json();
+    const sel = $("user");
+    const prev = sel.value;
+    sel.innerHTML = users.map((u) => `<option>${esc(u)}</option>`).join("");
+    if (users.includes(prev)) sel.value = prev;
+    sel.hidden = false;
+  } catch { $("user").hidden = true; }
+}
+
+async function load() {
+  localStorage.setItem("vcDashToken", $("token").value.trim());
+  $("status").textContent = "loading...";
+  await loadUsers();
+  let r;
+  try {
+    r = await fetch("/trace?limit=1000", { headers: headers() });
+  } catch {
+    $("status").textContent = "network error"; return;
+  }
+  if (r.status === 401) { $("status").textContent = "token not recognized"; return; }
+  if (!r.ok) { $("status").textContent = "server error " + r.status; return; }
+  events = (await r.json()).events;
+  events.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+  group();
+  render();
+  $("status").textContent = events.length + " events, updated " + new Date().toLocaleTimeString();
+}
+
+function group() {
+  groups = [];
+  let cur = null;
+  for (const e of events) {
+    if (e.type === "session_start" || cur === null) {
+      cur = { start: e.ts, engine: e.engine, room: e.room, events: [], synthetic: e.type !== "session_start" };
+      groups.push(cur);
+    }
+    cur.events.push(e);
+    if (e.type === "session_end") { cur.end = e.ts; cur = null; }
+  }
+  if (selected >= groups.length) selected = groups.length - 1;
+  if (selected < 0 && groups.length) {
+    // Default to the newest session with real content -- the very newest is
+    // often an empty redial shell.
+    selected = groups.length - 1;
+    for (let i = groups.length - 1; i >= 0; i--) {
+      if (groups[i].events.some((e) => e.type === "user_utterance" || String(e.type).startsWith("agent_action"))) {
+        selected = i;
+        break;
+      }
+    }
+  }
+}
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hhmm = (ts) => (ts || "").slice(11, 19);
+const day = (ts) => (ts || "").slice(0, 10);
+
+function describe(e) {
+  if (e.type === "user_utterance") return { cls: "t-user", tag: "USER", main: e.text, sub: e.interrupted ? "(interrupted)" : "" };
+  if (e.type === "agent_utterance") return { cls: "t-agent", tag: "AGENT", main: e.text, sub: e.interrupted ? "(interrupted)" : "" };
+  if (e.type === "agent_action" && e.tool === "show_card")
+    return { cls: "t-card", tag: "CARD", main: `${e.title || "(untitled)"}${e.auto ? " (auto)" : ""}`, sub: e.fallback_text || "" };
+  if (e.type === "agent_action" || e.type === "agent_action_result") {
+    const label = e.type === "agent_action_result" ? `${e.tool} result` : e.tool;
+    let main = "", sub = "";
+    if (e.tool === "quick_search") { main = e.query || ""; sub = e.result || ""; }
+    else if (e.tool === "execute") {
+      main = e.task || "";
+      sub = e.result || (e.deferred ? "(deferred to next call)" : "");
+      if (e.attached_view) main += "  [frame attached]";
+      if (e.agent_task_time_s != null) sub += `\n(${e.agent_task_time_s}s)`;
+    } else if (e.tool === "save_note") { main = e.text || ""; sub = e.tag ? "list: " + e.tag : ""; }
+    else if (e.tool === "recall_notes") { main = (e.tag ? e.tag + " list" : "all notes") + `, ${e.count ?? "?"} items`; }
+    else if (e.tool === "delete_note") { main = e.match || ""; sub = e.deleted ? "deleted: " + e.deleted : e.found === false ? "no match" : ""; }
+    else { main = JSON.stringify(e).slice(0, 200); }
+    if (e.error) sub = "FAILED" + (sub ? "\n" + sub : "");
+    return { cls: "t-tool", tag: "TOOL", main: `<span class="toolname">${esc(label)}</span>  ${esc(main)}`, sub, raw: true };
+  }
+  if (e.type === "session_start") return { cls: "t-sys", tag: "SYS", main: `call started (${e.engine || "?"}) ${e.room || ""}` };
+  if (e.type === "session_end") return { cls: "t-sys", tag: "SYS", main: "call ended" };
+  if (e.type === "result_parked") return { cls: "t-sys", tag: "SYS", main: "result parked for next call", sub: e.text || "" };
+  if (e.type === "parked_delivered") return { cls: "t-sys", tag: "SYS", main: `parked results delivered (${e.count})` };
+  return { cls: "t-sys", tag: "SYS", main: e.type, sub: JSON.stringify(e).slice(0, 300) };
+}
+
+function render() {
+  const list = $("sessions");
+  list.innerHTML = groups.map((g, i) => {
+    const n = { u: 0, a: 0, t: 0 };
+    for (const e of g.events) {
+      if (e.type === "user_utterance") n.u++;
+      else if (e.type === "agent_utterance") n.a++;
+      else if (e.type.startsWith("agent_action")) n.t++;
+    }
+    const dur = g.end ? Math.round((new Date(g.end) - new Date(g.start)) / 1000) + "s" : "";
+    return `<div class="session ${i === selected ? "active" : ""}" onclick="select(${i})">
+      <div class="when">${esc(day(g.start))} ${esc(hhmm(g.start))} ${dur ? `<span class="pill">${dur}</span>` : ""}${g.synthetic ? '<span class="pill">partial</span>' : ""}</div>
+      <div class="meta">${esc(g.engine || "")} ${n.u} user / ${n.a} agent / ${n.t} actions</div>
+    </div>`;
+  }).reverse().join("");
+
+  const totals = { sessions: groups.length, user: 0, agent: 0 };
+  const byTool = {};
+  for (const e of events) {
+    if (e.type === "user_utterance") totals.user++;
+    else if (e.type === "agent_utterance") totals.agent++;
+    else if (e.type.startsWith("agent_action") && e.tool) byTool[e.tool] = (byTool[e.tool] || 0) + 1;
+  }
+  $("summary").hidden = false;
+  $("summary").innerHTML =
+    `<span><b>${totals.sessions}</b> sessions</span><span><b>${totals.user}</b> user turns</span>` +
+    `<span><b>${totals.agent}</b> agent turns</span>` +
+    Object.entries(byTool).map(([t, n]) => `<span>${esc(t)} <b>${n}</b></span>`).join("");
+
+  const q = $("filter").value.trim().toLowerCase();
+  const g = groups[selected];
+  if (!g) { $("timeline").innerHTML = '<div class="empty">No sessions in the loaded window.</div>'; return; }
+  $("timeline").innerHTML = g.events.map((e) => {
+    const d = describe(e);
+    const text = (d.main + " " + (d.sub || "")).toLowerCase();
+    if (q && !text.includes(q)) return "";
+    const main = d.raw ? d.main : esc(d.main);
+    const sub = d.sub
+      ? d.sub.length > 220
+        ? `<details><summary>${esc(d.sub.slice(0, 120))}...</summary><div class="sub">${esc(d.sub)}</div></details>`
+        : `<div class="sub">${esc(d.sub)}</div>`
+      : "";
+    return `<div class="ev ${d.cls}"><div class="ts">${esc(hhmm(e.ts))}</div><div class="tag">${d.tag}</div>
+      <div class="body">${main}${sub}</div></div>`;
+  }).join("") || '<div class="empty">No events match the filter.</div>';
+}
+
+function select(i) { selected = i; render(); }
+window.select = select;
+
+$("load").onclick = load;
+$("token").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+$("user").onchange = load;
+$("filter").oninput = render;
+$("auto").onchange = () => {
+  clearInterval(timer);
+  if ($("auto").checked) timer = setInterval(load, 10_000);
+};
+if ($("token").value) load();
+</script>
+</body>
+</html>
