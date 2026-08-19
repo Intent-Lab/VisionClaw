@@ -152,7 +152,15 @@ class Tracer:
                     ) as resp:
                         resp.raise_for_status()
             except Exception:
-                logger.exception("trace flush failed: user=%s dropped=%d", self.user_id, len(batch))
+                # Study data: better late than lost. Re-queue for the next pump
+                # tick (a transient timeout was observed dropping a save_note);
+                # the cap only matters if the gateway stays down a whole call.
+                self._events = batch + self._events
+                if len(self._events) > 500:
+                    self._events = self._events[-500:]
+                logger.exception(
+                    "trace flush failed, requeued: user=%s batch=%d", self.user_id, len(batch)
+                )
 
     async def pump(self) -> None:
         while True:
@@ -707,7 +715,13 @@ async def entrypoint(ctx: JobContext):
     async def _finish_trace() -> None:
         pump.cancel()
         tracer.emit("session_end")
-        await tracer.flush()
+        # Last chance before the process exits -- a failed attempt re-queues,
+        # so retry a couple of times instead of losing the tail of the call.
+        for attempt in range(3):
+            await tracer.flush()
+            if not tracer._events:
+                break
+            await asyncio.sleep(2 * (attempt + 1))
 
     ctx.add_shutdown_callback(_finish_trace)
 
