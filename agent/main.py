@@ -64,9 +64,10 @@ per answer; reuse its uuid to update it.
 
 For notes and lists, use the note tools directly -- they are instant. "Remember this" or
 "note that down" is save_note; "add milk to my shopping list" is save_note with
-tag="shopping"; "what's on my list" is recall_notes (show a list card too); "remove the
-milk" is delete_note. When the user asks to note something they are showing on camera,
-save what you SEE as text -- one item per save_note call.
+tag="shopping"; "what's on my list" is recall_notes; "remove the milk" is delete_note.
+Every note tool puts the up-to-date list card on screen by itself -- never call show_card
+for note content, just confirm briefly in speech. When the user asks to note something
+they are showing on camera, save what you SEE as text -- one item per save_note call.
 
 For anything requiring action or multi-step work -- messages, reminders, calendars,
 research, smart home -- use the execute tool. Speak a brief natural acknowledgment BEFORE
@@ -161,6 +162,7 @@ class Userdata:
     user_id: str
     frames: FrameHolder
     tracer: Tracer = field(default_factory=lambda: Tracer("unknown"))
+    room: rtc.Room | None = None
 
 
 _search_client: genai.Client | None = None
@@ -292,6 +294,58 @@ async def _drain_pending(user_id: str) -> list[str]:
         return []
 
 
+async def _publish_card(room: rtc.Room, card: dict) -> None:
+    payload = json.dumps({k: v for k, v in card.items() if v is not None})
+    if len(payload) > 16_384:
+        return
+    await room.local_participant.send_text(payload, topic="vc.ui")
+
+
+def _notes_card(tag: str | None, notes: list[dict]) -> dict:
+    """Card built in code from the actual store contents -- the model narrates,
+    it never writes this UI, so the card cannot drift from the data."""
+    title = f"{tag.title()} List" if tag else "Notes"
+    shown = notes[:8]  # gateway returns newest first
+    return {
+        "uuid": f"notes-{tag or 'all'}",
+        "version": 1,
+        "type": "list",
+        "title": title,
+        "body": (
+            "List is empty."
+            if not shown
+            else f"{len(notes)} items; showing the latest {len(shown)}." if len(notes) > len(shown) else None
+        ),
+        "items": [{"title": n["text"]} for n in shown],
+        "fallback_text": f"{title}: " + (", ".join(n["text"] for n in shown) if shown else "empty"),
+    }
+
+
+async def _push_notes_card(ctx: RunContext[Userdata], tag: str | None, notes: list[dict] | None = None) -> None:
+    """Show the current state of a list after any note action. Deterministic:
+    fires on every save/recall/delete, from a fresh read when the caller has no
+    data in hand. A stable uuid per tag updates the card in place."""
+    room = ctx.userdata.room
+    if room is None:
+        return
+    try:
+        if notes is None:
+            body = await _notes_call("GET", ctx.userdata.user_id, query=f"?tag={tag}" if tag else "")
+            notes = body.get("notes") or []
+        card = _notes_card(tag, notes)
+        await _publish_card(room, card)
+        ctx.userdata.tracer.emit(
+            "agent_action",
+            tool="show_card",
+            card_type="list",
+            title=card["title"],
+            fallback_text=card["fallback_text"],
+            auto=True,
+        )
+    except Exception:
+        logger.exception("notes card publish failed: user=%s", ctx.userdata.user_id)
+
+
 async def _notes_call(method: str, user_id: str, payload: dict | None = None, query: str = "") -> dict:
     async with aiohttp.ClientSession() as http:
         async with http.request(
@@ -320,15 +374,16 @@ async def save_note(ctx: RunContext[Userdata], text: str, tag: str | None = None
         ctx.userdata.tracer.emit("agent_action", tool="save_note", text=text, tag=tag, error=True)
         return "Saving the note failed. Offer to try again."
     ctx.userdata.tracer.emit("agent_action", tool="save_note", text=text, tag=tag)
+    await _push_notes_card(ctx, tag)
     where = f"the {tag} list" if tag else "your notes"
-    return f"Saved to {where}. Confirm briefly in your own words."
+    return f"Saved to {where}. The updated list card is already on screen; confirm briefly in your own words."
 
 
 @function_tool
 async def recall_notes(ctx: RunContext[Userdata], tag: str | None = None) -> str:
     """Read back the user's saved notes, newest first. Pass tag to read one list
-    (e.g. tag="shopping"); omit it for everything. When there are several items,
-    also show them with show_card as a list card."""
+    (e.g. tag="shopping"); omit it for everything. The list card appears on
+    screen automatically -- do not build your own card for it."""
     query = f"?tag={tag}" if tag else ""
     try:
         body = await _notes_call("GET", ctx.userdata.user_id, query=query)
@@ -341,8 +396,9 @@ async def recall_notes(ctx: RunContext[Userdata], tag: str | None = None) -> str
     if not notes:
         where = f"the {tag} list" if tag else "your notes"
         return f"There is nothing on {where} yet."
+    await _push_notes_card(ctx, tag, notes)
     lines = [f"- {n['text']}" + (f" [{n['tag']}]" if n.get("tag") and not tag else "") for n in notes]
-    return "Saved notes, newest first:\n" + "\n".join(lines)
+    return "Saved notes, newest first (already shown on screen as a card):\n" + "\n".join(lines)
 
 
 @function_tool
@@ -361,7 +417,8 @@ async def delete_note(ctx: RunContext[Userdata], match: str, tag: str | None = N
         return f"No saved note contains {match!r}. Tell the user, and offer to read the list."
     deleted = (body.get("deleted") or {}).get("text", match)
     ctx.userdata.tracer.emit("agent_action", tool="delete_note", match=match, tag=tag, deleted=deleted)
-    return f"Removed: {deleted}. Confirm briefly."
+    await _push_notes_card(ctx, tag)
+    return f"Removed: {deleted}. The updated list card is already on screen; confirm briefly."
 
 
 @function_tool
@@ -683,7 +740,7 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(
         llm=build_llm(engine),
-        userdata=Userdata(user_id=user_id, frames=frames, tracer=tracer),
+        userdata=Userdata(user_id=user_id, frames=frames, tracer=tracer, room=ctx.room),
     )
 
     # The transcript pair the study runs on: final ASR of what the user said,
