@@ -1,0 +1,55 @@
+# Second google_workspace_mcp instance serving ONLY the Gmail tools.
+#
+# Separate from visionclaw-workspace-mcp (calendar) for two reasons:
+#   1. Vault credentials are keyed by MCP URL; Gmail's token comes from a
+#      different OAuth client (testing-mode project), so it needs its own URL
+#      or it would overwrite the calendar credential.
+#   2. The Gmail OAuth client lives in a Google Cloud project held in Testing
+#      publishing status -- the only no-review path for restricted scopes.
+#      Users must be added as test users; refresh tokens expire every 7 days.
+#
+# Deploy from a clone of the upstream repo with this file copied in:
+#   git clone https://github.com/taylorwilsdon/google_workspace_mcp.git
+#   cp <visionclaw>/gateway/deploy/gmail-mcp/fly.toml google_workspace_mcp/
+#   cd google_workspace_mcp && fly launch --no-deploy --copy-config --name visionclaw-gmail-mcp
+#   fly secrets set GOOGLE_OAUTH_CLIENT_ID=<testing client> GOOGLE_OAUTH_CLIENT_SECRET=...
+#   fly deploy
+#
+# Then point the gateway at it (the trailing /mcp/ matters):
+#   GMAIL_MCP_URL=https://visionclaw-gmail-mcp.fly.dev/mcp/
+#
+# Note: the vault credential is keyed to this URL. Changing it orphans every
+# stored credential and forces users to reconnect, so put a domain you own in
+# front before onboarding anyone long-term.
+
+app = 'visionclaw-gmail-mcp'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+# --no-sync: run the venv as built instead of re-syncing at startup (see the
+# calendar instance's fly.toml for the 21s-cold-start story).
+[experimental]
+  cmd = ['uv run --no-sync main.py --transport streamable-http --tools gmail']
+
+[env]
+  MCP_ENABLE_OAUTH21 = 'true'
+  EXTERNAL_OAUTH21_PROVIDER = 'true'
+  # Memory-only credential storage: nothing to persist, safe to scale to zero.
+  WORKSPACE_MCP_STATELESS_MODE = 'true'
+  WORKSPACE_MCP_PORT = '8000'
+  WORKSPACE_EXTERNAL_URL = 'https://visionclaw-gmail-mcp.fly.dev'
+  TOOLS = 'gmail'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'

@@ -92,7 +92,7 @@ async function probeMcp(mcpUrl: string, accessToken: string): Promise<{ ok: bool
 
     const names = [...listed.text.matchAll(/"name"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
     const probeName =
-      names.find((n) => /^list_calendars$/.test(n)) ??
+      names.find((n) => /^list_(calendars|gmail_labels)$/.test(n)) ??
       names.find((n) => /^list_/.test(n)) ??
       names[0];
     if (!probeName) return { ok: false, detail: "server exposed no tools" };

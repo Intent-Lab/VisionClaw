@@ -99,6 +99,42 @@ export const APPS: Record<string, ConnectableApp> = {
     clientIdEnv: "GOOGLE_CLIENT_ID",
     clientSecretEnv: "GOOGLE_CLIENT_SECRET",
   },
+
+  /**
+   * Gmail through a second google_workspace_mcp instance (TOOLS=gmail).
+   *
+   * Deliberately a SEPARATE OAuth client in a SEPARATE Google Cloud project
+   * kept in Testing publishing status: gmail.* are restricted scopes, and the
+   * only no-review path is testing mode with named test users (max 100).
+   * The calendar client's project must stay In Production -- moving it to
+   * Testing would put the 7-day refresh-token expiry on calendar too.
+   *
+   * Testing-mode costs, by policy: every user must be added as a test user in
+   * the console first, and refresh tokens expire every 7 days, so connections
+   * die weekly and users reconnect from the app. Fine for a deployment study;
+   * a public launch needs full restricted-scope verification (CASA).
+   *
+   * Separate MCP instance because vault credentials are keyed by MCP URL --
+   * on the calendar server's URL this credential would overwrite that one.
+   */
+  gmail: {
+    id: "gmail",
+    displayName: "Gmail",
+    mcpUrlEnv: "GMAIL_MCP_URL",
+    authorizeUrl: GOOGLE_AUTHORIZE,
+    tokenUrl: GOOGLE_TOKEN,
+    scopes: [
+      "openid",
+      "https://www.googleapis.com/auth/userinfo.email",
+      // Read + send, not gmail.modify: the agent summarizes and sends mail;
+      // nothing needs label edits or deletion, so don't ask for them.
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.send",
+    ],
+    authorizeParams: GOOGLE_AUTHORIZE_PARAMS,
+    clientIdEnv: "GOOGLE_GMAIL_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_GMAIL_CLIENT_SECRET",
+  },
 };
 
 /** MCP URL for an app, or null when a self-hosted app has no URL configured. */
