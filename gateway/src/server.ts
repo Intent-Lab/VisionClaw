@@ -350,6 +350,72 @@ app.get("/tasks", async (req, res) => {
   res.json({ tasks });
 });
 
+// ---------- notes (voice-created memos and lists) ----------
+
+const MAX_NOTES = 200;
+
+app.post("/notes", async (req, res) => {
+  const userId = userFromRequest(req);
+  if (!userId) {
+    res.status(401).json({ error: { message: "invalid or missing gateway token" } });
+    return;
+  }
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) {
+    res.status(400).json({ error: { message: "text is required" } });
+    return;
+  }
+  const tag = String(req.body?.tag ?? "").trim().toLowerCase() || undefined;
+  const u = await userResources(userId);
+  u.notes ??= [];
+  const note = { id: randomUUID().slice(0, 8), ts: new Date().toISOString(), text, tag };
+  u.notes.push(note);
+  if (u.notes.length > MAX_NOTES) u.notes = u.notes.slice(-MAX_NOTES);
+  await saveStore();
+  res.status(201).json({ note });
+});
+
+app.get("/notes", async (req, res) => {
+  const userId = userFromRequest(req);
+  if (!userId) {
+    res.status(401).json({ error: { message: "invalid or missing gateway token" } });
+    return;
+  }
+  const tag = typeof req.query.tag === "string" ? req.query.tag.trim().toLowerCase() : undefined;
+  const limit = Math.min(Number(req.query.limit ?? 50) || 50, MAX_NOTES);
+  const u = await userResources(userId);
+  const notes = (u.notes ?? []).filter((n) => !tag || n.tag === tag).slice(-limit).reverse();
+  res.json({ notes });
+});
+
+// Deletes the newest note whose text contains `match` (case-insensitive) --
+// voice can say "remove milk from the shopping list" but never quote an id.
+app.delete("/notes", async (req, res) => {
+  const userId = userFromRequest(req);
+  if (!userId) {
+    res.status(401).json({ error: { message: "invalid or missing gateway token" } });
+    return;
+  }
+  const match = String(req.body?.match ?? "").trim().toLowerCase();
+  if (!match) {
+    res.status(400).json({ error: { message: "match is required" } });
+    return;
+  }
+  const tag = String(req.body?.tag ?? "").trim().toLowerCase() || undefined;
+  const u = await userResources(userId);
+  const notes = u.notes ?? [];
+  for (let i = notes.length - 1; i >= 0; i--) {
+    if (tag && notes[i].tag !== tag) continue;
+    if (notes[i].text.toLowerCase().includes(match)) {
+      const [deleted] = notes.splice(i, 1);
+      await saveStore();
+      res.json({ deleted });
+      return;
+    }
+  }
+  res.status(404).json({ error: { message: "no note matched" } });
+});
+
 // Interaction trace: what the user said, what the voice model said, what
 // actions ran. The voice worker batches events here; text only -- image-like
 // fields are stripped in appendTrace, never stored.

@@ -19,6 +19,14 @@ export interface RecentTask {
   result: string;
 }
 
+export interface Note {
+  id: string;
+  ts: string;
+  text: string;
+  /** Optional grouping, e.g. "shopping" -- lets one voice command recall a whole list. */
+  tag?: string;
+}
+
 export interface UserResources {
   memoryStoreId?: string;
   vaultId?: string;
@@ -33,6 +41,9 @@ export interface UserResources {
    * reused instead of rotated -- rotating them would re-queue briefings that
    * pile up across calls that never delegate a task. */
   sessionUsed?: boolean;
+  /** Voice-created notes and lists. Lives here, not in the agent sandbox:
+   * sessions are ephemeral, so anything the sandbox holds dies with the call. */
+  notes?: Note[];
 }
 
 export interface StoreShape {

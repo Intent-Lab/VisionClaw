@@ -23,6 +23,7 @@ import io
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -61,7 +62,13 @@ show_card with the essentials in the same turn as your spoken answer. Card first
 alongside, then speak a short summary; never read the card aloud row by row. One card
 per answer; reuse its uuid to update it.
 
-For anything requiring action or multi-step work -- messages, lists, reminders, calendars,
+For notes and lists, use the note tools directly -- they are instant. "Remember this" or
+"note that down" is save_note; "add milk to my shopping list" is save_note with
+tag="shopping"; "what's on my list" is recall_notes (show a list card too); "remove the
+milk" is delete_note. When the user asks to note something they are showing on camera,
+save what you SEE as text -- one item per save_note call.
+
+For anything requiring action or multi-step work -- messages, reminders, calendars,
 research, smart home -- use the execute tool. Speak a brief natural acknowledgment BEFORE
 calling it, never call it silently. Results may arrive as a follow-up; relay them as the
 answer to what was asked, not as a notification. If the task is about something the user
@@ -283,6 +290,78 @@ async def _drain_pending(user_id: str) -> list[str]:
     except Exception:
         logger.exception("pending drain failed: user=%s", user_id)
         return []
+
+
+async def _notes_call(method: str, user_id: str, payload: dict | None = None, query: str = "") -> dict:
+    async with aiohttp.ClientSession() as http:
+        async with http.request(
+            method,
+            f"{_gateway_url()}/notes{query}",
+            headers=_gateway_headers(user_id),
+            json=payload,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            body = await resp.json()
+            return {"status": resp.status, **(body if isinstance(body, dict) else {})}
+
+
+@function_tool
+async def save_note(ctx: RunContext[Userdata], text: str, tag: str | None = None) -> str:
+    """Save a note or add an item to a named list, instantly. Use it when the user
+    says "remember this", "note that down", or "add X to my <name> list". One item
+    per call. tag groups items into a list (e.g. tag="shopping" for a shopping
+    list); omit it for a standalone note."""
+    try:
+        body = await _notes_call("POST", ctx.userdata.user_id, {"text": text, "tag": tag})
+        if body.get("status") != 201:
+            raise RuntimeError(f"gateway returned {body.get('status')}")
+    except Exception:
+        logger.exception("save_note failed: user=%s", ctx.userdata.user_id)
+        ctx.userdata.tracer.emit("agent_action", tool="save_note", text=text, tag=tag, error=True)
+        return "Saving the note failed. Offer to try again."
+    ctx.userdata.tracer.emit("agent_action", tool="save_note", text=text, tag=tag)
+    where = f"the {tag} list" if tag else "your notes"
+    return f"Saved to {where}. Confirm briefly in your own words."
+
+
+@function_tool
+async def recall_notes(ctx: RunContext[Userdata], tag: str | None = None) -> str:
+    """Read back the user's saved notes, newest first. Pass tag to read one list
+    (e.g. tag="shopping"); omit it for everything. When there are several items,
+    also show them with show_card as a list card."""
+    query = f"?tag={tag}" if tag else ""
+    try:
+        body = await _notes_call("GET", ctx.userdata.user_id, query=query)
+    except Exception:
+        logger.exception("recall_notes failed: user=%s", ctx.userdata.user_id)
+        ctx.userdata.tracer.emit("agent_action", tool="recall_notes", tag=tag, error=True)
+        return "Reading the notes failed. Offer to try again."
+    notes = body.get("notes") or []
+    ctx.userdata.tracer.emit("agent_action", tool="recall_notes", tag=tag, count=len(notes))
+    if not notes:
+        where = f"the {tag} list" if tag else "your notes"
+        return f"There is nothing on {where} yet."
+    lines = [f"- {n['text']}" + (f" [{n['tag']}]" if n.get("tag") and not tag else "") for n in notes]
+    return "Saved notes, newest first:\n" + "\n".join(lines)
+
+
+@function_tool
+async def delete_note(ctx: RunContext[Userdata], match: str, tag: str | None = None) -> str:
+    """Remove a saved note or list item: the newest one whose text contains
+    `match`. Use when the user says "remove X from the list" or "delete that
+    note". Pass tag when they name the list."""
+    try:
+        body = await _notes_call("DELETE", ctx.userdata.user_id, {"match": match, "tag": tag})
+    except Exception:
+        logger.exception("delete_note failed: user=%s", ctx.userdata.user_id)
+        ctx.userdata.tracer.emit("agent_action", tool="delete_note", match=match, tag=tag, error=True)
+        return "Deleting the note failed. Offer to try again."
+    if body.get("status") == 404:
+        ctx.userdata.tracer.emit("agent_action", tool="delete_note", match=match, tag=tag, found=False)
+        return f"No saved note contains {match!r}. Tell the user, and offer to read the list."
+    deleted = (body.get("deleted") or {}).get("text", match)
+    ctx.userdata.tracer.emit("agent_action", tool="delete_note", match=match, tag=tag, deleted=deleted)
+    return f"Removed: {deleted}. Confirm briefly."
 
 
 @function_tool
@@ -615,6 +694,9 @@ async def entrypoint(ctx: JobContext):
         item = ev.item
         role = getattr(item, "role", None)
         text = (getattr(item, "text_content", None) or "").strip()
+        # Gemini leaks internal control tokens (e.g. "<ctrl46>") into output
+        # transcription around tool calls; an "utterance" made of them is noise.
+        text = re.sub(r"<ctrl\d+>", "", text).strip()
         if not text or role not in ("user", "assistant"):
             return
         tracer.emit(
@@ -624,7 +706,10 @@ async def entrypoint(ctx: JobContext):
         )
 
     await session.start(
-        agent=Agent(instructions=INSTRUCTIONS, tools=[execute, quick_search, show_card]),
+        agent=Agent(
+            instructions=INSTRUCTIONS,
+            tools=[execute, quick_search, show_card, save_note, recall_notes, delete_note],
+        ),
         room=ctx.room,
         # Video is opt-in (RoomInputOptions.video_enabled defaults to False);
         # without this the model gets no frames and hallucinates a scene when
