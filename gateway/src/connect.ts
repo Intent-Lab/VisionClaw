@@ -1,7 +1,16 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { anthropic } from "./cma.js";
-import { activeApps, appCredentials, getApp, type ConnectableApp } from "./apps.js";
+import {
+  activeApps,
+  appAvailable,
+  appCredentials,
+  getApp,
+  type ConnectableApp,
+  type McpOAuth21App,
+  type StaticOAuthApp,
+} from "./apps.js";
+import { loadStore, saveStore, type McpClientRegistration } from "./store.js";
 import { ensureUser } from "./provision.js";
 import { notifyUser } from "./notify.js";
 import { appHealth, invalidateAppHealth } from "./health.js";
@@ -102,6 +111,25 @@ export async function exchangeAuthCode(
   return (await tokenRes.json()) as OAuthTokens;
 }
 
+/** How Anthropic should refresh a stored grant: the token endpoint plus the
+ * client authentication the provider registered us with. */
+export interface RefreshConfig {
+  clientId: string;
+  tokenEndpoint: string;
+  auth: { type: "none" } | { type: "client_secret_post" | "client_secret_basic"; client_secret: string };
+  /** RFC 8707 resource indicator, required by MCP servers on refresh too. */
+  resource?: string;
+  scope?: string;
+}
+
+export interface CredentialTarget {
+  id: string;
+  displayName: string;
+  mcpUrl: string;
+  /** Scopes the grant was expected to carry; missing ones are logged. */
+  scopes?: string[];
+}
+
 /**
  * Put an OAuth grant into the user's vault as the credential for one MCP
  * server (replacing any existing one for that URL), so Anthropic refreshes it
@@ -110,15 +138,15 @@ export async function exchangeAuthCode(
  */
 export async function storeMcpCredential(
   userId: string,
-  appDef: ConnectableApp & { mcpUrl: string },
+  target: CredentialTarget,
   tokens: OAuthTokens,
-  creds: { clientId: string; clientSecret: string },
+  refresh: RefreshConfig,
 ): Promise<{ vaultId: string }> {
   const granted = (tokens.scope ?? "").split(" ").filter(Boolean);
-  const missing = appDef.scopes.filter((s) => !granted.includes(s));
-  console.log(`[connect] ${appDef.id} granted scopes:`, granted.join(" ") || "(none reported)");
+  const missing = (target.scopes ?? []).filter((s) => !granted.includes(s));
+  console.log(`[connect] ${target.id} granted scopes:`, granted.join(" ") || "(none reported)");
   if (missing.length > 0) {
-    console.warn(`[connect] ${appDef.id} MISSING scopes:`, missing.join(" "));
+    console.warn(`[connect] ${target.id} MISSING scopes:`, missing.join(" "));
   }
 
   const { vaultId } = await ensureUser(userId);
@@ -126,16 +154,16 @@ export async function storeMcpCredential(
   // One credential per MCP server URL: replace any existing one.
   for await (const cred of anthropic.beta.vaults.credentials.list(vaultId)) {
     const url = (cred as { auth?: { mcp_server_url?: string } }).auth?.mcp_server_url;
-    if (url === appDef.mcpUrl) {
+    if (url === target.mcpUrl) {
       await anthropic.beta.vaults.credentials.delete(cred.id, { vault_id: vaultId });
     }
   }
 
   await anthropic.beta.vaults.credentials.create(vaultId, {
-    display_name: `${appDef.displayName} (${userId})`,
+    display_name: `${target.displayName} (${userId})`,
     auth: {
       type: "mcp_oauth",
-      mcp_server_url: appDef.mcpUrl,
+      mcp_server_url: target.mcpUrl,
       access_token: tokens.access_token,
       expires_at: tokens.expires_in
         ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
@@ -144,12 +172,11 @@ export async function storeMcpCredential(
       refresh: tokens.refresh_token
         ? {
             refresh_token: tokens.refresh_token,
-            client_id: creds.clientId,
-            token_endpoint: appDef.tokenUrl,
-            token_endpoint_auth: {
-              type: "client_secret_post",
-              client_secret: creds.clientSecret,
-            },
+            client_id: refresh.clientId,
+            token_endpoint: refresh.tokenEndpoint,
+            token_endpoint_auth: refresh.auth,
+            resource: refresh.resource,
+            scope: refresh.scope,
           }
         : undefined,
     },
@@ -157,12 +184,204 @@ export async function storeMcpCredential(
 
   if (!tokens.refresh_token) {
     console.warn(
-      `[connect] ${appDef.id} returned no refresh_token for ${userId};` +
+      `[connect] ${target.id} returned no refresh_token for ${userId};` +
         " access will expire. Check access_type=offline and prompt=consent.",
     );
   }
-  invalidateAppHealth(userId, appDef.id);
+  invalidateAppHealth(userId, target.id);
   return { vaultId };
+}
+
+/** Refresh config for a statically registered (Google-style) client. */
+export function staticRefresh(
+  appDef: StaticOAuthApp,
+  creds: { clientId: string; clientSecret: string },
+): RefreshConfig {
+  return {
+    clientId: creds.clientId,
+    tokenEndpoint: appDef.tokenUrl,
+    auth: { type: "client_secret_post", client_secret: creds.clientSecret },
+  };
+}
+
+// ---------- OAuth 2.1 remote MCP servers (discovery + dynamic registration + PKCE) ----------
+
+interface AuthServerMetadata {
+  authorization_endpoint: string;
+  token_endpoint: string;
+  registration_endpoint?: string;
+  code_challenge_methods_supported?: string[];
+  scopes_supported?: string[];
+  token_endpoint_auth_methods_supported?: string[];
+}
+
+// Notion fronts its MCP with Cloudflare, which bans some non-browser
+// User-Agents (Python's default 403s); an explicit identity is safest.
+const GATEWAY_UA = "VisionClaw-gateway/1.0 (+https://api.visionagents.app)";
+const META_TTL_MS = 60 * 60 * 1000;
+const metadataCache = new Map<string, { at: number; meta: AuthServerMetadata }>();
+
+async function fetchJson<T>(url: string): Promise<T | null> {
+  try {
+    const r = await fetch(url, { headers: { Accept: "application/json", "User-Agent": GATEWAY_UA } });
+    if (!r.ok) return null;
+    return (await r.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** Well-known URL for a path-bearing resource/issuer (RFC 9728 / RFC 8414 insertion rule). */
+function wellKnown(base: string, suffix: string): string {
+  const u = new URL(base);
+  const path = u.pathname.replace(/\/$/, "");
+  return `${u.origin}/.well-known/${suffix}${path}`;
+}
+
+/**
+ * MCP authorization discovery: the protected resource names its authorization
+ * server, whose metadata names the endpoints. Servers that skip the first
+ * document are handled by asking the MCP origin directly.
+ */
+async function discoverAuthServer(app: McpOAuth21App): Promise<AuthServerMetadata> {
+  const hit = metadataCache.get(app.id);
+  if (hit && Date.now() - hit.at < META_TTL_MS) return hit.meta;
+
+  const origin = new URL(app.mcpUrl).origin;
+  const prm =
+    (await fetchJson<{ authorization_servers?: string[] }>(wellKnown(app.mcpUrl, "oauth-protected-resource"))) ??
+    (await fetchJson<{ authorization_servers?: string[] }>(`${origin}/.well-known/oauth-protected-resource`));
+  const authServer = prm?.authorization_servers?.[0] ?? origin;
+
+  const meta =
+    (await fetchJson<AuthServerMetadata>(wellKnown(authServer, "oauth-authorization-server"))) ??
+    (await fetchJson<AuthServerMetadata>(`${origin}/.well-known/oauth-authorization-server`));
+  if (!meta?.authorization_endpoint || !meta.token_endpoint) {
+    throw new Error(`${app.id}: no OAuth authorization server metadata at ${authServer}`);
+  }
+  metadataCache.set(app.id, { at: Date.now(), meta });
+  console.log(`[connect] ${app.id} auth server: ${authServer}`);
+  return meta;
+}
+
+/**
+ * Register this gateway as an OAuth client with the server, once. A public
+ * client (PKCE, no secret) is preferred; servers that insist on a secret get
+ * a confidential registration instead. Stored in the shared store so every
+ * user's consent reuses the same client id.
+ */
+async function ensureMcpClient(
+  app: McpOAuth21App,
+  meta: AuthServerMetadata,
+  redirectUri: string,
+): Promise<McpClientRegistration> {
+  const store = await loadStore();
+  store.shared.mcpClients ??= {};
+  const existing = store.shared.mcpClients[app.id];
+  if (existing && existing.redirectUri === redirectUri) return existing;
+  if (!meta.registration_endpoint) {
+    throw new Error(`${app.id}: server does not support dynamic client registration`);
+  }
+
+  const register = async (method: "none" | "client_secret_post") => {
+    const r = await fetch(meta.registration_endpoint!, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "User-Agent": GATEWAY_UA },
+      body: JSON.stringify({
+        client_name: app.clientName,
+        redirect_uris: [redirectUri],
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        token_endpoint_auth_method: method,
+      }),
+    });
+    const text = await r.text();
+    if (!r.ok) {
+      console.warn(`[connect] ${app.id} registration (${method}) rejected:`, r.status, text.slice(0, 300));
+      return null;
+    }
+    return JSON.parse(text) as {
+      client_id: string;
+      client_secret?: string;
+      token_endpoint_auth_method?: string;
+    };
+  };
+
+  const reg = (await register("none")) ?? (await register("client_secret_post"));
+  if (!reg?.client_id) throw new Error(`${app.id}: dynamic client registration failed`);
+  const method = (reg.token_endpoint_auth_method ?? (reg.client_secret ? "client_secret_post" : "none")) as
+    McpClientRegistration["tokenEndpointAuthMethod"];
+  const registration: McpClientRegistration = {
+    clientId: reg.client_id,
+    clientSecret: reg.client_secret,
+    tokenEndpointAuthMethod: method,
+    registeredAt: new Date().toISOString(),
+    redirectUri,
+  };
+  store.shared.mcpClients[app.id] = registration;
+  await saveStore();
+  console.log(`[connect] ${app.id} registered OAuth client (${method})`);
+  return registration;
+}
+
+function refreshFor(reg: McpClientRegistration, meta: AuthServerMetadata, app: McpOAuth21App): RefreshConfig {
+  return {
+    clientId: reg.clientId,
+    tokenEndpoint: meta.token_endpoint,
+    auth:
+      reg.tokenEndpointAuthMethod === "none" || !reg.clientSecret
+        ? { type: "none" }
+        : { type: reg.tokenEndpointAuthMethod, client_secret: reg.clientSecret },
+    resource: app.mcpUrl,
+    scope: app.scopes?.join(" "),
+  };
+}
+
+// PKCE verifiers live only until the callback; keyed by the signed state.
+const PKCE_TTL_MS = STATE_TTL_MS;
+const pkce = new Map<string, { verifier: string; at: number }>();
+
+function sweepPkce(): void {
+  const now = Date.now();
+  for (const [k, v] of pkce) if (now - v.at > PKCE_TTL_MS) pkce.delete(k);
+}
+
+function pkcePair(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  return { verifier, challenge };
+}
+
+/** Authorization-code exchange for a dynamically registered client (PKCE + resource indicator). */
+async function exchangeMcpAuthCode(
+  meta: AuthServerMetadata,
+  reg: McpClientRegistration,
+  app: McpOAuth21App,
+  args: { code: string; verifier: string; redirectUri: string },
+): Promise<OAuthTokens | null> {
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: args.code,
+    redirect_uri: args.redirectUri,
+    client_id: reg.clientId,
+    code_verifier: args.verifier,
+    resource: app.mcpUrl,
+  });
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent": GATEWAY_UA,
+  };
+  if (reg.clientSecret && reg.tokenEndpointAuthMethod === "client_secret_post") {
+    body.set("client_secret", reg.clientSecret);
+  } else if (reg.clientSecret && reg.tokenEndpointAuthMethod === "client_secret_basic") {
+    headers.Authorization = `Basic ${Buffer.from(`${reg.clientId}:${reg.clientSecret}`).toString("base64")}`;
+  }
+  const r = await fetch(meta.token_endpoint, { method: "POST", headers, body });
+  if (!r.ok) {
+    console.error(`[connect] ${app.id} token exchange failed:`, r.status, await r.text());
+    return null;
+  }
+  return (await r.json()) as OAuthTokens;
 }
 
 /**
@@ -170,7 +389,11 @@ export async function storeMcpCredential(
  * `tools/list` can succeed on servers that then refuse every data call, so the
  * only meaningful health check is an actual `tools/call`.
  */
-async function probeMcp(mcpUrl: string, accessToken: string): Promise<{ ok: boolean; detail: string }> {
+async function probeMcp(
+  mcpUrl: string,
+  accessToken: string,
+  opts: { callTool: boolean } = { callTool: true },
+): Promise<{ ok: boolean; detail: string }> {
   const rpc = async (body: object) => {
     const r = await fetch(mcpUrl, {
       method: "POST",
@@ -194,6 +417,9 @@ async function probeMcp(mcpUrl: string, accessToken: string): Promise<{ ok: bool
       names.find((n) => /^list_/.test(n)) ??
       names[0];
     if (!probeName) return { ok: false, detail: "server exposed no tools" };
+    // Generic servers have no known zero-argument tool to call safely; a
+    // successful authenticated tools/list is the best available evidence.
+    if (!opts.callTool) return { ok: true, detail: `${names.length} tools listed` };
 
     const called = await rpc({
       jsonrpc: "2.0",
@@ -241,7 +467,7 @@ export function registerConnectRoutes(
             id: a.id,
             displayName: a.displayName,
             connected: credentialId !== undefined,
-            available: appCredentials(a) !== null,
+            available: appAvailable(a),
             healthy: health ? health.healthy : null,
             needs_reconnect: health ? health.needsReconnect : false,
             detail: health?.detail,
@@ -269,6 +495,36 @@ export function registerConnectRoutes(
       res.status(404).send(page("Unknown app", "That integration does not exist."));
       return;
     }
+    const scheme = String(req.query.scheme ?? "") || undefined;
+
+    if (appDef.kind === "mcp-oauth21") {
+      void (async () => {
+        try {
+          const meta = await discoverAuthServer(appDef);
+          const reg = await ensureMcpClient(appDef, meta, redirectUri(req, appDef.id));
+          const { verifier, challenge } = pkcePair();
+          const state = signState(userId, appDef.id, scheme);
+          sweepPkce();
+          pkce.set(state, { verifier, at: Date.now() });
+          const params = new URLSearchParams({
+            client_id: reg.clientId,
+            redirect_uri: redirectUri(req, appDef.id),
+            response_type: "code",
+            code_challenge: challenge,
+            code_challenge_method: "S256",
+            state,
+            resource: appDef.mcpUrl,
+          });
+          if (appDef.scopes?.length) params.set("scope", appDef.scopes.join(" "));
+          res.redirect(`${meta.authorization_endpoint}?${params.toString()}`);
+        } catch (err) {
+          console.error(`[connect] ${appDef.id} could not start:`, err);
+          res.status(502).send(page("Could not connect", `${appDef.displayName} is not reachable right now. Please try again.`));
+        }
+      })();
+      return;
+    }
+
     const creds = appCredentials(appDef);
     if (!creds) {
       res.status(503).send(page("Not configured", `${appDef.displayName} is not set up on this gateway yet.`));
@@ -280,7 +536,7 @@ export function registerConnectRoutes(
       redirect_uri: redirectUri(req, appDef.id),
       response_type: "code",
       scope: appDef.scopes.join(" "),
-      state: signState(userId, appDef.id, String(req.query.scheme ?? "") || undefined),
+      state: signState(userId, appDef.id, scheme),
       ...(appDef.authorizeParams ?? {}),
     });
     res.redirect(`${appDef.authorizeUrl}?${params.toString()}`);
@@ -305,19 +561,38 @@ export function registerConnectRoutes(
       return;
     }
 
-    const creds = appCredentials(appDef);
-    if (!creds) {
-      res.status(503).send(page("Not configured", `${appDef.displayName} is not set up on this gateway yet.`));
-      return;
-    }
-
     try {
-      const tokens = await exchangeAuthCode(appDef.tokenUrl, {
-        code,
-        clientId: creds.clientId,
-        clientSecret: creds.clientSecret,
-        redirectUri: redirectUri(req, appDef.id),
-      });
+      let tokens: OAuthTokens | null;
+      let refresh: RefreshConfig;
+      if (appDef.kind === "mcp-oauth21") {
+        const meta = await discoverAuthServer(appDef);
+        const reg = await ensureMcpClient(appDef, meta, redirectUri(req, appDef.id));
+        const entry = pkce.get(String(req.query.state));
+        pkce.delete(String(req.query.state));
+        if (!entry) {
+          res.status(400).send(page("Could not connect", "The sign-in link expired. Please try again from the app."));
+          return;
+        }
+        tokens = await exchangeMcpAuthCode(meta, reg, appDef, {
+          code,
+          verifier: entry.verifier,
+          redirectUri: redirectUri(req, appDef.id),
+        });
+        refresh = refreshFor(reg, meta, appDef);
+      } else {
+        const creds = appCredentials(appDef);
+        if (!creds) {
+          res.status(503).send(page("Not configured", `${appDef.displayName} is not set up on this gateway yet.`));
+          return;
+        }
+        tokens = await exchangeAuthCode(appDef.tokenUrl, {
+          code,
+          clientId: creds.clientId,
+          clientSecret: creds.clientSecret,
+          redirectUri: redirectUri(req, appDef.id),
+        });
+        refresh = staticRefresh(appDef, creds);
+      }
       if (!tokens) {
         res.status(502).send(page("Could not connect", "The provider rejected the sign-in. Please try again."));
         return;
@@ -326,7 +601,7 @@ export function registerConnectRoutes(
       // DIAG=1: probe the provider directly with the fresh token, so an opaque
       // "permission denied" from the agent can be attributed to the token, the
       // REST API, or the MCP endpoint specifically.
-      if (process.env.DIAG === "1") {
+      if (process.env.DIAG === "1" && appDef.kind === "oauth2-static") {
         try {
           const rest = await fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
             headers: { Authorization: `Bearer ${tokens.access_token}` },
@@ -367,11 +642,13 @@ export function registerConnectRoutes(
         }
       }
 
-      await storeMcpCredential(verified.userId, appDef, tokens, creds);
+      await storeMcpCredential(verified.userId, appDef, tokens, refresh);
 
       // Verify the connection actually works before claiming it does: a valid
       // OAuth grant does not guarantee the MCP server will serve this account.
-      const health = await probeMcp(appDef.mcpUrl, tokens.access_token);
+      const health = await probeMcp(appDef.mcpUrl, tokens.access_token, {
+        callTool: appDef.kind === "oauth2-static",
+      });
       if (health.ok) {
         console.log(`[connect] ${appDef.displayName} connected and working for ${verified.userId}`);
         notifyUser(verified.userId, `${appDef.displayName} is connected.`);

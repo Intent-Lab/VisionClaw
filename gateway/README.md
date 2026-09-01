@@ -125,6 +125,24 @@ backed by EventKit, which need no OAuth at all. Those cover interactive asks;
 the connected app is what lets background and scheduled tasks reach the
 calendar when the phone is asleep.
 
+### Notion
+
+Notion connects through Notion's hosted MCP server (`https://mcp.notion.com/mcp`),
+which speaks the MCP authorization spec (OAuth 2.1). There is nothing to set up in
+any console: the gateway discovers the server's OAuth endpoints from its metadata,
+registers itself as a client once (dynamic client registration, persisted in the
+store under `shared.mcpClients.notion`), and runs a PKCE authorization for each
+user. `NOTION_DISABLED=true` hides the app.
+
+What the user sees: Notion's consent screen, where they choose which pages or the
+whole workspace the agent may access. Token lifetimes are Notion's: access tokens
+about eight hours, refresh tokens 180 days (or 30 days idle), rotated on every
+refresh; Anthropic refreshes them from the stored vault credential.
+
+The same `mcp-oauth21` app kind works for any remote MCP server that implements
+the authorization spec: add an entry in `apps.ts` with its `mcpUrl` and a
+`clientName`, and the discovery, registration, and consent flow are shared.
+
 ## Google sign-in and accounts
 
 Besides static `GATEWAY_TOKENS`, people can register themselves with a Google

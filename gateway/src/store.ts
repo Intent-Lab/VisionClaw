@@ -11,6 +11,17 @@ export interface SharedResources {
   environmentId?: string;
   agentId?: string;
   agentVersion?: number;
+  /** Dynamic OAuth client registrations with remote MCP servers, by app id.
+   * Registered once per gateway; re-registered if our callback URL changes. */
+  mcpClients?: Record<string, McpClientRegistration>;
+}
+
+export interface McpClientRegistration {
+  clientId: string;
+  clientSecret?: string;
+  tokenEndpointAuthMethod: "none" | "client_secret_post" | "client_secret_basic";
+  registeredAt: string;
+  redirectUri: string;
 }
 
 export interface RecentTask {

@@ -9,13 +9,25 @@
  * Inactive entries are invisible to the agent config, `/apps`, and `/connect`.
  */
 
-export interface ConnectableApp {
+interface AppBase {
   id: string;
   displayName: string;
   /** Fixed MCP server URL. Use `mcpUrlEnv` instead for self-hosted deployments. */
   mcpUrl?: string;
   /** Env var holding the MCP server URL; the app stays hidden until it is set. */
   mcpUrlEnv?: string;
+  /** Env var that hides the app when set to "true" (kill switch without a deploy). */
+  disabledEnv?: string;
+  /** Kept for reference but never offered; see the note on each entry. */
+  disabled?: boolean;
+}
+
+/**
+ * Classic OAuth 2.0 against a provider we pre-registered with (Google): fixed
+ * authorize/token endpoints, scopes, and a client id/secret from the env.
+ */
+export interface StaticOAuthApp extends AppBase {
+  kind: "oauth2-static";
   authorizeUrl: string;
   tokenUrl: string;
   scopes: string[];
@@ -23,9 +35,24 @@ export interface ConnectableApp {
   authorizeParams?: Record<string, string>;
   clientIdEnv: string;
   clientSecretEnv: string;
-  /** Kept for reference but never offered; see the note on each entry. */
-  disabled?: boolean;
 }
+
+/**
+ * A remote MCP server that implements the MCP authorization spec (OAuth 2.1):
+ * endpoints come from the server's own metadata, the client id from dynamic
+ * registration (done once, persisted in the store), PKCE is mandatory. No
+ * console setup, no env -- one entry here is the whole integration.
+ */
+export interface McpOAuth21App extends AppBase {
+  kind: "mcp-oauth21";
+  mcpUrl: string;
+  /** Shown to the user on the provider's consent screen. */
+  clientName: string;
+  /** Sent only if the server advertises scopes; most remote MCPs use one default scope. */
+  scopes?: string[];
+}
+
+export type ConnectableApp = StaticOAuthApp | McpOAuth21App;
 
 const GOOGLE_AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
@@ -50,6 +77,7 @@ export const APPS: Record<string, ConnectableApp> = {
    * out for consumer users. Re-enable if that changes.
    */
   gcal: {
+    kind: "oauth2-static",
     id: "gcal",
     displayName: "Google Calendar (Google-hosted)",
     mcpUrl: "https://calendarmcp.googleapis.com/mcp/v1",
@@ -79,6 +107,7 @@ export const APPS: Record<string, ConnectableApp> = {
    * then set WORKSPACE_MCP_URL to its public https URL, ending in /mcp/.
    */
   gcalSelfHosted: {
+    kind: "oauth2-static",
     id: "gcal-self",
     displayName: "Google Calendar",
     mcpUrlEnv: "WORKSPACE_MCP_URL",
@@ -118,6 +147,7 @@ export const APPS: Record<string, ConnectableApp> = {
    * on the calendar server's URL this credential would overwrite that one.
    */
   gmail: {
+    kind: "oauth2-static",
     id: "gmail",
     displayName: "Gmail",
     mcpUrlEnv: "GMAIL_MCP_URL",
@@ -135,6 +165,20 @@ export const APPS: Record<string, ConnectableApp> = {
     clientIdEnv: "GOOGLE_GMAIL_CLIENT_ID",
     clientSecretEnv: "GOOGLE_GMAIL_CLIENT_SECRET",
   },
+  /**
+   * Notion's hosted MCP server. OAuth 2.1 only (it refuses plain integration
+   * tokens); endpoints and client id are discovered/registered at first use.
+   * The consent screen lets each user pick which pages the agent may see.
+   * Access tokens last ~8h, refresh tokens 180 days (rotated on every refresh).
+   */
+  notion: {
+    kind: "mcp-oauth21",
+    id: "notion",
+    displayName: "Notion",
+    mcpUrl: "https://mcp.notion.com/mcp",
+    clientName: "VisionClaw",
+    disabledEnv: "NOTION_DISABLED",
+  },
 };
 
 /** MCP URL for an app, or null when a self-hosted app has no URL configured. */
@@ -148,6 +192,7 @@ export function mcpUrlFor(app: ConnectableApp): string | null {
 export function activeApps(): Array<ConnectableApp & { mcpUrl: string }> {
   return Object.values(APPS).flatMap((app) => {
     if (app.disabled) return [];
+    if (app.disabledEnv && process.env[app.disabledEnv] === "true") return [];
     const url = mcpUrlFor(app);
     return url ? [{ ...app, mcpUrl: url }] : [];
   });
@@ -157,9 +202,20 @@ export function getApp(id: string): (ConnectableApp & { mcpUrl: string }) | unde
   return activeApps().find((a) => a.id === id);
 }
 
-export function appCredentials(app: ConnectableApp): { clientId: string; clientSecret: string } | null {
+export function getStaticApp(id: string): (StaticOAuthApp & { mcpUrl: string }) | undefined {
+  const app = getApp(id);
+  return app?.kind === "oauth2-static" ? app : undefined;
+}
+
+export function appCredentials(app: StaticOAuthApp): { clientId: string; clientSecret: string } | null {
   const clientId = process.env[app.clientIdEnv];
   const clientSecret = process.env[app.clientSecretEnv];
   if (!clientId || !clientSecret) return null;
   return { clientId, clientSecret };
+}
+
+/** Whether the app can be connected right now: static apps need their env
+ * client; self-registering ones need nothing beyond their entry. */
+export function appAvailable(app: ConnectableApp): boolean {
+  return app.kind === "mcp-oauth21" ? true : appCredentials(app) !== null;
 }

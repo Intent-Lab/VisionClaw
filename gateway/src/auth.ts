@@ -3,8 +3,8 @@ import type { Express, Request, Response } from "express";
 import { config } from "./config.js";
 import { accounts, loadStore, saveStore, type Account, type AccountStatus } from "./store.js";
 import { ensureUser } from "./provision.js";
-import { appCredentials, getApp } from "./apps.js";
-import { baseUrl, exchangeAuthCode, page, storeMcpCredential } from "./connect.js";
+import { appCredentials, getStaticApp } from "./apps.js";
+import { baseUrl, exchangeAuthCode, page, staticRefresh, storeMcpCredential } from "./connect.js";
 
 /**
  * Google sign-in with self-registration.
@@ -179,7 +179,7 @@ export function registerAuthRoutes(app: Express): void {
       res.status(400).send(page("Bad request", "Open this from the VisionClaw app."));
       return;
     }
-    const appDef = getApp(SIGN_IN_APP_ID);
+    const appDef = getStaticApp(SIGN_IN_APP_ID);
     const creds = appDef ? appCredentials(appDef) : null;
     if (!appDef || !creds) {
       res.status(503).send(page("Not configured", "Google sign-in is not set up on this gateway yet."));
@@ -211,7 +211,7 @@ export function registerAuthRoutes(app: Express): void {
       res.status(400).send(page("Could not sign in", "The sign-in link expired. Please try again from the app."));
       return;
     }
-    const appDef = getApp(SIGN_IN_APP_ID);
+    const appDef = getStaticApp(SIGN_IN_APP_ID);
     const creds = appDef ? appCredentials(appDef) : null;
     if (!appDef || !creds) {
       res.status(503).send(page("Not configured", "Google sign-in is not set up on this gateway yet."));
@@ -282,7 +282,7 @@ export function registerAuthRoutes(app: Express): void {
       if (acct.status !== "revoked") {
         try {
           await ensureUser(userId);
-          await storeMcpCredential(userId, appDef, tokens, creds);
+          await storeMcpCredential(userId, appDef, tokens, staticRefresh(appDef, creds));
         } catch (err) {
           console.error(`[auth] provisioning/calendar failed for ${userId}:`, err);
         }
