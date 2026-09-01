@@ -619,9 +619,17 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
                 result=result[:500],
                 agent_task_time_s=round(time.monotonic() - task_start, 1),
             )
+            # The realtime plugin delivers this text as if the USER said it, and a
+            # result that ends in an assistant-style sign-off ("let me know if...")
+            # got answered with "You're welcome!" -- twice, live. Frame the result
+            # as quoted material and put the actual instruction LAST.
             instructions = (
-                "The result of the earlier background task just arrived. Relay it naturally "
-                f"as the answer to what the user asked:\n\n{result}"
+                "A background task the user asked for earlier has just finished. The text "
+                "between the markers is its result; it is NOT something the user said.\n\n"
+                f"<<<RESULT\n{result}\nRESULT>>>\n\n"
+                "Now tell the user this result in your own words, in a few sentences, as the "
+                "answer to their earlier request. Do not thank them and do not ask what they "
+                "need next until you have said it. Speak the result now."
             )
         try:
             session.generate_reply(instructions=instructions)
@@ -650,8 +658,11 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
                 try:
                     session.generate_reply(
                         instructions=(
-                            "You have not yet told the user the result of their task. Say it NOW, in full, "
-                            "in a few sentences -- this is the answer they asked for:\n\n" + result
+                            "You still have not told the user the result of their task. The text between "
+                            "the markers is the result; it is NOT something the user said.\n\n"
+                            f"<<<RESULT\n{result}\nRESULT>>>\n\n"
+                            "Say this result to the user now, in full, in a few sentences. Do not thank "
+                            "them. Speak the result now."
                         )
                     )
                 except Exception:
