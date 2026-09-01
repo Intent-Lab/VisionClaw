@@ -4,6 +4,7 @@ import { anthropic } from "./cma.js";
 import { activeApps, appCredentials, getApp } from "./apps.js";
 import { ensureUser } from "./provision.js";
 import { notifyUser } from "./notify.js";
+import { appHealth, invalidateAppHealth } from "./health.js";
 
 /**
  * One-tap app connection: /connect/:app redirects to the provider, the callback
@@ -128,19 +129,29 @@ export function registerConnectRoutes(
     }
     try {
       const { vaultId } = await ensureUser(userId);
-      const connected = new Set<string>();
+      const credentialByUrl = new Map<string, string>();
       for await (const cred of anthropic.beta.vaults.credentials.list(vaultId)) {
         const url = (cred as { auth?: { mcp_server_url?: string } }).auth?.mcp_server_url;
-        if (url) connected.add(url);
+        if (url) credentialByUrl.set(url, cred.id);
       }
-      res.json({
-        apps: activeApps().map((a) => ({
-          id: a.id,
-          displayName: a.displayName,
-          connected: connected.has(a.mcpUrl),
-          available: appCredentials(a) !== null,
-        })),
-      });
+      // "Connected" and "working" are different things: a stored credential
+      // whose refresh token has expired looks connected and fails every call.
+      const apps = await Promise.all(
+        activeApps().map(async (a) => {
+          const credentialId = credentialByUrl.get(a.mcpUrl);
+          const health = credentialId ? await appHealth(userId, a.id, vaultId, credentialId) : null;
+          return {
+            id: a.id,
+            displayName: a.displayName,
+            connected: credentialId !== undefined,
+            available: appCredentials(a) !== null,
+            healthy: health ? health.healthy : null,
+            needs_reconnect: health ? health.needsReconnect : false,
+            detail: health?.detail,
+          };
+        }),
+      );
+      res.json({ apps });
     } catch (err) {
       console.error("[apps] listing failed:", err);
       res.status(502).json({ error: { message: "could not list apps" } });
@@ -325,6 +336,7 @@ export function registerConnectRoutes(
 
       // Verify the connection actually works before claiming it does: a valid
       // OAuth grant does not guarantee the MCP server will serve this account.
+      invalidateAppHealth(verified.userId, appDef.id);
       const health = await probeMcp(appDef.mcpUrl, tokens.access_token);
       if (health.ok) {
         console.log(`[connect] ${appDef.displayName} connected and working for ${verified.userId}`);

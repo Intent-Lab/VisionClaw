@@ -292,6 +292,28 @@ async def _park_result(user_id: str, task: str, result: str) -> None:
         logger.exception("failed to park result: user=%s", user_id)
 
 
+async def _apps_needing_reconnect(user_id: str) -> list[str]:
+    """Connected apps whose stored credential no longer works (Gmail's
+    testing-mode refresh tokens expire every 7 days by policy). Only the user
+    can fix it, from Settings, so this exists to say so once per call."""
+    try:
+        async with aiohttp.ClientSession() as http:
+            async with http.get(
+                f"{_gateway_url()}/apps",
+                headers=_gateway_headers(user_id),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                body = await resp.json()
+        return [
+            str(a.get("displayName") or a.get("id"))
+            for a in body.get("apps") or []
+            if a.get("connected") and a.get("needs_reconnect")
+        ]
+    except Exception:
+        logger.exception("app health check failed: user=%s", user_id)
+        return []
+
+
 async def _drain_pending(user_id: str) -> list[str]:
     try:
         async with aiohttp.ClientSession() as http:
@@ -831,7 +853,18 @@ async def entrypoint(ctx: JobContext):
 
     # Results that finished after a previous call ended are waiting at the
     # gateway; deliver them up front so a hangup never discards an answer.
-    pending = await _drain_pending(user_id)
+    # Dead app connections ride the same opening beat: one brief mention,
+    # then silence -- the fix lives in Settings -> Connected Apps.
+    pending, stale_apps = await asyncio.gather(_drain_pending(user_id), _apps_needing_reconnect(user_id))
+    reconnect_note = ""
+    if stale_apps:
+        logger.info("apps need reconnect: user=%s apps=%s", user_id, stale_apps)
+        tracer.emit("reconnect_prompt", apps=stale_apps)
+        reconnect_note = (
+            f"Also mention once, briefly and in passing, that {' and '.join(stale_apps)} needs "
+            "reconnecting under Settings -> Connected Apps before related tasks will work. "
+            "Do not bring it up again during this call."
+        )
     if pending:
         logger.info("delivering parked results: user=%s count=%d", user_id, len(pending))
         joined = "\n\n".join(pending)
@@ -840,10 +873,16 @@ async def entrypoint(ctx: JobContext):
                 instructions=(
                     "Tasks the user started during an earlier call finished while they were "
                     "away. Greet them briefly and relay the results naturally:\n\n" + joined
+                    + ("\n\n" + reconnect_note if reconnect_note else "")
                 )
             )
         except Exception:
             logger.exception("failed to deliver parked results: user=%s content=%s", user_id, joined[:500])
+    elif reconnect_note:
+        try:
+            session.generate_reply(instructions=reconnect_note)
+        except Exception:
+            logger.exception("failed to deliver reconnect note: user=%s", user_id)
 
 
 if __name__ == "__main__":

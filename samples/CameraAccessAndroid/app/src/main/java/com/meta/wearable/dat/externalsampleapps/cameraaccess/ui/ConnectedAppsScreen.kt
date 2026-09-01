@@ -156,6 +156,14 @@ fun ConnectedAppsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            // In-app OAuth: a Custom Tab keeps the dance
+                            // inside the app; ON_RESUME refreshes the list
+                            // when it closes. Reconnect is the same dance.
+                            val startConnect = {
+                                CustomTabsIntent.Builder()
+                                    .build()
+                                    .launchUrl(context, Uri.parse(GatewayApi.connectUrl(app.id)))
+                            }
                             Column {
                                 Text(app.displayName, style = MaterialTheme.typography.bodyLarge)
                                 if (!app.available) {
@@ -164,29 +172,28 @@ fun ConnectedAppsScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.outline,
                                     )
+                                } else if (app.connected && app.needsReconnect) {
+                                    Text(
+                                        "Access expired",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
                                 }
                             }
-                            if (app.connected) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Connected",
-                                    tint = AppColor.Green,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            } else {
-                                TextButton(
-                                    enabled = app.available,
-                                    onClick = {
-                                        // In-app OAuth: a Custom Tab keeps the
-                                        // dance inside the app; ON_RESUME
-                                        // refreshes the list when it closes.
-                                        CustomTabsIntent.Builder()
-                                            .build()
-                                            .launchUrl(context, Uri.parse(GatewayApi.connectUrl(app.id)))
-                                    },
-                                ) {
-                                    Text("Connect")
-                                }
+                            when {
+                                app.connected && app.needsReconnect ->
+                                    TextButton(onClick = startConnect) { Text("Reconnect") }
+                                app.connected ->
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "Connected",
+                                        tint = AppColor.Green,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                else ->
+                                    TextButton(enabled = app.available, onClick = startConnect) {
+                                        Text("Connect")
+                                    }
                             }
                         }
                     }
