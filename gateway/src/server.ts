@@ -223,6 +223,14 @@ app.post("/v1/chat/completions", async (req, res) => {
     const isServiceCall = !!config.serviceToken && bearer === config.serviceToken;
     // What the user is looking at, when the voice layer judged it relevant.
     const image = typeof req.body?.image === "string" && req.body.image ? req.body.image : undefined;
+    // The worker's job process dies with the call. If that happens while this
+    // request is still running, the finished answer would be written to a dead
+    // socket -- observed live: a 25s research task lost outright. Track it so
+    // the result can be parked for the next call instead.
+    let clientGone = false;
+    res.on("close", () => {
+      if (!res.writableFinished) clientGone = true;
+    });
     // The session owns durable history; only the newest user turn is sent.
     const result = await runTurn(
       sessionId,
@@ -241,6 +249,16 @@ app.post("/v1/chat/completions", async (req, res) => {
     );
 
     if (!result.deferred && result.text) void recordTask(userId, lastUser, result.text);
+    if (!result.deferred && result.text && clientGone) {
+      console.warn(`[turn] caller gone before completion; parking result for ${userId}`);
+      // Same wrapper the worker uses when it parks, so the next call's relay
+      // instruction reads identically.
+      void queuePending(
+        userId,
+        `A task from an earlier call finished. Task: ${lastUser.slice(0, 200)}\nResult: ${result.text}`,
+      );
+      return;
+    }
     const content = result.deferred
       ? config.spawnMode
         ? SPAWN_ACK
