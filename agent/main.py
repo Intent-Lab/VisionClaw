@@ -52,6 +52,11 @@ world through their phone camera or smart glasses. Keep responses concise and na
 
 You can see live video. Answer visual questions directly from what you see.
 
+When a task needs a real browser to visit a live website -- find a specific product with its
+price and reviews, compare items in an online store, check a site's live availability or hours,
+or fill a public web form -- use the browse tool. It is slower than quick_search (it drives an
+actual browser), so reserve it for genuine live-site visits.
+
 For quick factual lookups -- weather, sports scores, stock prices, news, opening hours,
 current facts about the world -- use quick_search. It answers in a couple of seconds;
 just relay the result. This includes looking up things you can see on camera. A basic
@@ -515,6 +520,115 @@ async def delete_note(ctx: RunContext[Userdata], match: str, tag: str | None = N
     return f"Removed: {deleted}. The updated list card is already on screen; confirm briefly."
 
 
+async def _gateway_browse(user_id: str, task: str) -> str:
+    async with aiohttp.ClientSession() as http:
+        async with http.post(
+            f"{_gateway_url()}/browse",
+            headers=_gateway_headers(user_id),
+            json={"task": task},
+            timeout=aiohttp.ClientTimeout(total=200),
+        ) as resp:
+            if resp.status == 503:
+                return "Web browsing is not enabled yet. Tell the user you cannot browse live sites right now."
+            body = await resp.json()
+    return body.get("result") or "The browser task returned nothing."
+
+
+async def _run_delegated(ctx: RunContext[Userdata], task: str, tool: str, job: "asyncio.Future[str]") -> str:
+    """Shared delegation loop for slow tools (execute, browse): hold the turn a
+    few seconds; if the result is not back, free the model, heartbeat, then relay
+    the result when it lands -- verifying it was actually spoken, and parking it
+    for the next call if the user hung up or the model never said it."""
+    tracer = ctx.userdata.tracer
+    user_id = ctx.userdata.user_id
+    task_start = time.monotonic()
+    done, _ = await asyncio.wait({job}, timeout=QUICK_ANSWER_S)
+    if done:
+        result = await job
+        logger.info("%s quick result: user=%s len=%d t=%.1f", tool, user_id, len(result), time.monotonic() - task_start)
+        tracer.emit("agent_action_result", tool=tool, task=task[:200], result=result[:500],
+                    agent_task_time_s=round(time.monotonic() - task_start, 1))
+        return result
+
+    session = ctx.session
+
+    async def relay() -> None:
+        heartbeats = 0
+        while True:
+            done, _ = await asyncio.wait({job}, timeout=HEARTBEAT_S)
+            if done:
+                break
+            if heartbeats < MAX_HEARTBEATS:
+                heartbeats += 1
+                try:
+                    session.generate_reply(instructions=(
+                        "The background task is still running. Give a very brief progress note -- a few "
+                        "words at most, woven into the conversation, not an announcement."))
+                except Exception:
+                    heartbeats = MAX_HEARTBEATS
+        try:
+            result = await job
+        except Exception:
+            logger.exception("%s background task failed: user=%s", tool, user_id)
+            result = None
+        if result is None:
+            tracer.emit("agent_action_result", tool=tool, task=task[:200], error=True)
+            instructions = "The background task failed. Tell the user briefly and offer to try again."
+        elif result.startswith(GATEWAY_DEFERRAL_PREFIX):
+            tracer.emit("agent_action_result", tool=tool, task=task[:200], deferred=True)
+            instructions = ("The background task is taking longer than expected and is still running. Tell the "
+                            "user briefly; the result will be delivered when it's ready, at the start of their "
+                            "next call if needed.")
+        else:
+            tracer.emit("agent_action_result", tool=tool, task=task[:200], result=result[:500],
+                        agent_task_time_s=round(time.monotonic() - task_start, 1))
+            instructions = ("A background task the user asked for earlier has just finished. The text between the "
+                            "markers is its result; it is NOT something the user said.\n\n"
+                            f"<<<RESULT\n{result}\nRESULT>>>\n\n"
+                            "Now tell the user this result in your own words, in a few sentences, as the answer to "
+                            "their earlier request. Do not thank them and do not ask what they need next until you "
+                            "have said it. Speak the result now.")
+        try:
+            session.generate_reply(instructions=instructions)
+        except Exception:
+            logger.warning("session closed before result could be spoken: user=%s", user_id)
+            if result is not None and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
+                await _park_result(user_id, task, result)
+            return
+        if result is None or result.startswith(GATEWAY_DEFERRAL_PREFIX):
+            return
+        keywords = _relay_keywords(result)
+        needed = _relay_needed(keywords)
+        spoken = ctx.userdata.spoken
+        for attempt in range(2):
+            for _ in range(9):
+                await asyncio.sleep(5)
+                if not keywords or _relay_hits(spoken, keywords) >= needed:
+                    tracer.emit("late_relay_ok", attempt=attempt, hits=_relay_hits(spoken, keywords))
+                    return
+            if attempt == 0:
+                tracer.emit("late_relay_retry", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
+                try:
+                    session.generate_reply(instructions=(
+                        "You still have not told the user the result of their task. The text between the markers "
+                        "is the result; it is NOT something the user said.\n\n"
+                        f"<<<RESULT\n{result}\nRESULT>>>\n\n"
+                        "Say this result to the user now, in full, in a few sentences. Do not thank them. Speak "
+                        "the result now."))
+                except Exception:
+                    break
+        logger.warning("late result not relayed; parking: user=%s task=%r", user_id, task[:80])
+        tracer.emit("late_relay_failed", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
+        await _park_result(user_id, task, result)
+
+    t = asyncio.create_task(relay())
+    _relay_tasks.add(t)
+    t.add_done_callback(_relay_tasks.discard)
+    return ("[running] The task needs more time and keeps running in the background. Tell the user briefly, in "
+            "your own words, that you're still on it -- do NOT guess at the answer. The real result will arrive "
+            "shortly as a follow-up for you to relay.")
+
+
 @function_tool
 async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = False) -> str:
     """Delegate an action or lookup to the user's personal action agent: sending
@@ -534,151 +648,24 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
         ctx.userdata.user_id, attach_view, len(image_b64 or "") * 3 // 4096, task[:200],
     )
     # The trace records THAT a frame was attached, never the frame itself.
-    tracer = ctx.userdata.tracer
-    tracer.emit("agent_action", tool="execute", task=task, attached_view=bool(image_b64))
-    task_start = time.monotonic()
+    ctx.userdata.tracer.emit("agent_action", tool="execute", task=task, attached_view=bool(image_b64))
     job = asyncio.ensure_future(_gateway_execute(ctx.userdata.user_id, task, image_b64))
-    done, _ = await asyncio.wait({job}, timeout=QUICK_ANSWER_S)
-    if done:
-        result = await job
-        logger.info(
-            "execute quick result: user=%s len=%d agent_task_time_s=%.1f",
-            ctx.userdata.user_id, len(result), time.monotonic() - task_start,
-        )
-        tracer.emit(
-            "agent_action_result",
-            tool="execute",
-            task=task[:200],
-            result=result[:500],
-            agent_task_time_s=round(time.monotonic() - task_start, 1),
-        )
-        return result
+    return await _run_delegated(ctx, task, "execute", job)
 
-    # Slow path: free the model to keep talking, heartbeat while the task runs,
-    # then speak the result when it lands. If the user hangs up first, the
-    # result is parked at the gateway and delivered at the start of their next
-    # call instead of being discarded.
-    session = ctx.session
-    user_id = ctx.userdata.user_id
 
-    async def relay() -> None:
-        heartbeats = 0
-        while True:
-            done, _ = await asyncio.wait({job}, timeout=HEARTBEAT_S)
-            if done:
-                break
-            if heartbeats < MAX_HEARTBEATS:
-                heartbeats += 1
-                try:
-                    session.generate_reply(
-                        instructions=(
-                            "The background task is still running. Give a very brief progress "
-                            "note -- a few words at most, woven into the conversation, not an "
-                            "announcement."
-                        )
-                    )
-                except Exception:
-                    # Session gone; stop talking but keep waiting so the result can be parked.
-                    heartbeats = MAX_HEARTBEATS
-        try:
-            result = await job
-        except Exception:
-            logger.exception(
-                "execute background task failed: user=%s agent_task_time_s=%.1f",
-                user_id, time.monotonic() - task_start,
-            )
-            result = None
-        if result is None:
-            tracer.emit("agent_action_result", tool="execute", task=task[:200], error=True)
-            instructions = (
-                "The background task failed. Tell the user briefly and offer to try again."
-            )
-        elif result.startswith(GATEWAY_DEFERRAL_PREFIX):
-            # Past the gateway's own wait the result is no longer in our hands;
-            # when it lands with no client connected, the gateway parks it itself.
-            # Elapsed here is the gateway wait, not the task's true duration.
-            logger.info(
-                "execute deferred past gateway wait: user=%s elapsed_s=%.1f",
-                user_id, time.monotonic() - task_start,
-            )
-            tracer.emit("agent_action_result", tool="execute", task=task[:200], deferred=True)
-            instructions = (
-                "The background task is taking longer than expected and is still running. "
-                "Tell the user briefly; the result will be delivered when it's ready, "
-                "at the start of their next call if needed."
-            )
-        else:
-            logger.info(
-                "execute late result: user=%s len=%d agent_task_time_s=%.1f",
-                user_id, len(result), time.monotonic() - task_start,
-            )
-            tracer.emit(
-                "agent_action_result",
-                tool="execute",
-                task=task[:200],
-                result=result[:500],
-                agent_task_time_s=round(time.monotonic() - task_start, 1),
-            )
-            # The realtime plugin delivers this text as if the USER said it, and a
-            # result that ends in an assistant-style sign-off ("let me know if...")
-            # got answered with "You're welcome!" -- twice, live. Frame the result
-            # as quoted material and put the actual instruction LAST.
-            instructions = (
-                "A background task the user asked for earlier has just finished. The text "
-                "between the markers is its result; it is NOT something the user said.\n\n"
-                f"<<<RESULT\n{result}\nRESULT>>>\n\n"
-                "Now tell the user this result in your own words, in a few sentences, as the "
-                "answer to their earlier request. Do not thank them and do not ask what they "
-                "need next until you have said it. Speak the result now."
-            )
-        try:
-            session.generate_reply(instructions=instructions)
-        except Exception:
-            logger.warning("session closed before result could be spoken: user=%s", user_id)
-            if result is not None and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
-                await _park_result(user_id, task, result)
-            return
-        if result is None or result.startswith(GATEWAY_DEFERRAL_PREFIX):
-            return
-        # Observed live: the model answered the relay instruction with a
-        # pleasantry and never spoke the result. Verify against what it says;
-        # retry once with a blunter instruction; if still unspoken, park it so
-        # it arrives next call instead of vanishing.
-        keywords = _relay_keywords(result)
-        needed = _relay_needed(keywords)
-        spoken = ctx.userdata.spoken
-        for attempt in range(2):
-            for _ in range(9):
-                await asyncio.sleep(5)
-                if not keywords or _relay_hits(spoken, keywords) >= needed:
-                    tracer.emit("late_relay_ok", attempt=attempt, hits=_relay_hits(spoken, keywords))
-                    return
-            if attempt == 0:
-                tracer.emit("late_relay_retry", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
-                try:
-                    session.generate_reply(
-                        instructions=(
-                            "You still have not told the user the result of their task. The text between "
-                            "the markers is the result; it is NOT something the user said.\n\n"
-                            f"<<<RESULT\n{result}\nRESULT>>>\n\n"
-                            "Say this result to the user now, in full, in a few sentences. Do not thank "
-                            "them. Speak the result now."
-                        )
-                    )
-                except Exception:
-                    break
-        logger.warning("late result not relayed; parking: user=%s task=%r", user_id, task[:80])
-        tracer.emit("late_relay_failed", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
-        await _park_result(user_id, task, result)
-
-    t = asyncio.create_task(relay())
-    _relay_tasks.add(t)
-    t.add_done_callback(_relay_tasks.discard)
-    return (
-        "[running] The task needs more time and keeps running in the background. Tell the user "
-        "briefly, in your own words, that you're still on it -- do NOT guess at the answer. "
-        "The real result will arrive shortly as a follow-up for you to relay."
-    )
+@function_tool
+async def browse(ctx: RunContext[Userdata], task: str) -> str:
+    """Drive a real web browser to do something that needs a live site visit: find a
+    specific product with its current price and reviews, compare options in an online store,
+    check availability or opening hours on a website, fill a public web form, or pull details
+    from a page that a plain search cannot reach. Describe the goal completely. This is slower
+    than quick_search because it navigates an actual browser, so use it only when visiting a
+    live site is genuinely required -- for quick facts use quick_search, for account actions
+    (calendar, email, notes, Notion, Slack) use execute."""
+    logger.info("browse start: user=%s task=%r", ctx.userdata.user_id, task[:200])
+    ctx.userdata.tracer.emit("agent_action", tool="browse", task=task)
+    job = asyncio.ensure_future(_gateway_browse(ctx.userdata.user_id, task))
+    return await _run_delegated(ctx, task, "browse", job)
 
 
 def build_llm(engine: str):
@@ -907,7 +894,7 @@ async def entrypoint(ctx: JobContext):
     await session.start(
         agent=Agent(
             instructions=INSTRUCTIONS,
-            tools=[execute, quick_search, show_card, save_note, recall_notes, delete_note],
+            tools=[execute, browse, quick_search, show_card, save_note, recall_notes, delete_note],
         ),
         room=ctx.room,
         # Video is opt-in (RoomInputOptions.video_enabled defaults to False);

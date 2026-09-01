@@ -9,6 +9,7 @@ import { ensureUser } from "./provision.js";
 import { runTurn, runTurnStreaming, queueContext, drainContext, type TurnStats } from "./turn.js";
 import { registerSocket, notifyUser, queuePending, drainPending } from "./notify.js";
 import { appendTrace, readTrace } from "./trace.js";
+import { runBrowse, browseEnabled } from "./browse.js";
 import { registerConnectRoutes } from "./connect.js";
 import { approvedAccountIds, initAuth, lookupToken, registerAuthRoutes, touchLastSeen } from "./auth.js";
 
@@ -303,6 +304,62 @@ app.post("/v1/chat/completions", async (req, res) => {
   } catch (err) {
     console.error("[chat] turn failed:", err);
     res.status(502).json({ error: { message: "agent backend error" } });
+  }
+});
+
+// Live web browsing via Browser Use Cloud. The voice worker's `browse` tool
+// posts here; the run drives a real browser and returns the result, reusing the
+// same defer/park machinery as the action agent: if the caller hangs up or the
+// run outlasts the wait budget, the result is parked for the next call.
+app.post("/browse", async (req, res) => {
+  const userId = userFromRequest(req);
+  if (!userId) {
+    res.status(401).json({ error: { message: "invalid or missing gateway token" } });
+    return;
+  }
+  if (!browseEnabled()) {
+    res.status(503).json({ error: { message: "browser tasks are not enabled on this gateway" } });
+    return;
+  }
+  const task = String(req.body?.task ?? "").trim();
+  if (!task) {
+    res.status(400).json({ error: { message: "task is required" } });
+    return;
+  }
+  const wrap = (t: string) => `A task from an earlier call finished. Task: ${task.slice(0, 200)}\nResult: ${t}`;
+  let clientGone = false;
+  res.on("close", () => {
+    if (!res.writableFinished) clientGone = true;
+  });
+  try {
+    const outcome = await runBrowse(task, 170_000, (lateText, meta) => {
+      appendTrace(userId, [
+        { type: "browser_task", task: task.slice(0, 200), outcome: "late", run_id: meta.runId, cost_usd: meta.cost },
+      ]);
+      void recordTask(userId, task, lateText);
+      if (!notifyUser(userId, wrap(lateText))) void queuePending(userId, wrap(lateText));
+    });
+    if (!outcome.deferred) {
+      appendTrace(userId, [
+        {
+          type: "browser_task",
+          task: task.slice(0, 200),
+          outcome: clientGone ? "caller_gone" : "quick",
+          run_id: outcome.runId,
+          cost_usd: outcome.cost,
+        },
+      ]);
+      if (outcome.text) void recordTask(userId, task, outcome.text);
+      if (outcome.text && clientGone) {
+        void queuePending(userId, wrap(outcome.text));
+        res.json({ result: SPAWN_ACK });
+        return;
+      }
+    }
+    res.json({ result: outcome.deferred ? SPAWN_ACK : (outcome.text ?? "Done.") });
+  } catch (err) {
+    console.error("[browse] failed:", err);
+    res.status(502).json({ error: { message: "browser backend error" } });
   }
 });
 
