@@ -72,11 +72,27 @@
   .ev details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
   .empty { color: var(--muted); padding: 40px; text-align: center; }
   .pill { display: inline-block; font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 10px; padding: 0 8px; margin-left: 6px; }
+  .tabs { display: flex; gap: 2px; margin-right: 6px; }
+  .tabs button { background: var(--bg); color: var(--text); }
+  .tabs button.active { background: var(--accent); color: #fff; }
+  #users { flex: 1; overflow: auto; padding: 14px 20px; }
+  #users table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  #users th, #users td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  #users th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  #users td button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 5px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; margin-right: 4px; }
+  #users td button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .st { display: inline-block; font-size: 11px; font-weight: 600; border-radius: 5px; padding: 1px 7px; color: #fff; }
+  .st-approved { background: var(--agent); } .st-pending { background: var(--tool); } .st-revoked { background: var(--sys); }
+  #settings { color: var(--muted); font-size: 12.5px; margin-bottom: 12px; }
 </style>
 </head>
 <body>
 <header>
   <h1>VisionClaw Trace</h1>
+  <div class="tabs" id="tabs" hidden>
+    <button id="tab-trace" class="active">Trace</button>
+    <button id="tab-users">Users</button>
+  </div>
   <input id="token" type="password" placeholder="Access token" autocomplete="off">
   <select id="user" title="Participant (service token only)" hidden></select>
   <button id="load">Load</button>
@@ -88,11 +104,13 @@
 <main>
   <div id="sessions"></div>
   <div id="timeline"><div class="empty">Enter your access token and press Load.</div></div>
+  <div id="users" hidden></div>
 </main>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 let events = [], groups = [], selected = -1, timer = null;
+let accountsById = {}, view = "trace";
 
 // #t=<token> in the fragment: never sent to the server; stored then stripped
 // from the address bar so a shared link does not keep the secret on screen.
@@ -111,17 +129,91 @@ function headers() {
 }
 
 async function loadUsers() {
+  const auth = { Authorization: "Bearer " + $("token").value.trim() };
   try {
-    const r = await fetch("/users", { headers: { Authorization: "Bearer " + $("token").value.trim() } });
-    if (!r.ok) { $("user").hidden = true; return; }
+    const r = await fetch("/users", { headers: auth });
+    if (!r.ok) { $("user").hidden = true; $("tabs").hidden = true; return; }
     const { users } = await r.json();
+    // Service token confirmed: the account roster labels the picker and feeds the Users tab.
+    try {
+      const a = await fetch("/admin/accounts", { headers: auth });
+      if (a.ok) accountsById = Object.fromEntries((await a.json()).accounts.map((x) => [x.userId, x]));
+    } catch { /* roster is optional */ }
     const sel = $("user");
     const prev = sel.value;
-    sel.innerHTML = users.map((u) => `<option>${esc(u)}</option>`).join("");
+    sel.innerHTML = users.map((u) => {
+      const e = accountsById[u]?.email;
+      return `<option value="${esc(u)}">${esc(e ? `${u} (${e})` : u)}</option>`;
+    }).join("");
     if (users.includes(prev)) sel.value = prev;
     sel.hidden = false;
-  } catch { $("user").hidden = true; }
+    $("tabs").hidden = false;
+  } catch { $("user").hidden = true; $("tabs").hidden = true; }
 }
+
+async function loadAccounts() {
+  const auth = { Authorization: "Bearer " + $("token").value.trim() };
+  const [a, s] = await Promise.all([
+    fetch("/admin/accounts", { headers: auth }),
+    fetch("/admin/settings", { headers: auth }),
+  ]);
+  if (!a.ok) { $("users").innerHTML = '<div class="empty">Service token required.</div>'; return; }
+  const { accounts } = await a.json();
+  accountsById = Object.fromEntries(accounts.map((x) => [x.userId, x]));
+  const settings = s.ok ? await s.json() : null;
+  renderUsers(accounts, settings);
+}
+
+function renderUsers(accounts, settings) {
+  const cfg = settings
+    ? `Registration: <b>${settings.registrationOpen ? "open" : "closed"}</b>. Auto-approve: <b>${settings.autoApproveAll ? "everyone" : (settings.autoApproveDomains.length ? settings.autoApproveDomains.join(", ") : "nobody (manual approval)")}</b>. Change via REGISTRATION_OPEN / AUTO_APPROVE_DOMAINS / AUTO_APPROVE_ALL on the gateway.`
+    : "";
+  const rows = accounts.map((a) => `<tr>
+    <td>${esc(a.email)}<div class="sub" style="color:var(--muted);font-size:12px">${esc(a.name || "")}</div></td>
+    <td><code>${esc(a.userId)}</code></td>
+    <td><span class="st st-${esc(a.status)}">${esc(a.status)}</span></td>
+    <td>${esc(day(a.createdAt))}</td>
+    <td>${esc((a.lastSeenAt || "").slice(0, 16).replace("T", " "))}</td>
+    <td>
+      ${a.status !== "approved" ? `<button class="primary" onclick="setStatus('${esc(a.userId)}','approved')">Approve</button>` : ""}
+      ${a.status !== "revoked" ? `<button onclick="setStatus('${esc(a.userId)}','revoked')">Revoke</button>` : ""}
+      <button onclick="viewTrace('${esc(a.userId)}')">View trace</button>
+    </td></tr>`).join("");
+  $("users").innerHTML = `<div id="settings">${cfg}</div>` + (accounts.length
+    ? `<table><thead><tr><th>Email</th><th>User id</th><th>Status</th><th>Joined</th><th>Last seen</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<div class="empty">No self-registered accounts yet.</div>');
+}
+
+async function setStatus(userId, status) {
+  const r = await fetch("/admin/accounts/" + encodeURIComponent(userId), {
+    method: "POST",
+    headers: { Authorization: "Bearer " + $("token").value.trim(), "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!r.ok) { $("status").textContent = "update failed (" + r.status + ")"; return; }
+  await loadAccounts();
+  await loadUsers();
+}
+window.setStatus = setStatus;
+
+function showView(v) {
+  view = v;
+  $("tab-trace").classList.toggle("active", v === "trace");
+  $("tab-users").classList.toggle("active", v === "users");
+  $("sessions").hidden = v !== "trace";
+  $("timeline").hidden = v !== "trace";
+  $("summary").hidden = v !== "trace" || !groups.length;
+  $("users").hidden = v !== "users";
+  if (v === "users") loadAccounts();
+}
+
+function viewTrace(userId) {
+  const sel = $("user");
+  if ([...sel.options].some((o) => o.value === userId)) sel.value = userId;
+  showView("trace");
+  load();
+}
+window.viewTrace = viewTrace;
 
 async function load() {
   localStorage.setItem("vcDashToken", $("token").value.trim());
@@ -249,7 +341,9 @@ function render() {
 function select(i) { selected = i; render(); }
 window.select = select;
 
-$("load").onclick = load;
+$("load").onclick = () => (view === "users" ? loadAccounts() : load());
+$("tab-trace").onclick = () => showView("trace");
+$("tab-users").onclick = () => showView("users");
 $("token").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
 $("user").onchange = load;
 $("filter").oninput = render;

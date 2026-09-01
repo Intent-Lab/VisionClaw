@@ -10,8 +10,12 @@ import { runTurn, runTurnStreaming, queueContext, drainContext } from "./turn.js
 import { registerSocket, notifyUser, queuePending, drainPending } from "./notify.js";
 import { appendTrace, readTrace } from "./trace.js";
 import { registerConnectRoutes } from "./connect.js";
+import { approvedAccountIds, initAuth, lookupToken, registerAuthRoutes, touchLastSeen } from "./auth.js";
 
 initStore(config.storePath);
+// Sign-in accounts resolve tokens synchronously from an in-memory index, so
+// it must exist before the first request.
+await initAuth();
 
 const app = express();
 // 5mb: task requests may carry a base64 camera frame (~200-400KB typical).
@@ -86,12 +90,22 @@ function userFromRequest(req: express.Request, explicitToken?: string): string |
     const impersonated = req.header("x-user-id")?.trim();
     return impersonated || null;
   }
-  return config.tokens.get(token) ?? null;
+  const staticUser = config.tokens.get(token);
+  if (staticUser) return staticUser;
+  // Self-registered accounts: only approved ones resolve here; pending and
+  // revoked look exactly like a bad token everywhere except /me.
+  const dyn = lookupToken(token);
+  if (dyn && dyn.status === "approved") {
+    touchLastSeen(dyn.userId);
+    return dyn.userId;
+  }
+  return null;
 }
 
 // ---------- app connections (OAuth -> vault) ----------
 
 registerConnectRoutes(app, userFromRequest);
+registerAuthRoutes(app);
 
 // ---------- HTTP: the app's existing protocol ----------
 
@@ -437,7 +451,7 @@ app.get("/users", (req, res) => {
     res.status(401).json({ error: { message: "service token required" } });
     return;
   }
-  res.json({ users: [...new Set(config.tokens.values())] });
+  res.json({ users: [...new Set([...config.tokens.values(), ...approvedAccountIds()])] });
 });
 
 // Interaction trace: what the user said, what the voice model said, what

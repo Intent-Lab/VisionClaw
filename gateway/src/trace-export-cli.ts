@@ -65,6 +65,37 @@ function serviceHeaders(userId?: string): Record<string, string> {
   return h;
 }
 
+interface AccountRow {
+  userId: string;
+  email: string;
+  name: string;
+  status: string;
+  createdAt: string;
+}
+
+/** Self-registered accounts (service token). Static GATEWAY_TOKENS users are not accounts. */
+async function listAccounts(): Promise<AccountRow[]> {
+  const r = await fetch(`${gatewayUrl()}/admin/accounts`, { headers: serviceHeaders() });
+  if (!r.ok) throw new Error(`GET /admin/accounts -> ${r.status}`);
+  return ((await r.json()) as { accounts: AccountRow[] }).accounts;
+}
+
+/**
+ * participants.csv: one row per account with a stable pseudonym (p01, p02, ...)
+ * in sign-up order, so the study never keeps the id-to-person mapping by hand.
+ * Static GATEWAY_TOKENS users have no account record and are listed after the
+ * accounts with their userId as the pseudonym.
+ */
+function participantsCsv(accountRows: AccountRow[], staticUsers: string[]): string {
+  const sorted = [...accountRows].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const lines = ["pseudonym,userId,email,name,status,createdAt"];
+  sorted.forEach((a, i) =>
+    lines.push([`p${String(i + 1).padStart(2, "0")}`, a.userId, a.email, a.name, a.status, a.createdAt].map(csvCell).join(",")),
+  );
+  for (const u of staticUsers) lines.push([u, u, "", "", "static", ""].map(csvCell).join(","));
+  return lines.join("\n") + "\n";
+}
+
 async function listUsers(): Promise<string[]> {
   const r = await fetch(`${gatewayUrl()}/users`, { headers: serviceHeaders() });
   if (!r.ok) throw new Error(`GET /users -> ${r.status}`);
@@ -378,6 +409,11 @@ async function main(): Promise<void> {
   if (args.all) {
     await fs.writeFile(path.join(args.out, "summary.md"), aggregateMd(reports));
     console.log(`aggregate -> ${path.join(args.out, "summary.md")}`);
+    const accountRows = await listAccounts();
+    const accountIds = new Set(accountRows.map((a) => a.userId));
+    const staticUsers = users.filter((u) => !accountIds.has(u));
+    await fs.writeFile(path.join(args.out, "participants.csv"), participantsCsv(accountRows, staticUsers));
+    console.log(`participants -> ${path.join(args.out, "participants.csv")} (${accountRows.length} accounts, ${staticUsers.length} static)`);
   }
 }
 
