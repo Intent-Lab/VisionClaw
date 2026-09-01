@@ -174,6 +174,7 @@ function roleOrTool(e: Ev): string {
   if (e.type === "user_utterance") return "user";
   if (e.type === "agent_utterance") return "agent";
   if (isAction(e)) return String(e.tool ?? "");
+  if (e.type === "subagent_turn") return "subagent";
   return "";
 }
 
@@ -330,6 +331,32 @@ function summaryMd(userId: string, sessions: Session[], truncated: boolean): { m
     lines.push("| Tool | Count |", "|---|---|");
     for (const [t, n] of Object.entries(byTool).sort((a, b) => b[1] - a[1])) lines.push(`| ${t} | ${n} |`);
   } else lines.push("(none)");
+  // Subagent: what the managed agent did inside delegated tasks (the paper's
+  // tool-depth and tool-mix numbers).
+  const turns = all.filter((e) => e.type === "subagent_turn");
+  if (turns.length) {
+    const mix: Record<string, number> = {};
+    let calls = 0;
+    let errors = 0;
+    for (const t of turns) {
+      const tools = Array.isArray(t.tools) ? (t.tools as Array<{ name?: string; server?: string; ok?: boolean | null }>) : [];
+      calls += tools.length;
+      for (const c of tools) {
+        const key = `${c.server ? c.server + "/" : ""}${c.name ?? "?"}`;
+        mix[key] = (mix[key] ?? 0) + 1;
+        if (c.ok === false) errors++;
+      }
+    }
+    const depths = turns.map((t) => (Array.isArray(t.tools) ? (t.tools as unknown[]).length : 0));
+    const durs = turns.map((t) => Number(t.duration_ms ?? 0) / 1000).filter((d) => d > 0);
+    lines.push("", "## Subagent (delegated tasks)", "");
+    lines.push(`- Delegated tasks with a recorded subagent turn: ${turns.length}`);
+    lines.push(`- Tool calls per task: mean ${fmt(mean(depths))}, median ${fmt(median(depths))}, max ${Math.max(...depths)} (${calls} calls, ${errors} errors)`);
+    if (durs.length) lines.push(`- Subagent turn duration: mean ${fmt(mean(durs))}s, median ${fmt(median(durs))}s`);
+    lines.push(`- No-tool turns: ${depths.filter((d) => d === 0).length}`);
+    lines.push("", "| Subagent tool | Count |", "|---|---|");
+    for (const [k, n] of Object.entries(mix).sort((a, b) => b[1] - a[1])) lines.push(`| ${k} | ${n} |`);
+  }
   lines.push("", "## Per session", "");
   lines.push(`- User turns per session: mean ${fmt(mean(perSession.map((p) => p.userTurns)))}, median ${fmt(median(perSession.map((p) => p.userTurns)))}`);
   lines.push(`- Agent turns per session: mean ${fmt(mean(perSession.map((p) => p.agentTurns)))}, median ${fmt(median(perSession.map((p) => p.agentTurns)))}`);
