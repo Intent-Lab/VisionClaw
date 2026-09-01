@@ -525,18 +525,39 @@ async def delete_note(ctx: RunContext[Userdata], match: str, tag: str | None = N
     return f"Removed: {deleted}. The updated list card is already on screen; confirm briefly."
 
 
-async def _gateway_browse(user_id: str, task: str) -> str:
+async def _gateway_browse_start(user_id: str, task: str) -> dict:
     async with aiohttp.ClientSession() as http:
         async with http.post(
-            f"{_gateway_url()}/browse",
+            f"{_gateway_url()}/browse/start",
             headers=_gateway_headers(user_id),
             json={"task": task},
-            timeout=aiohttp.ClientTimeout(total=200),
+            timeout=aiohttp.ClientTimeout(total=30),
         ) as resp:
             if resp.status == 503:
-                return "Web browsing is not enabled yet. Tell the user you cannot browse live sites right now."
+                return {"disabled": True}
+            resp.raise_for_status()
+            return await resp.json()
+
+
+async def _gateway_browse_await(user_id: str, run_id: str, task: str) -> str:
+    async with aiohttp.ClientSession() as http:
+        async with http.post(
+            f"{_gateway_url()}/browse/await",
+            headers=_gateway_headers(user_id),
+            json={"runId": run_id, "task": task},
+            timeout=aiohttp.ClientTimeout(total=200),
+        ) as resp:
             body = await resp.json()
     return body.get("result") or "The browser task returned nothing."
+
+
+async def _dismiss_card(room, uuid: str) -> None:
+    if room is None:
+        return
+    try:
+        await room.local_participant.send_text(json.dumps({"uuid": uuid, "dismiss": True}), topic="vc.ui")
+    except Exception:
+        logger.exception("failed to dismiss card: uuid=%s", uuid)
 
 
 async def _run_delegated(ctx: RunContext[Userdata], task: str, tool: str, job: "asyncio.Future[str]") -> str:
@@ -669,7 +690,32 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
     (calendar, email, notes, Notion, Slack) use execute."""
     logger.info("browse start: user=%s task=%r", ctx.userdata.user_id, task[:200])
     ctx.userdata.tracer.emit("agent_action", tool="browse", task=task)
-    job = asyncio.ensure_future(_gateway_browse(ctx.userdata.user_id, task))
+    user_id = ctx.userdata.user_id
+    room = ctx.userdata.room
+    start = await _gateway_browse_start(user_id, task)
+    if start.get("disabled"):
+        return "Web browsing is not enabled yet. Tell the user you cannot browse live sites right now."
+    run_id = start.get("runId")
+    live_url = start.get("liveUrl")
+    live_uuid = "browse-live"
+    if live_url and room is not None:
+        # Show what the browser is doing, mid-screen, exactly like a result card.
+        card = {"uuid": live_uuid, "version": 1, "type": "live", "url": live_url,
+                "title": "Browsing the web", "fallback_text": "Watching the browser work."}
+        try:
+            await _publish_card(room, card)
+            ctx.userdata.tracer.emit("agent_action", tool="show_card", card_type="live", title="Browsing the web", auto=True)
+        except Exception:
+            logger.exception("failed to publish live card: user=%s", user_id)
+    if not run_id:
+        return "The browser could not start that task. Tell the user briefly and offer to try again."
+    job = asyncio.ensure_future(_gateway_browse_await(user_id, run_id, task))
+    # Dismiss the live view the moment the task finishes, whatever the outcome.
+    if live_url and room is not None:
+        def _on_done(_fut) -> None:
+            d = asyncio.create_task(_dismiss_card(room, live_uuid))
+            _relay_tasks.add(d); d.add_done_callback(_relay_tasks.discard)
+        job.add_done_callback(_on_done)
     return await _run_delegated(ctx, task, "browse", job)
 
 

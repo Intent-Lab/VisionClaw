@@ -9,7 +9,7 @@ import { ensureUser } from "./provision.js";
 import { runTurn, runTurnStreaming, queueContext, drainContext, type TurnStats } from "./turn.js";
 import { registerSocket, notifyUser, queuePending, drainPending } from "./notify.js";
 import { appendTrace, readTrace } from "./trace.js";
-import { runBrowse, browseEnabled } from "./browse.js";
+import { startBrowse, awaitBrowse, browseEnabled } from "./browse.js";
 import { registerConnectRoutes } from "./connect.js";
 import { approvedAccountIds, initAuth, lookupToken, registerAuthRoutes, touchLastSeen } from "./auth.js";
 
@@ -307,11 +307,10 @@ app.post("/v1/chat/completions", async (req, res) => {
   }
 });
 
-// Live web browsing via Browser Use Cloud. The voice worker's `browse` tool
-// posts here; the run drives a real browser and returns the result, reusing the
-// same defer/park machinery as the action agent: if the caller hangs up or the
-// run outlasts the wait budget, the result is parked for the next call.
-app.post("/browse", async (req, res) => {
+// Live web browsing via Browser Use Cloud. Split into start + await so the
+// voice worker can show a live-view card the moment the browser is up (only the
+// worker holds the LiveKit room), then keep waiting for the result.
+app.post("/browse/start", async (req, res) => {
   const userId = userFromRequest(req);
   if (!userId) {
     res.status(401).json({ error: { message: "invalid or missing gateway token" } });
@@ -326,13 +325,34 @@ app.post("/browse", async (req, res) => {
     res.status(400).json({ error: { message: "task is required" } });
     return;
   }
+  try {
+    const { runId, liveUrl } = await startBrowse(task);
+    res.json({ runId, liveUrl });
+  } catch (err) {
+    console.error("[browse] start failed:", err);
+    res.status(502).json({ error: { message: "browser backend error" } });
+  }
+});
+
+app.post("/browse/await", async (req, res) => {
+  const userId = userFromRequest(req);
+  if (!userId) {
+    res.status(401).json({ error: { message: "invalid or missing gateway token" } });
+    return;
+  }
+  const runId = String(req.body?.runId ?? "").trim();
+  const task = String(req.body?.task ?? "").trim();
+  if (!runId) {
+    res.status(400).json({ error: { message: "runId is required" } });
+    return;
+  }
   const wrap = (t: string) => `A task from an earlier call finished. Task: ${task.slice(0, 200)}\nResult: ${t}`;
   let clientGone = false;
   res.on("close", () => {
     if (!res.writableFinished) clientGone = true;
   });
   try {
-    const outcome = await runBrowse(task, 170_000, (lateText, meta) => {
+    const outcome = await awaitBrowse(runId, 170_000, (lateText, meta) => {
       appendTrace(userId, [
         { type: "browser_task", task: task.slice(0, 200), outcome: "late", run_id: meta.runId, cost_usd: meta.cost },
       ]);
@@ -358,7 +378,7 @@ app.post("/browse", async (req, res) => {
     }
     res.json({ result: outcome.deferred ? SPAWN_ACK : (outcome.text ?? "Done.") });
   } catch (err) {
-    console.error("[browse] failed:", err);
+    console.error("[browse] await failed:", err);
     res.status(502).json({ error: { message: "browser backend error" } });
   }
 });
