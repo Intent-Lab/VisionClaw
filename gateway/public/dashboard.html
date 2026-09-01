@@ -94,7 +94,7 @@
     <button id="tab-users">Users</button>
   </div>
   <input id="token" type="password" placeholder="Access token" autocomplete="off">
-  <select id="user" title="Participant (service token only)" hidden></select>
+  <label id="userlabel" hidden style="gap:4px">viewing <select id="user" title="Participant to view"></select></label>
   <button id="load">Load</button>
   <label><input type="checkbox" id="auto"> auto-refresh</label>
   <input id="filter" placeholder="Filter text" style="width:150px">
@@ -132,7 +132,7 @@ async function loadUsers() {
   const auth = { Authorization: "Bearer " + $("token").value.trim() };
   try {
     const r = await fetch("/users", { headers: auth });
-    if (!r.ok) { $("user").hidden = true; $("tabs").hidden = true; return; }
+    if (!r.ok) { $("user").hidden = true; $("userlabel").hidden = true; $("tabs").hidden = true; return; }
     const { users } = await r.json();
     // Service token confirmed: the account roster labels the picker and feeds the Users tab.
     try {
@@ -147,8 +147,9 @@ async function loadUsers() {
     }).join("");
     if (users.includes(prev)) sel.value = prev;
     sel.hidden = false;
+    $("userlabel").hidden = false;
     $("tabs").hidden = false;
-  } catch { $("user").hidden = true; $("tabs").hidden = true; }
+  } catch { $("user").hidden = true; $("userlabel").hidden = true; $("tabs").hidden = true; }
 }
 
 async function loadAccounts() {
@@ -329,7 +330,12 @@ function render() {
 
   const q = $("filter").value.trim().toLowerCase();
   const g = groups[selected];
-  if (!g) { $("timeline").innerHTML = '<div class="empty">No sessions in the loaded window.</div>'; return; }
+  if (!g) {
+    const who = (!$("user").hidden && $("user").value) ? $("user").value : "this token";
+    $("timeline").innerHTML = '<div class="empty">No sessions logged for <b>' + esc(who) +
+      '</b> yet.' + ($("user").hidden ? '' : '<br>Pick another participant from the dropdown above, or open the <b>Users</b> tab to see everyone.') + '</div>';
+    return;
+  }
   $("timeline").innerHTML = g.events.map((e) => {
     const d = describe(e);
     const text = (d.main + " " + (d.sub || "")).toLowerCase();
