@@ -898,26 +898,40 @@ async def entrypoint(ctx: JobContext):
         except Exception:
             logger.exception("failed to deliver parked results: user=%s content=%s", user_id, joined[:500])
 
-        async def verify_relay() -> None:
-            # Safety net: if nothing the assistant says in the next stretch carries
-            # the result's own words, the drain lost it -- park it again so it
-            # comes back next call instead of vanishing.
-            await asyncio.sleep(25)
+        keywords = {
+            w for w in re.findall(r"[a-z]{7,}", joined.lower())
+            if w not in {"finished", "earlier", "result", "research", "summary", "shopping"}
+        }
+        needed = max(3, len(keywords) // 10)
+
+        def relay_hits() -> int:
             said = " ".join(spoken).lower()
-            keywords = {
-                w for w in re.findall(r"[a-z]{7,}", joined.lower())
-                if w not in {"finished", "earlier", "result", "research", "summary", "shopping"}
-            }
-            hits = sum(1 for w in keywords if w in said)
-            if keywords and hits < max(3, len(keywords) // 10):
-                logger.warning(
-                    "parked result not relayed (hits=%d/%d); re-parking: user=%s", hits, len(keywords), user_id
-                )
-                tracer.emit("parked_relay_failed", hits=hits, keywords=len(keywords))
-                for text in pending:
-                    await _park_text(user_id, text)
-            else:
-                tracer.emit("parked_relay_ok", hits=hits, keywords=len(keywords))
+            return sum(1 for w in keywords if w in said)
+
+        async def verify_relay() -> None:
+            # Safety net: the drain is destructive, so if the assistant never
+            # actually says the result, park it again for the next call. A long
+            # result takes a while to speak (a 2k-char summary measured ~35s), so
+            # poll rather than judge at a fixed instant; if the call ends first,
+            # the CancelledError branch re-parks it.
+            try:
+                for _ in range(18):
+                    await asyncio.sleep(5)
+                    if not keywords or relay_hits() >= needed:
+                        tracer.emit("parked_relay_ok", hits=relay_hits(), keywords=len(keywords))
+                        return
+                verdict = "timeout"
+            except asyncio.CancelledError:
+                if not keywords or relay_hits() >= needed:
+                    return
+                verdict = "call_ended"
+            logger.warning(
+                "parked result not relayed (%s, hits=%d/%d); re-parking: user=%s",
+                verdict, relay_hits(), len(keywords), user_id,
+            )
+            tracer.emit("parked_relay_failed", reason=verdict, hits=relay_hits(), keywords=len(keywords))
+            for text in pending:
+                await _park_text(user_id, text)
 
         t = asyncio.create_task(verify_relay())
         _relay_tasks.add(t)
