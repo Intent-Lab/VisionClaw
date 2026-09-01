@@ -175,6 +175,7 @@ function roleOrTool(e: Ev): string {
   if (e.type === "agent_utterance") return "agent";
   if (isAction(e)) return String(e.tool ?? "");
   if (e.type === "subagent_turn") return "subagent";
+  if (e.type === "browser_task") return "browse";
   return "";
 }
 

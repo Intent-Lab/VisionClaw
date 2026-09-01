@@ -285,6 +285,10 @@ function describe(e) {
     if (e.error) sub = "FAILED" + (sub ? "\n" + sub : "");
     return { cls: "t-tool", tag: "TOOL", main: `<span class="toolname">${esc(label)}</span>  ${esc(main)}`, sub, raw: true };
   }
+  if (e.type === "browser_task") {
+    const cost = e.cost_usd != null ? " $" + e.cost_usd : "";
+    return { cls: "t-tool", tag: "BROWSE", main: `<span class="toolname">browser</span>  ${esc(e.outcome || "")}${esc(cost)}`, sub: e.task || "", raw: true };
+  }
   if (e.type === "subagent_turn") {
     const tools = Array.isArray(e.tools) ? e.tools : [];
     const names = tools.map((t) => `${t.server ? t.server + "/" : ""}${t.name}${t.ok === false ? " (error)" : ""}`).join(", ");
