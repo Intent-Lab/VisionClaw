@@ -96,6 +96,9 @@ export async function readTrace(
       // A torn line (crash mid-append) loses one event, never the read.
     }
   }
-  const filtered = since ? events.filter((e) => typeof e.ts === "string" && e.ts >= since) : events;
-  return filtered.slice(-limit);
+  // No cursor: the newest window (what the dashboard wants). With a cursor:
+  // the OLDEST `limit` events at or after it, so a client can page forward
+  // through unbounded history instead of being capped at the newest window.
+  if (!since) return events.slice(-limit);
+  return events.filter((e) => typeof e.ts === "string" && e.ts >= since).slice(0, limit);
 }

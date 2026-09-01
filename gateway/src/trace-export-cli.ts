@@ -72,24 +72,25 @@ async function listUsers(): Promise<string[]> {
 }
 
 /**
- * The server answers "the newest `limit` events with ts >= since". Paging
- * forward moves `since` to the newest ts seen and drops the boundary
- * duplicate; the loop ends when a page comes back short or adds nothing new.
- * If the very first page is full, events older than its oldest ts are beyond
- * reach of this API -- that is reported, not silently dropped.
+ * With a `since` cursor the server answers the OLDEST `limit` events at or
+ * after it, so paging forward from the epoch walks the whole history. Each
+ * page moves `since` to the newest ts seen and drops the boundary duplicate;
+ * the loop ends when a page comes back short or adds nothing new. Only the
+ * page cap can truncate, and that is reported rather than silently dropped.
  */
 async function fetchAll(userId: string, since?: string): Promise<{ events: Ev[]; truncated: boolean }> {
   const seen = new Set<string>();
   const events: Ev[] = [];
-  let cursor = since;
+  let cursor = since ?? "1970-01-01T00:00:00.000Z";
   let truncated = false;
-  for (let page = 0; page < 100; page++) {
+  const MAX_PAGES = 500;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    if (page === MAX_PAGES - 1) truncated = true;
     const q = new URLSearchParams({ limit: String(PAGE) });
-    if (cursor) q.set("since", cursor);
+    q.set("since", cursor);
     const r = await fetch(`${gatewayUrl()}/trace?${q}`, { headers: serviceHeaders(userId) });
     if (!r.ok) throw new Error(`GET /trace for ${userId} -> ${r.status}`);
     const batch = ((await r.json()) as { events: Ev[] }).events;
-    if (page === 0 && batch.length === PAGE) truncated = true;
     let added = 0;
     for (const e of batch) {
       const key = JSON.stringify(e);
@@ -284,7 +285,7 @@ function summaryMd(userId: string, sessions: Session[], truncated: boolean): { m
   if (all.length) lines.push(`Window: ${all[0].ts} to ${all[all.length - 1].ts}`, "");
   if (truncated)
     lines.push(
-      `WARNING: the first page came back full (${PAGE} events); events older than that page are not reachable through GET /trace. Narrow with --since or raise the server limit.`,
+      `WARNING: export stopped at the page cap (${PAGE * 500} events); narrow with --since to fetch the rest.`,
       "",
     );
   lines.push("## Totals", "");
