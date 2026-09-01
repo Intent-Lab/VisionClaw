@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { anthropic } from "./cma.js";
-import { activeApps, appCredentials, getApp } from "./apps.js";
+import { activeApps, appCredentials, getApp, type ConnectableApp } from "./apps.js";
 import { ensureUser } from "./provision.js";
 import { notifyUser } from "./notify.js";
 import { appHealth, invalidateAppHealth } from "./health.js";
@@ -56,16 +56,113 @@ function verifyState(state: string): StatePayload | null {
   }
 }
 
-function redirectUri(req: Request, appId: string): string {
-  const base = process.env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`;
-  return `${base}/connect/${appId}/callback`;
+/** Public origin of this gateway, as the provider must see it in redirect URIs. */
+export function baseUrl(req: Request): string {
+  return process.env.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`;
 }
 
-function page(title: string, body: string): string {
+function redirectUri(req: Request, appId: string): string {
+  return `${baseUrl(req)}/connect/${appId}/callback`;
+}
+
+export function page(title: string, body: string): string {
   return `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font:17px -apple-system,system-ui,sans-serif;margin:0;display:grid;place-items:center;height:100vh;text-align:center;padding:24px;color:#111}
 h1{font-size:20px;margin:0 0 8px}p{color:#666;margin:0;max-width:28em}</style>
 <h1>${title}</h1><p>${body}</p>`;
+}
+
+export interface OAuthTokens {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+}
+
+/** Authorization-code exchange; null when the provider rejects it (already logged). */
+export async function exchangeAuthCode(
+  tokenUrl: string,
+  args: { code: string; clientId: string; clientSecret: string; redirectUri: string },
+): Promise<OAuthTokens | null> {
+  const tokenRes = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code: args.code,
+      client_id: args.clientId,
+      client_secret: args.clientSecret,
+      redirect_uri: args.redirectUri,
+      grant_type: "authorization_code",
+    }),
+  });
+  if (!tokenRes.ok) {
+    console.error("[connect] token exchange failed:", tokenRes.status, await tokenRes.text());
+    return null;
+  }
+  return (await tokenRes.json()) as OAuthTokens;
+}
+
+/**
+ * Put an OAuth grant into the user's vault as the credential for one MCP
+ * server (replacing any existing one for that URL), so Anthropic refreshes it
+ * from here on. Shared by the per-app connect flow and Google sign-in, which
+ * connects the calendar in the same consent.
+ */
+export async function storeMcpCredential(
+  userId: string,
+  appDef: ConnectableApp & { mcpUrl: string },
+  tokens: OAuthTokens,
+  creds: { clientId: string; clientSecret: string },
+): Promise<{ vaultId: string }> {
+  const granted = (tokens.scope ?? "").split(" ").filter(Boolean);
+  const missing = appDef.scopes.filter((s) => !granted.includes(s));
+  console.log(`[connect] ${appDef.id} granted scopes:`, granted.join(" ") || "(none reported)");
+  if (missing.length > 0) {
+    console.warn(`[connect] ${appDef.id} MISSING scopes:`, missing.join(" "));
+  }
+
+  const { vaultId } = await ensureUser(userId);
+
+  // One credential per MCP server URL: replace any existing one.
+  for await (const cred of anthropic.beta.vaults.credentials.list(vaultId)) {
+    const url = (cred as { auth?: { mcp_server_url?: string } }).auth?.mcp_server_url;
+    if (url === appDef.mcpUrl) {
+      await anthropic.beta.vaults.credentials.delete(cred.id, { vault_id: vaultId });
+    }
+  }
+
+  await anthropic.beta.vaults.credentials.create(vaultId, {
+    display_name: `${appDef.displayName} (${userId})`,
+    auth: {
+      type: "mcp_oauth",
+      mcp_server_url: appDef.mcpUrl,
+      access_token: tokens.access_token,
+      expires_at: tokens.expires_in
+        ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
+        : undefined,
+      // Without refresh, access dies with the first token expiry.
+      refresh: tokens.refresh_token
+        ? {
+            refresh_token: tokens.refresh_token,
+            client_id: creds.clientId,
+            token_endpoint: appDef.tokenUrl,
+            token_endpoint_auth: {
+              type: "client_secret_post",
+              client_secret: creds.clientSecret,
+            },
+          }
+        : undefined,
+    },
+  });
+
+  if (!tokens.refresh_token) {
+    console.warn(
+      `[connect] ${appDef.id} returned no refresh_token for ${userId};` +
+        " access will expire. Check access_type=offline and prompt=consent.",
+    );
+  }
+  invalidateAppHealth(userId, appDef.id);
+  return { vaultId };
 }
 
 /**
@@ -215,38 +312,15 @@ export function registerConnectRoutes(
     }
 
     try {
-      const tokenRes = await fetch(appDef.tokenUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          code,
-          client_id: creds.clientId,
-          client_secret: creds.clientSecret,
-          redirect_uri: redirectUri(req, appDef.id),
-          grant_type: "authorization_code",
-        }),
+      const tokens = await exchangeAuthCode(appDef.tokenUrl, {
+        code,
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        redirectUri: redirectUri(req, appDef.id),
       });
-      if (!tokenRes.ok) {
-        console.error("[connect] token exchange failed:", tokenRes.status, await tokenRes.text());
+      if (!tokens) {
         res.status(502).send(page("Could not connect", "The provider rejected the sign-in. Please try again."));
         return;
-      }
-
-      const tokens = (await tokenRes.json()) as {
-        access_token: string;
-        refresh_token?: string;
-        expires_in?: number;
-        scope?: string;
-      };
-
-      // Granted scopes can be narrower than requested (the user can decline
-      // individual permissions), which surfaces later as opaque "caller does not
-      // have permission" errors from the provider. Log what we actually got.
-      const granted = (tokens.scope ?? "").split(" ").filter(Boolean);
-      const missing = appDef.scopes.filter((s) => !granted.includes(s));
-      console.log(`[connect] ${appDef.id} granted scopes:`, granted.join(" ") || "(none reported)");
-      if (missing.length > 0) {
-        console.warn(`[connect] ${appDef.id} MISSING scopes:`, missing.join(" "));
       }
 
       // DIAG=1: probe the provider directly with the fresh token, so an opaque
@@ -293,50 +367,10 @@ export function registerConnectRoutes(
         }
       }
 
-      const { vaultId } = await ensureUser(verified.userId);
-
-      // One credential per MCP server URL: replace any existing one.
-      for await (const cred of anthropic.beta.vaults.credentials.list(vaultId)) {
-        const url = (cred as { auth?: { mcp_server_url?: string } }).auth?.mcp_server_url;
-        if (url === appDef.mcpUrl) {
-          await anthropic.beta.vaults.credentials.delete(cred.id, { vault_id: vaultId });
-        }
-      }
-
-      await anthropic.beta.vaults.credentials.create(vaultId, {
-        display_name: `${appDef.displayName} (${verified.userId})`,
-        auth: {
-          type: "mcp_oauth",
-          mcp_server_url: appDef.mcpUrl,
-          access_token: tokens.access_token,
-          expires_at: tokens.expires_in
-            ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
-            : undefined,
-          // Without refresh, access dies with the first token expiry.
-          refresh: tokens.refresh_token
-            ? {
-                refresh_token: tokens.refresh_token,
-                client_id: creds.clientId,
-                token_endpoint: appDef.tokenUrl,
-                token_endpoint_auth: {
-                  type: "client_secret_post",
-                  client_secret: creds.clientSecret,
-                },
-              }
-            : undefined,
-        },
-      });
-
-      if (!tokens.refresh_token) {
-        console.warn(
-          `[connect] ${appDef.id} returned no refresh_token for ${verified.userId};` +
-            " access will expire. Check access_type=offline and prompt=consent.",
-        );
-      }
+      await storeMcpCredential(verified.userId, appDef, tokens, creds);
 
       // Verify the connection actually works before claiming it does: a valid
       // OAuth grant does not guarantee the MCP server will serve this account.
-      invalidateAppHealth(verified.userId, appDef.id);
       const health = await probeMcp(appDef.mcpUrl, tokens.access_token);
       if (health.ok) {
         console.log(`[connect] ${appDef.displayName} connected and working for ${verified.userId}`);

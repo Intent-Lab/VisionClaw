@@ -125,6 +125,43 @@ backed by EventKit, which need no OAuth at all. Those cover interactive asks;
 the connected app is what lets background and scheduled tasks reach the
 calendar when the phone is asleep.
 
+## Google sign-in and accounts
+
+Besides static `GATEWAY_TOKENS`, people can register themselves with a Google
+account. The app opens `GET /auth/google?nonce=<32 hex>` in the browser, the
+consent screen asks for identity plus the calendar scopes of `gcal-self`, and
+the callback upserts an account, stores the calendar credential in that
+user's vault (so signing in also connects the calendar), mints a bearer token,
+and parks it under the nonce. The app collects it once with
+`POST /auth/exchange {nonce}` (`404 not_ready` until the callback has run,
+`410 expired` after use or 10 minutes). Tokens are stored as sha256 hashes,
+five live per account; the raw token exists only on the device.
+
+Account ids are `u_<16 hex of sha256(google sub)>`, never the email. Only
+`approved` accounts resolve on authenticated routes; `pending` and `revoked`
+ones get 401 everywhere except `GET /me` (`{userId,email,status}`), which the
+app uses to show a waiting state.
+
+Env:
+
+- `REGISTRATION_OPEN=false` refuses new accounts (existing ones keep working).
+- `AUTO_APPROVE_DOMAINS=colorado.edu,example.org` approves new accounts from
+  those email domains; everyone else waits in `pending`.
+- `AUTO_APPROVE_ALL=true` approves every new account.
+
+Admin (service token only): `GET /admin/accounts`,
+`POST /admin/accounts/:userId {status}`, `GET /admin/settings`. The dashboard's
+Users tab wraps these: approve, revoke, jump to a user's trace. `/users` (and
+so `trace:export --all`) includes approved accounts, and `--all` also writes
+`participants.csv` with a stable `p01..pNN` pseudonym per account in sign-up
+order.
+
+One-time Google Console step: add
+`https://api.visionagents.app/auth/google/callback` as an authorized redirect
+URI on the calendar OAuth client (`GOOGLE_CLIENT_ID`). Sign-in reuses that
+client, so no new project or verification is involved; the unverified-app cap
+of 100 users applies to sign-in as it does to calendar.
+
 ## Exporting the interaction trace
 
 The voice worker records every call as text-only events (utterances, tool
@@ -144,9 +181,9 @@ attached), `sessions.csv` (per-call duration, engine, turn and action counts)
 and `summary.md` (totals, per-tool counts, turn statistics, and every error,
 deferral or parked result). `--all` adds an aggregate `summary.md`.
 
-`GET /trace` returns the newest 1000 events at or after `since`, so a user
-with more than that is flagged `(truncated)` in the export: narrow with
-`--since` to window the read.
+`GET /trace` with no cursor returns the newest 1000 events; with `since` it
+returns the oldest 1000 at or after the cursor, and the export pages forward
+from the epoch, so long histories export completely.
 
 ## Notes and roadmap
 

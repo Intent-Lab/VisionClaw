@@ -24,6 +24,12 @@ export interface GatewayConfig {
    * which authenticates users itself via room-token identity.
    */
   serviceToken?: string;
+  /** Google sign-in: whether unknown accounts may register at all. */
+  registrationOpen: boolean;
+  /** Email domains whose new accounts skip the approval queue. */
+  autoApproveDomains: string[];
+  /** Approve every new account (study-window convenience; the kill switch is registrationOpen). */
+  autoApproveAll: boolean;
 }
 
 function parseTokens(raw: string | undefined): Map<string, string> {
@@ -51,6 +57,12 @@ export const config: GatewayConfig = {
   quickAnswerTimeoutMs: Number(process.env.QUICK_ANSWER_TIMEOUT_MS ?? 30_000),
   spawnMode: process.env.SPAWN_MODE !== "false",
   serviceToken: process.env.GATEWAY_SERVICE_TOKEN || undefined,
+  registrationOpen: process.env.REGISTRATION_OPEN !== "false",
+  autoApproveDomains: (process.env.AUTO_APPROVE_DOMAINS ?? "")
+    .split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean),
+  autoApproveAll: process.env.AUTO_APPROVE_ALL === "true",
 };
 
 if (config.tokens.size === 0) {

@@ -46,9 +46,26 @@ export interface UserResources {
   notes?: Note[];
 }
 
+export type AccountStatus = "pending" | "approved" | "revoked";
+
+/** A self-registered (Google sign-in) identity. Static GATEWAY_TOKENS users
+ * never appear here; their identity is the env var. */
+export interface Account {
+  /** Google's stable subject id; the userId is derived from it, never from the email. */
+  sub: string;
+  email: string;
+  name: string;
+  status: AccountStatus;
+  createdAt: string;
+  lastSeenAt: string;
+  /** sha256 hex of each live bearer token, newest last. Raw tokens are never stored. */
+  tokenHashes: string[];
+}
+
 export interface StoreShape {
   shared: SharedResources;
   users: Record<string, UserResources>;
+  accounts?: Record<string, Account>;
 }
 
 let cache: StoreShape | null = null;
@@ -74,6 +91,12 @@ export async function saveStore(): Promise<void> {
   const tmp = `${path}.tmp`;
   await writeFile(tmp, JSON.stringify(cache, null, 2));
   await rename(tmp, path);
+}
+
+export async function accounts(): Promise<Record<string, Account>> {
+  const store = await loadStore();
+  store.accounts ??= {};
+  return store.accounts;
 }
 
 export async function userResources(userId: string): Promise<UserResources> {
