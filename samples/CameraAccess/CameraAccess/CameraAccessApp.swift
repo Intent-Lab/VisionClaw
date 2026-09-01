@@ -83,6 +83,11 @@ struct AccessCodeView: View {
   @State private var code = ""
   @State private var checking = false
   @State private var error: String?
+  /// Self-hosters mint their own codes on their own gateway; without a way to
+  /// point the app there, the gate reads as a private beta and they email the
+  /// author for a code that only their gateway can issue.
+  @State private var ownGateway = false
+  @State private var gatewayURL = SettingsManager.shared.cloudGatewayURL
 
   var body: some View {
     VStack(spacing: 12) {
@@ -100,6 +105,23 @@ struct AccessCodeView: View {
         .textInputAutocapitalization(.never)
         .disabled(checking)
         .padding(.top, 20)
+      DisclosureGroup("Using your own gateway?", isExpanded: $ownGateway) {
+        VStack(spacing: 8) {
+          Text("A self-hosted gateway issues its own codes: any entry you set in its GATEWAY_TOKENS works here.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+          TextField("Gateway URL", text: $gatewayURL)
+            .textFieldStyle(.roundedBorder)
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            .keyboardType(.URL)
+            .disabled(checking)
+        }
+        .padding(.top, 6)
+      }
+      .font(.subheadline)
+      .disabled(checking)
       if let error {
         Text(error)
           .font(.footnote)
@@ -124,8 +146,17 @@ struct AccessCodeView: View {
 
   private func submit() {
     guard !checking else { return }
-    checking = true
     error = nil
+    if ownGateway {
+      var url = gatewayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+      while url.hasSuffix("/") { url.removeLast() }
+      guard url.hasPrefix("http") else {
+        error = "Gateway URL must start with https://"
+        return
+      }
+      SettingsManager.shared.cloudGatewayURL = url
+    }
+    checking = true
     let token = code.trimmingCharacters(in: .whitespacesAndNewlines)
     SettingsManager.shared.cloudGatewayToken = token
     Task {

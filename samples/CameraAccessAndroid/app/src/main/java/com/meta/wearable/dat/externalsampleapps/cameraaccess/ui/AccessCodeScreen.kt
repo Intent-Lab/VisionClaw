@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,12 +43,25 @@ fun AccessCodeScreen(
     var code by remember { mutableStateOf("") }
     var checking by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Self-hosters mint their own codes on their own gateway; without a way to
+    // point the app there, the gate reads as a private beta and they email the
+    // author for a code that only their gateway can issue.
+    var ownGateway by remember { mutableStateOf(false) }
+    var gatewayUrl by remember { mutableStateOf(SettingsManager.gatewayBaseUrl) }
     val scope = rememberCoroutineScope()
 
     fun submit() {
         if (checking) return
-        checking = true
         error = null
+        if (ownGateway) {
+            val url = gatewayUrl.trim().trimEnd('/')
+            if (!url.startsWith("http")) {
+                error = "Gateway URL must start with https://"
+                return
+            }
+            SettingsManager.gatewayBaseUrl = url
+        }
+        checking = true
         SettingsManager.gatewayToken = code.trim()
         scope.launch {
             when (val status = GatewayApi.checkStatus()) {
@@ -91,7 +105,28 @@ fun AccessCodeScreen(
                 supportingText = { error?.let { Text(it) } },
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            TextButton(onClick = { ownGateway = !ownGateway }, enabled = !checking) {
+                Text(if (ownGateway) "Use the default gateway" else "Using your own gateway?")
+            }
+            if (ownGateway) {
+                Text(
+                    "A self-hosted gateway issues its own codes: any entry you set in its GATEWAY_TOKENS works here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = gatewayUrl,
+                    onValueChange = { gatewayUrl = it },
+                    label = { Text("Gateway URL") },
+                    singleLine = true,
+                    enabled = !checking,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = ::submit,
                 enabled = code.trim().isNotEmpty() && !checking,
