@@ -175,6 +175,25 @@ class Userdata:
     frames: FrameHolder
     tracer: Tracer = field(default_factory=lambda: Tracer("unknown"))
     room: rtc.Room | None = None
+    # Everything the assistant has said this session, in order; relay checks
+    # read it to confirm a delivered result was actually spoken.
+    spoken: list[str] = field(default_factory=list)
+
+
+_RELAY_STOPWORDS = {"finished", "earlier", "result", "research", "summary", "shopping", "however", "because"}
+
+
+def _relay_keywords(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]{7,}", text.lower()) if w not in _RELAY_STOPWORDS}
+
+
+def _relay_hits(spoken: list[str], keywords: set[str]) -> int:
+    said = " ".join(spoken).lower()
+    return sum(1 for w in keywords if w in said)
+
+
+def _relay_needed(keywords: set[str]) -> int:
+    return max(3, len(keywords) // 10)
 
 
 _search_client: genai.Client | None = None
@@ -610,6 +629,36 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
             logger.warning("session closed before result could be spoken: user=%s", user_id)
             if result is not None and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
                 await _park_result(user_id, task, result)
+            return
+        if result is None or result.startswith(GATEWAY_DEFERRAL_PREFIX):
+            return
+        # Observed live: the model answered the relay instruction with a
+        # pleasantry and never spoke the result. Verify against what it says;
+        # retry once with a blunter instruction; if still unspoken, park it so
+        # it arrives next call instead of vanishing.
+        keywords = _relay_keywords(result)
+        needed = _relay_needed(keywords)
+        spoken = ctx.userdata.spoken
+        for attempt in range(2):
+            for _ in range(9):
+                await asyncio.sleep(5)
+                if not keywords or _relay_hits(spoken, keywords) >= needed:
+                    tracer.emit("late_relay_ok", attempt=attempt, hits=_relay_hits(spoken, keywords))
+                    return
+            if attempt == 0:
+                tracer.emit("late_relay_retry", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
+                try:
+                    session.generate_reply(
+                        instructions=(
+                            "You have not yet told the user the result of their task. Say it NOW, in full, "
+                            "in a few sentences -- this is the answer they asked for:\n\n" + result
+                        )
+                    )
+                except Exception:
+                    break
+        logger.warning("late result not relayed; parking: user=%s task=%r", user_id, task[:80])
+        tracer.emit("late_relay_failed", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
+        await _park_result(user_id, task, result)
 
     t = asyncio.create_task(relay())
     _relay_tasks.add(t)
@@ -820,18 +869,12 @@ async def entrypoint(ctx: JobContext):
 
     show_card = function_tool(_show_card, name="show_card")
 
-    session = AgentSession(
-        llm=build_llm(engine),
-        userdata=Userdata(user_id=user_id, frames=frames, tracer=tracer, room=ctx.room),
-    )
+    userdata = Userdata(user_id=user_id, frames=frames, tracer=tracer, room=ctx.room)
+    session = AgentSession(llm=build_llm(engine), userdata=userdata)
 
     # The transcript pair the study runs on: final ASR of what the user said,
     # and the voice model's spoken reply (from output transcription). Items with
     # no text (tool plumbing, handoffs) are skipped.
-    # Everything the assistant has said this session, in order; the parked-result
-    # relay check reads it to confirm a delivered result was actually spoken.
-    spoken: list[str] = []
-
     @session.on("conversation_item_added")
     def _on_conversation_item(ev) -> None:
         item = ev.item
@@ -843,7 +886,7 @@ async def entrypoint(ctx: JobContext):
         if not text or role not in ("user", "assistant"):
             return
         if role == "assistant":
-            spoken.append(text)
+            userdata.spoken.append(text)
         tracer.emit(
             "user_utterance" if role == "user" else "agent_utterance",
             text=text,
@@ -898,15 +941,11 @@ async def entrypoint(ctx: JobContext):
         except Exception:
             logger.exception("failed to deliver parked results: user=%s content=%s", user_id, joined[:500])
 
-        keywords = {
-            w for w in re.findall(r"[a-z]{7,}", joined.lower())
-            if w not in {"finished", "earlier", "result", "research", "summary", "shopping"}
-        }
-        needed = max(3, len(keywords) // 10)
+        keywords = _relay_keywords(joined)
+        needed = _relay_needed(keywords)
 
         def relay_hits() -> int:
-            said = " ".join(spoken).lower()
-            return sum(1 for w in keywords if w in said)
+            return _relay_hits(userdata.spoken, keywords)
 
         async def verify_relay() -> None:
             # Safety net: the drain is destructive, so if the assistant never
