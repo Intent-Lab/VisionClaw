@@ -278,7 +278,10 @@ async def _gateway_execute(user_id: str, task: str, image_b64: str | None = None
 async def _park_result(user_id: str, task: str, result: str) -> None:
     """Hand a result we can no longer speak (call over) back to the gateway;
     the next call's worker drains and delivers it."""
-    text = f"A task from an earlier call finished. Task: {task[:200]}\nResult: {result}"
+    await _park_text(user_id, f"A task from an earlier call finished. Task: {task[:200]}\nResult: {result}")
+
+
+async def _park_text(user_id: str, text: str) -> None:
     try:
         async with aiohttp.ClientSession() as http:
             async with http.post(
@@ -825,6 +828,10 @@ async def entrypoint(ctx: JobContext):
     # The transcript pair the study runs on: final ASR of what the user said,
     # and the voice model's spoken reply (from output transcription). Items with
     # no text (tool plumbing, handoffs) are skipped.
+    # Everything the assistant has said this session, in order; the parked-result
+    # relay check reads it to confirm a delivered result was actually spoken.
+    spoken: list[str] = []
+
     @session.on("conversation_item_added")
     def _on_conversation_item(ev) -> None:
         item = ev.item
@@ -835,6 +842,8 @@ async def entrypoint(ctx: JobContext):
         text = re.sub(r"<ctrl\d+>", "", text).strip()
         if not text or role not in ("user", "assistant"):
             return
+        if role == "assistant":
+            spoken.append(text)
         tracer.emit(
             "user_utterance" if role == "user" else "agent_utterance",
             text=text,
@@ -870,16 +879,49 @@ async def entrypoint(ctx: JobContext):
     if pending:
         logger.info("delivering parked results: user=%s count=%d", user_id, len(pending))
         joined = "\n\n".join(pending)
+        tracer.emit("parked_relay", count=len(pending), chars=len(joined))
         try:
+            # Observed failure: "greet briefly and relay" produced a greeting and
+            # nothing else, and the drained result was gone. The instruction now
+            # makes the result the whole point of the turn.
             session.generate_reply(
                 instructions=(
-                    "Tasks the user started during an earlier call finished while they were "
-                    "away. Greet them briefly and relay the results naturally:\n\n" + joined
+                    "The user hung up before a task they asked for was finished. It has finished "
+                    "now, and THE RESULT BELOW IS WHAT YOU MUST SAY. Do not just greet them. Say one "
+                    "short phrase like 'While you were away, that finished', then relay the result "
+                    "in full -- every key point, in your own words, in a few sentences. Do not ask "
+                    "what they want next until you have relayed it.\n\n" + joined
                     + ("\n\n" + reconnect_note if reconnect_note else "")
+                    + "\n\nRemember: relay the result above now."
                 )
             )
         except Exception:
             logger.exception("failed to deliver parked results: user=%s content=%s", user_id, joined[:500])
+
+        async def verify_relay() -> None:
+            # Safety net: if nothing the assistant says in the next stretch carries
+            # the result's own words, the drain lost it -- park it again so it
+            # comes back next call instead of vanishing.
+            await asyncio.sleep(25)
+            said = " ".join(spoken).lower()
+            keywords = {
+                w for w in re.findall(r"[a-z]{7,}", joined.lower())
+                if w not in {"finished", "earlier", "result", "research", "summary", "shopping"}
+            }
+            hits = sum(1 for w in keywords if w in said)
+            if keywords and hits < max(3, len(keywords) // 10):
+                logger.warning(
+                    "parked result not relayed (hits=%d/%d); re-parking: user=%s", hits, len(keywords), user_id
+                )
+                tracer.emit("parked_relay_failed", hits=hits, keywords=len(keywords))
+                for text in pending:
+                    await _park_text(user_id, text)
+            else:
+                tracer.emit("parked_relay_ok", hits=hits, keywords=len(keywords))
+
+        t = asyncio.create_task(verify_relay())
+        _relay_tasks.add(t)
+        t.add_done_callback(_relay_tasks.discard)
     elif reconnect_note:
         try:
             session.generate_reply(instructions=reconnect_note)
