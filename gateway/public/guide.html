@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VisionClaw Participant Guide</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --border: #e2e5ea; --text: #1a1d21;
+    --muted: #667085; --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101418; --panel: #171c22; --border: #2a323c; --text: #e6e9ec;
+      --muted: #8b94a1; --accent: #60a5fa;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 16px/1.55 -apple-system, "SF Pro Text", Roboto, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text); padding: 24px 16px 64px;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 26px; margin-bottom: 4px; }
+  .lead { color: var(--muted); margin-bottom: 28px; }
+  section {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  h2 { font-size: 17px; margin-bottom: 10px; }
+  ol, ul { padding-left: 22px; }
+  li { margin: 6px 0; }
+  li ul { margin-top: 4px; }
+  code { font: 14px ui-monospace, Menlo, monospace; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .btn {
+    display: inline-block; margin: 6px 0 4px; padding: 10px 18px; border-radius: 10px;
+    background: var(--accent); color: #fff; font-weight: 600;
+  }
+  .btn:hover { text-decoration: none; opacity: 0.92; }
+  .say { font-style: italic; color: var(--muted); }
+  .note { color: var(--muted); font-size: 14px; margin-top: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 15px; }
+  td { padding: 6px 4px; border-top: 1px solid var(--border); vertical-align: top; }
+  td:first-child { color: var(--muted); width: 42%; }
+</style>
+</head>
+<body>
+<main>
+  <h1>VisionClaw Participant Guide</h1>
+  <p class="lead">Thanks for joining the study. This page gets the app on your phone and shows what you can do with it. Setup takes about ten minutes with a researcher nearby.</p>
+
+  <section>
+    <h2>1. Install the app</h2>
+    <a class="btn" href="https://api.visionagents.app/install">Open the install page</a>
+    <ul>
+      <li><strong>iPhone:</strong> the researcher registers your phone first. Then open the install page in Safari, tap <em>Install for iPhone</em>, close Safari, and wait for the icon on your home screen.</li>
+      <li><strong>Android:</strong> tap <em>Download for Android</em>, open the downloaded file, and allow installs from your browser when asked.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>2. Enter your access code</h2>
+    <p>The first screen asks for an access code. The researcher gives you yours; it is personal to you, so do not share it. The app checks it and unlocks immediately.</p>
+    <p class="note">If it says the code was not recognized, check for typos or ask the researcher to re-issue it.</p>
+  </section>
+
+  <section>
+    <h2>3. Connect your Google account</h2>
+    <ol>
+      <li>Open <strong>Settings</strong> (gear icon) and tap <strong>Connected Apps</strong>.</li>
+      <li>Tap <strong>Google Calendar</strong> and sign in with your own Google account. Only your calendar is accessed, and only when you ask.</li>
+      <li>If email is part of your study, the researcher adds your Gmail address to a test list first; then connect <strong>Gmail</strong> the same way. Google makes this connection expire every 7 days, so reconnect it from the same screen when the app tells you to.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>4. Your first call</h2>
+    <p>Tap the call button. A small label near the top shows the assistant's state (listening, thinking, speaking). Point the camera at something and just talk:</p>
+    <ul>
+      <li class="say">"What is this?"</li>
+      <li class="say">"What's the weather here today?"</li>
+      <li class="say">"Add this to my shopping list."</li>
+    </ul>
+    <p class="note">Captions of what you and the assistant said appear at the bottom. Cards with details appear near the top; swipe them away when you are done.</p>
+  </section>
+
+  <section>
+    <h2>5. Glasses day</h2>
+    <ol>
+      <li>Pair your Ray-Ban Meta glasses with the Meta AI app on your phone.</li>
+      <li>In the Meta AI app, open its settings and turn on <strong>Developer Mode</strong>. Without it the glasses refuse to link to VisionClaw.</li>
+      <li>In VisionClaw, open <strong>Settings</strong> and set <strong>Camera source</strong> to <strong>Glasses</strong>. Put the glasses on; the call starts by itself.</li>
+    </ol>
+    <p class="note">"Waiting for glasses video" means the glasses are asleep or folded; wearing them wakes the link. A short stall when the video starts is normal, and the app reconnects on its own if the link drops. If it stays stuck, turn the glasses off and on.</p>
+  </section>
+
+  <section>
+    <h2>6. Things to try</h2>
+    <table>
+      <tr><td>Ask about what you see</td><td class="say">"Read this label." "Which of these is cheaper?"</td></tr>
+      <tr><td>Look something up</td><td class="say">"When does this place close?" "What's the score of the game?"</td></tr>
+      <tr><td>Remember things</td><td class="say">"Remember this." "Add eggs to my shopping list." "What's on my list?" "Remove the eggs."</td></tr>
+      <tr><td>Your calendar</td><td class="say">"What's on my calendar today?" "Add lunch with Sam on Friday at noon."</td></tr>
+      <tr><td>Bigger tasks</td><td class="say">"Find me three reviews of this." "Compare these two products." The assistant works on these in the background and tells you when it is done, sometimes at the start of your next call.</td></tr>
+      <tr><td>Email (if connected)</td><td class="say">"Summarize my unread email." "Email this to Sam."</td></tr>
+    </table>
+    <p class="note">Not supported in this study: buying things, logging into websites, controlling smart-home devices, Slack, Notion, and text messages. If you find yourself wanting one of these, tell the researcher; that is useful to us.</p>
+  </section>
+
+  <section>
+    <h2>7. What happens to my data</h2>
+    <ul>
+      <li>Your voice is transcribed. The transcripts, the assistant's replies, and the actions it took are logged to your study account and reviewed by the research team.</li>
+      <li>Camera video is used live to answer you and is <strong>not stored</strong> by the study. For some tasks a single frame is sent to the assistant's action system and discarded afterward.</li>
+      <li>Notes you ask the assistant to save are stored as text until you delete them. Avoid saving anything you would not want the research team to read.</li>
+      <li>Connected accounts are used only when you ask. You can disconnect them any time from Settings or from your Google account page.</li>
+      <li>Your account is identified by a code, not your name.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>8. If something goes wrong</h2>
+    <table>
+      <tr><td>"Waiting for agent" does not change</td><td>The assistant service is down. Tell the researcher.</td></tr>
+      <tr><td>Code not recognized</td><td>Check for typos, or ask for a new code.</td></tr>
+      <tr><td>"Error opening link" with glasses</td><td>Turn on Developer Mode in the Meta AI app and try again.</td></tr>
+      <tr><td>The assistant said it was working on something, then the call ended</td><td>The answer arrives at the start of your next call.</td></tr>
+    </table>
+    <p class="note">Contact: the researcher who gave you your access code.</p>
+  </section>
+</main>
+</body>
+</html>

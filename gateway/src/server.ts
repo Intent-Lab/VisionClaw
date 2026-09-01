@@ -423,6 +423,12 @@ app.get("/dashboard", (_req, res) => {
   res.sendFile(path.resolve("public/dashboard.html"));
 });
 
+// Participant guide: install, access code, Google connection, glasses setup,
+// and what the study logs. Public by design, like /install.
+app.get("/guide", (_req, res) => {
+  res.sendFile(path.resolve("public/guide.html"));
+});
+
 // Participant roster for the dashboard's picker. Service token only: a user
 // token names one user and has no business enumerating the others.
 app.get("/users", (req, res) => {
