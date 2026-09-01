@@ -422,6 +422,12 @@ final class LiveKitSession: NSObject, ObservableObject {
 
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+      if (response as? HTTPURLResponse)?.statusCode == 401 {
+        // A revoked (or never-approved) account: drop the credential so the
+        // sign-in gate returns at next launch instead of every call failing.
+        SettingsManager.shared.cloudGatewayToken = ""
+        SettingsManager.shared.accountStatus = nil
+      }
       let detail = OpenClawBridge.errorMessage(from: data) ?? "gateway error"
       throw NSError(domain: "LiveKitSession", code: 1, userInfo: [NSLocalizedDescriptionKey: detail])
     }
