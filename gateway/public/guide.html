@@ -61,18 +61,20 @@
   </section>
 
   <section>
-    <h2>2. Enter your access code</h2>
-    <p>The first screen asks for an access code. The researcher gives you yours; it is personal to you, so do not share it. The app checks it and unlocks immediately.</p>
-    <p class="note">If it says the code was not recognized, check for typos or ask the researcher to re-issue it.</p>
+    <h2>2. Sign in with Google</h2>
+    <p>The first screen has one button: <strong>Sign in with Google</strong>. Tap it, choose your own Google account, and approve the permissions. Signing in creates your study account and connects your Google Calendar in the same step, so there is nothing to type and no code to keep.</p>
+    <p class="note">If the browser says the sign-in expired, come back to the app and tap the button again. You never need an access code; that option only exists for people running their own server.</p>
   </section>
 
   <section>
-    <h2>3. Connect your Google account</h2>
-    <ol>
-      <li>Open <strong>Settings</strong> (gear icon) and tap <strong>Connected Apps</strong>.</li>
-      <li>Tap <strong>Google Calendar</strong> and sign in with your own Google account. Only your calendar is accessed, and only when you ask.</li>
-      <li>If email is part of your study, the researcher adds your Gmail address to a test list first; then connect <strong>Gmail</strong> the same way. Google makes this connection expire every 7 days, so reconnect it from the same screen when the app tells you to.</li>
-    </ol>
+    <h2>3. Connected apps</h2>
+    <p>Open <strong>Settings</strong> (gear icon) and tap <strong>Connected Apps</strong>. Google Calendar is already connected from sign-in. The others are optional; connect the ones you would actually use:</p>
+    <ul>
+      <li><strong>Gmail</strong>: the researcher adds your Gmail address to a test list first, then tap Connect. Google expires this connection every 7 days; the app tells you when to reconnect from the same screen.</li>
+      <li><strong>Notion</strong>: tap Connect and pick which pages the assistant may use.</li>
+      <li><strong>Slack</strong>: only for members of the study's Slack workspace.</li>
+    </ul>
+    <p class="note">Each connection is used only when you ask, and you can disconnect any of them from this screen.</p>
   </section>
 
   <section>
@@ -116,7 +118,7 @@
       <li>Camera video is used live to answer you and is <strong>not stored</strong> by the study. For some tasks a single frame is sent to the assistant's action system and discarded afterward.</li>
       <li>Notes you ask the assistant to save are stored as text until you delete them. Avoid saving anything you would not want the research team to read.</li>
       <li>Connected accounts are used only when you ask. You can disconnect them any time from Settings or from your Google account page.</li>
-      <li>Your account is identified by a code, not your name.</li>
+      <li>In the study data your account appears under a random id, not your name or email.</li>
     </ul>
   </section>
 
@@ -124,11 +126,12 @@
     <h2>8. If something goes wrong</h2>
     <table>
       <tr><td>"Waiting for agent" does not change</td><td>The assistant service is down. Tell the researcher.</td></tr>
-      <tr><td>Code not recognized</td><td>Check for typos, or ask for a new code.</td></tr>
+      <tr><td>Sign-in expired or failed</td><td>Return to the app and tap Sign in with Google again.</td></tr>
+      <tr><td>Gmail says access blocked</td><td>Your address is not on the test list yet. Tell the researcher.</td></tr>
       <tr><td>"Error opening link" with glasses</td><td>Turn on Developer Mode in the Meta AI app and try again.</td></tr>
       <tr><td>The assistant said it was working on something, then the call ended</td><td>The answer arrives at the start of your next call.</td></tr>
     </table>
-    <p class="note">Contact: the researcher who gave you your access code.</p>
+    <p class="note">Contact: the researcher who enrolled you.</p>
   </section>
 </main>
 </body>
