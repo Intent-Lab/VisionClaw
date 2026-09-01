@@ -35,6 +35,8 @@ object GatewayApi {
         val displayName: String,
         val connected: Boolean,
         val available: Boolean,
+        /** Connected, but the stored credential no longer works; only reconnecting fixes it. */
+        val needsReconnect: Boolean,
     )
 
     data class TaskEntry(
@@ -89,6 +91,7 @@ object GatewayApi {
                         displayName = item.optString("displayName", id),
                         connected = item.optBoolean("connected", false),
                         available = item.optBoolean("available", false),
+                        needsReconnect = item.optBoolean("needs_reconnect", false),
                     )
                 }
                 Result.success(apps)

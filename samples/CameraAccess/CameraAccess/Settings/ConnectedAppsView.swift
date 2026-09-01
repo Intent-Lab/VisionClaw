@@ -18,6 +18,8 @@ struct ConnectedAppsView: View {
     let displayName: String
     let connected: Bool
     let available: Bool
+    /// Connected, but the stored credential no longer works; only reconnecting fixes it.
+    let needsReconnect: Bool
   }
 
   var body: some View {
@@ -54,11 +56,18 @@ struct ConnectedAppsView: View {
                     Text("Not configured on the gateway")
                       .font(.caption)
                       .foregroundStyle(.tertiary)
+                  } else if app.connected && app.needsReconnect {
+                    Text("Access expired")
+                      .font(.caption)
+                      .foregroundStyle(.red)
                   }
                 }
                 Spacer()
                 if connectingId == app.id {
                   ProgressView()
+                } else if app.connected && app.needsReconnect {
+                  Button("Reconnect") { connect(app) }
+                    .buttonStyle(.borderless)
                 } else if app.connected {
                   Label("Connected", systemImage: "checkmark.circle.fill")
                     .labelStyle(.iconOnly)
@@ -115,7 +124,8 @@ struct ConnectedAppsView: View {
           id: id,
           displayName: name,
           connected: item["connected"] as? Bool ?? false,
-          available: item["available"] as? Bool ?? false)
+          available: item["available"] as? Bool ?? false,
+          needsReconnect: item["needs_reconnect"] as? Bool ?? false)
       }
       errorMessage = nil
       isLoading = false
