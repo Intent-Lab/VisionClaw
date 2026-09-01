@@ -125,6 +125,29 @@ backed by EventKit, which need no OAuth at all. Those cover interactive asks;
 the connected app is what lets background and scheduled tasks reach the
 calendar when the phone is asleep.
 
+## Exporting the interaction trace
+
+The voice worker records every call as text-only events (utterances, tool
+actions, cards, parked results) at `POST /trace`; `GET /trace` reads them back
+and `/dashboard` shows them live. For study analysis, export per user:
+
+```bash
+npm run trace:export -- <userId> [--since 2026-08-18T00:00:00Z] [--out dir]
+npm run trace:export -- --all                       # every user in GATEWAY_TOKENS
+npm run trace:export -- fixture --from-file test-fixtures/trace-sample.json
+```
+
+Needs `GATEWAY_SERVICE_TOKEN` (and optionally `GATEWAY_URL`) in the environment
+or `.env`; `--all` enumerates users through the service-token-only `/users`
+endpoint. Each user gets `events.csv` (one row per event, session index
+attached), `sessions.csv` (per-call duration, engine, turn and action counts)
+and `summary.md` (totals, per-tool counts, turn statistics, and every error,
+deferral or parked result). `--all` adds an aggregate `summary.md`.
+
+`GET /trace` returns the newest 1000 events at or after `since`, so a user
+with more than that is flagged `(truncated)` in the export: narrow with
+`--since` to window the read.
+
 ## Notes and roadmap
 
 - Managed Agents is an Anthropic **beta**; quotas apply (notably scheduled
