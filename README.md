@@ -58,6 +58,17 @@ Gemini Live API (WebSocket)
 
 ---
 
+## The app asks for an access code
+
+The first screen asks for an access code. The code is not something the author issues -- it is a token from **whichever gateway the app points at**, and the gate verifies it against that gateway before unlocking.
+
+- The default gateway (`api.visionagents.app`) is a small private pilot instance for a user study, not a public service, so its codes are not handed out.
+- **Self-hosting:** run the gateway in [`gateway/`](gateway/README.md) and set `GATEWAY_TOKENS="<any-secret>:<your-name>"` in its `.env` -- that secret is your access code. Point the app at your gateway either in `Secrets.swift` / `Secrets.kt` (`gatewayBaseUrl`) before building, or at runtime with **"Using your own gateway?"** on the access-code screen.
+- **Voice needs the whole stack:** the gateway only mints room tickets and runs tasks. Calls also need the `agent/` worker running against a [LiveKit Cloud](https://livekit.io) project (free tier works), with the same LiveKit credentials on both the gateway and the worker -- otherwise the app connects and waits on "Waiting for agent" forever.
+- **Ray-Ban Meta glasses** need Developer Mode enabled in the Meta AI app on the phone; without it the glasses link is rejected ("Error opening link").
+
+Details for the gateway, tokens and app connections: [gateway/README.md](gateway/README.md).
+
 ## Quick Start (iOS)
 
 ### 1. Clone and open
