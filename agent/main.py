@@ -198,7 +198,12 @@ def _relay_hits(spoken: list[str], keywords: set[str]) -> int:
 
 
 def _relay_needed(keywords: set[str]) -> int:
-    return max(3, len(keywords) // 10)
+    # How many of the result's distinctive words must appear in what the model
+    # actually said for us to count it as relayed. Scales with result length,
+    # but a short result (few keywords) must not demand more hits than it has --
+    # that made every one-line result look "not relayed" and re-park duplicates.
+    n = len(keywords)
+    return 0 if n == 0 else min(n, max(1, n // 10))
 
 
 _search_client: genai.Client | None = None
