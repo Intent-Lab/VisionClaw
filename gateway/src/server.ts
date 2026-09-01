@@ -6,7 +6,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { config } from "./config.js";
 import { initStore, saveStore, userResources } from "./store.js";
 import { ensureUser } from "./provision.js";
-import { runTurn, runTurnStreaming, queueContext, drainContext } from "./turn.js";
+import { runTurn, runTurnStreaming, queueContext, drainContext, type TurnStats } from "./turn.js";
 import { registerSocket, notifyUser, queuePending, drainPending } from "./notify.js";
 import { appendTrace, readTrace } from "./trace.js";
 import { registerConnectRoutes } from "./connect.js";
@@ -232,11 +232,32 @@ app.post("/v1/chat/completions", async (req, res) => {
       if (!res.writableFinished) clientGone = true;
     });
     // The session owns durable history; only the newest user turn is sent.
+    // What the subagent did, for the study trace: tool calls (name, server,
+    // ok, ms), chain depth, stop reason. Text only, args/results clipped.
+    const traceSubagent = (stats: TurnStats | undefined, outcome: string, resultText: string) => {
+      if (!stats) return;
+      appendTrace(userId, [
+        {
+          type: "subagent_turn",
+          task: lastUser.slice(0, 200),
+          outcome,
+          tool_count: stats.tools.length,
+          tools: stats.tools,
+          thinking: stats.thinking,
+          messages: stats.messages,
+          stop_reason: stats.stop_reason,
+          duration_ms: stats.duration_ms,
+          result_chars: resultText.length,
+          errors: stats.tools.filter((t) => t.ok === false).length,
+        },
+      ]);
+    };
     const result = await runTurn(
       sessionId,
       lastUser,
       isServiceCall ? 110_000 : config.spawnMode ? 0 : config.quickAnswerTimeoutMs,
-      (lateText) => {
+      (lateText, stats) => {
+        traceSubagent(stats, "late", lateText);
         void recordTask(userId, lastUser, lateText);
         const delivered = notifyUser(userId, lateText);
         if (!delivered) {
@@ -249,6 +270,7 @@ app.post("/v1/chat/completions", async (req, res) => {
     );
 
     if (!result.deferred && result.text) void recordTask(userId, lastUser, result.text);
+    if (!result.deferred) traceSubagent(result.stats, clientGone ? "caller_gone" : "quick", result.text ?? "");
     if (!result.deferred && result.text && clientGone) {
       console.warn(`[turn] caller gone before completion; parking result for ${userId}`);
       // Same wrapper the worker uses when it parks, so the next call's relay

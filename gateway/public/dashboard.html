@@ -284,6 +284,13 @@ function describe(e) {
     if (e.error) sub = "FAILED" + (sub ? "\n" + sub : "");
     return { cls: "t-tool", tag: "TOOL", main: `<span class="toolname">${esc(label)}</span>  ${esc(main)}`, sub, raw: true };
   }
+  if (e.type === "subagent_turn") {
+    const tools = Array.isArray(e.tools) ? e.tools : [];
+    const names = tools.map((t) => `${t.server ? t.server + "/" : ""}${t.name}${t.ok === false ? " (error)" : ""}`).join(", ");
+    const secs = e.duration_ms != null ? (e.duration_ms / 1000).toFixed(1) + "s" : "";
+    const sub = tools.map((t) => `${t.server ? t.server + "/" : ""}${t.name} [${t.ok === null ? "?" : t.ok ? "ok" : "ERROR"}${t.ms != null ? " " + t.ms + "ms" : ""}] ${t.args}${t.result ? "\n  -> " + t.result : ""}`).join("\n");
+    return { cls: "t-tool", tag: "AGENT*", main: `<span class="toolname">subagent</span>  ${esc(String(e.tool_count ?? tools.length))} tool calls ${esc(secs)} ${esc(e.outcome || "")}${names ? "  " + esc(names) : ""}`, sub, raw: true };
+  }
   if (e.type === "session_start") return { cls: "t-sys", tag: "SYS", main: `call started (${e.engine || "?"}) ${e.room || ""}` };
   if (e.type === "session_end") return { cls: "t-sys", tag: "SYS", main: "call ended" };
   if (e.type === "result_parked") return { cls: "t-sys", tag: "SYS", main: "result parked for next call", sub: e.text || "" };

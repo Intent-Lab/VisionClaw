@@ -93,11 +93,42 @@ async function sendUserTurn(
   }
 }
 
+/** One tool call the managed agent made during a turn, as seen on the event stream. */
+export interface TurnToolCall {
+  name: string;
+  server?: string;
+  ok: boolean | null;
+  ms: number | null;
+  args: string;
+  result: string;
+}
+
+/** What the subagent did during a turn -- the study's tool-depth and tool-mix data. */
+export interface TurnStats {
+  tools: TurnToolCall[];
+  thinking: number;
+  messages: number;
+  stop_reason: string | null;
+  duration_ms: number;
+}
+
 export interface TurnResult {
   /** Final text if it finished within the wait budget, else null. */
   text: string | null;
   /** True when the turn is still running and the result will arrive via onLateResult. */
   deferred: boolean;
+  stats?: TurnStats;
+}
+
+const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}...` : s);
+
+function blockText(content: unknown): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((b) => b && typeof b === "object" && (b as { type?: string }).type === "text")
+    .map((b) => String((b as { text?: string }).text ?? ""))
+    .join("\n")
+    .trim();
 }
 
 /**
@@ -113,7 +144,7 @@ export async function runTurn(
   sessionId: string,
   userText: string,
   maxWaitMs: number,
-  onLateResult: (text: string) => void,
+  onLateResult: (text: string, stats: TurnStats) => void,
   contextNotes: string[] = [],
   imageBase64?: string,
 ): Promise<TurnResult> {
@@ -127,9 +158,50 @@ export async function runTurn(
   let timedOut = false;
   let sawError = false;
 
+  // Subagent activity for the trace: tool calls paired with their results by id.
+  const startedAt = Date.now();
+  const stats: TurnStats = { tools: [], thinking: 0, messages: 0, stop_reason: null, duration_ms: 0 };
+  const pendingTools = new Map<string, { call: TurnToolCall; at: number }>();
   const drain = (async () => {
     for await (const event of stream) {
+      const ev = event as unknown as {
+        type: string;
+        id?: string;
+        name?: string;
+        input?: unknown;
+        content?: unknown;
+        mcp_server_name?: string;
+        mcp_tool_use_id?: string;
+        tool_use_id?: string;
+        is_error?: boolean;
+        stop_reason?: { type?: string };
+      };
+      if (ev.type === "agent.tool_use" || ev.type === "agent.mcp_tool_use") {
+        const call: TurnToolCall = {
+          name: ev.name ?? "?",
+          server: ev.mcp_server_name,
+          ok: null,
+          ms: null,
+          args: clip(JSON.stringify(ev.input ?? {}), 200),
+          result: "",
+        };
+        stats.tools.push(call);
+        if (ev.id) pendingTools.set(ev.id, { call, at: Date.now() });
+      } else {
+        const ref = ev.mcp_tool_use_id ?? ev.tool_use_id;
+        if (ref && pendingTools.has(ref)) {
+          const { call, at } = pendingTools.get(ref)!;
+          call.ok = !ev.is_error;
+          call.ms = Date.now() - at;
+          call.result = clip(blockText(ev.content).replace(/\s+/g, " "), 200);
+          pendingTools.delete(ref);
+        }
+      }
+      if (ev.type === "agent.thinking") stats.thinking++;
+      if (ev.type === "session.status_idle") stats.stop_reason = ev.stop_reason?.type ?? null;
+      stats.duration_ms = Date.now() - startedAt;
       if (event.type === "agent.message") {
+        stats.messages++;
         for (const block of event.content) {
           if (block.type === "text") parts.push(block.text);
         }
@@ -165,13 +237,13 @@ export async function runTurn(
   const finished = await Promise.race([drain, timeout]);
 
   if (finished !== null) {
-    return { text: finished || "Done.", deferred: false };
+    return { text: finished || "Done.", deferred: false, stats };
   }
 
   // Deferred: keep draining in the background and hand the result to the caller.
   void drain
     .then((text) => {
-      if (timedOut && text) onLateResult(text);
+      if (timedOut && text) onLateResult(text, stats);
     })
     .catch((err) => console.error("[turn] background drain failed:", err));
 
