@@ -43,6 +43,7 @@ struct SettingsView: View {
 
   @State private var cloudGatewayURL: String = ""
   @State private var cloudGatewayToken: String = ""
+  @State private var accountEmail: String?
   @State private var showResetConfirmation = false
   @State private var gatewayStatus: GatewayStatus = .checking
   // Applies immediately rather than on Save: the root view observes the same
@@ -80,6 +81,17 @@ struct SettingsView: View {
         // Cloud gateway is the only backend now.
         if true {
           Section {
+            if let accountEmail, !accountEmail.isEmpty {
+              HStack {
+                Text("Signed in as")
+                Spacer()
+                Text(accountEmail)
+                  .foregroundColor(.secondary)
+                  .lineLimit(1)
+                  .truncationMode(.middle)
+              }
+              Button("Sign out", role: .destructive) { signOut() }
+            }
             HStack {
               Text("Status")
               Spacer()
@@ -197,6 +209,17 @@ struct SettingsView: View {
   private func loadCurrentValues() {
     cloudGatewayURL = settings.cloudGatewayURL
     cloudGatewayToken = settings.cloudGatewayToken
+    accountEmail = settings.accountEmail
+  }
+
+  /// Drops the gateway credential; the sign-in gate returns at next launch.
+  private func signOut() {
+    settings.cloudGatewayToken = ""
+    settings.accountEmail = nil
+    settings.accountStatus = nil
+    cloudGatewayToken = ""
+    accountEmail = nil
+    gatewayStatus = .notConfigured
   }
 
   private func save() {

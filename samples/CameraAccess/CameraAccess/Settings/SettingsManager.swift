@@ -59,6 +59,8 @@ final class SettingsManager {
     case openClawGatewayToken
     case cloudGatewayURL
     case cloudGatewayToken
+    case accountEmail
+    case accountStatus
     case geminiSystemPrompt
     case speakerOutputEnabled
     case videoStreamingEnabled
@@ -153,6 +155,20 @@ final class SettingsManager {
     set { defaults.set(newValue, forKey: Key.cloudGatewayToken.rawValue) }
   }
 
+  // MARK: - Account (Google sign-in)
+
+  /// Email of the Google account that created this app's gateway credential.
+  var accountEmail: String? {
+    get { defaults.string(forKey: Key.accountEmail.rawValue) }
+    set { defaults.set(newValue, forKey: Key.accountEmail.rawValue) }
+  }
+
+  /// approved | pending | revoked, as last reported by the gateway.
+  var accountStatus: String? {
+    get { defaults.string(forKey: Key.accountStatus.rawValue) }
+    set { defaults.set(newValue, forKey: Key.accountStatus.rawValue) }
+  }
+
   // MARK: - Audio
 
   var speakerOutputEnabled: Bool {
@@ -179,6 +195,7 @@ final class SettingsManager {
   func resetAll() {
     for key in [Key.geminiAPIKey, .geminiSystemPrompt, .agentBackend, .openClawHost, .openClawPort,
                 .openClawHookToken, .openClawGatewayToken, .cloudGatewayURL, .cloudGatewayToken,
+                .accountEmail, .accountStatus,
                 .speakerOutputEnabled, .videoStreamingEnabled,
                 .proactiveNotificationsEnabled] {
       defaults.removeObject(forKey: key.rawValue)
