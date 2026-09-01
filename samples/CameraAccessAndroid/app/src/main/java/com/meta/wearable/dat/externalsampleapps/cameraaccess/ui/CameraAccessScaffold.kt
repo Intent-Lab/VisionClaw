@@ -68,16 +68,16 @@ fun CameraAccessScaffold(
   val liveKitViewModel: LiveKitSessionViewModel = composeViewModel()
   val snackbarHostState = remember { SnackbarHostState() }
   // Builds ship without a gateway token (it is per-person identity), so an
-  // install with none configured sees only the access-code gate. Re-checked
-  // when Settings closes because the token can be edited or reset there.
-  var tokenConfigured by remember { mutableStateOf(SettingsManager.isGatewayConfigured) }
+  // install with none configured -- or one whose account is still pending
+  // approval -- sees only the sign-in gate. The flow also drops a revoked
+  // account back here mid-session. Re-checked when Settings closes because
+  // the token can be edited or reset there.
+  val unlocked by SettingsManager.unlockedFlow.collectAsStateWithLifecycle()
   LaunchedEffect(uiState.isSettingsVisible) {
-    if (!uiState.isSettingsVisible) {
-      tokenConfigured = SettingsManager.isGatewayConfigured
-    }
+    if (!uiState.isSettingsVisible) SettingsManager.refreshUnlocked()
   }
-  if (!tokenConfigured) {
-    AccessCodeScreen(onUnlocked = { tokenConfigured = true }, modifier = modifier)
+  if (!unlocked) {
+    AccessCodeScreen(onUnlocked = { SettingsManager.refreshUnlocked() }, modifier = modifier)
     return
   }
 

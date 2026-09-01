@@ -791,6 +791,13 @@ class LiveKitSessionViewModel(
             .build()
         httpClient.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
+            if (response.code == 401 && SettingsManager.accountEmail != null) {
+                // A signed-in account the gateway no longer honors (revoked or
+                // reverted to pending): drop to the gate instead of a dead call.
+                SettingsManager.accountStatus = "revoked"
+                SettingsManager.signOut()
+                throw IOException("Your account is no longer active")
+            }
             if (!response.isSuccessful) {
                 throw IOException(GatewayApi.errorMessage(text) ?: "gateway error (${response.code})")
             }

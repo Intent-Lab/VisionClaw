@@ -47,9 +47,20 @@ object SettingsManager {
     private val _captureSourceFlow = MutableStateFlow(CaptureSource.PHONE)
     val captureSourceFlow: StateFlow<CaptureSource> = _captureSourceFlow.asStateFlow()
 
+    // Whether the app may show anything beyond the sign-in gate. A flow so a
+    // token cleared from deep inside a call (revoked account -> 401) drops the
+    // root scaffold back to the gate without a settings round-trip.
+    private val _unlockedFlow = MutableStateFlow(false)
+    val unlockedFlow: StateFlow<Boolean> = _unlockedFlow.asStateFlow()
+
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         _captureSourceFlow.value = CaptureSource.fromValue(prefs.getString("captureSource", null))
+        refreshUnlocked()
+    }
+
+    fun refreshUnlocked() {
+        _unlockedFlow.value = isUnlocked
     }
 
     var captureSource: CaptureSource
@@ -66,7 +77,41 @@ object SettingsManager {
 
     var gatewayToken: String
         get() = prefs.getString("gatewayToken", null) ?: Secrets.gatewayToken
-        set(value) = prefs.edit().putString("gatewayToken", value).apply()
+        set(value) {
+            prefs.edit().putString("gatewayToken", value).apply()
+            refreshUnlocked()
+        }
+
+    /** Google account the token was issued to; null for access-code sign-ins. */
+    var accountEmail: String?
+        get() = prefs.getString("accountEmail", null)
+        set(value) = prefs.edit().putString("accountEmail", value).apply()
+
+    var accountUserId: String?
+        get() = prefs.getString("accountUserId", null)
+        set(value) = prefs.edit().putString("accountUserId", value).apply()
+
+    /** approved | pending | revoked, as last reported by GET /me. */
+    var accountStatus: String?
+        get() = prefs.getString("accountStatus", null)
+        set(value) {
+            prefs.edit().putString("accountStatus", value).apply()
+            refreshUnlocked()
+        }
+
+    /** Pending accounts hold a real token but every endpoint answers 401. */
+    val isUnlocked: Boolean
+        get() = isGatewayConfigured && accountStatus != "pending"
+
+    fun signOut() {
+        prefs.edit()
+            .remove("gatewayToken")
+            .remove("accountEmail")
+            .remove("accountUserId")
+            .remove("accountStatus")
+            .apply()
+        refreshUnlocked()
+    }
 
     // An unfilled Secrets.kt.example placeholder is not empty, so without this
     // a fresh clone reports "configured" and then fails with a 401 that looks
@@ -91,5 +136,6 @@ object SettingsManager {
     fun resetAll() {
         prefs.edit().clear().apply()
         _captureSourceFlow.value = CaptureSource.PHONE
+        refreshUnlocked()
     }
 }

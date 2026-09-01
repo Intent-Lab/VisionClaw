@@ -278,11 +278,15 @@ private fun GatewaySettingsScreen(
     var gatewayBaseUrl by remember { mutableStateOf(SettingsManager.gatewayBaseUrl) }
     var gatewayToken by remember { mutableStateOf(SettingsManager.gatewayToken) }
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
+    val accountEmail = SettingsManager.accountEmail
+    var signedOut by remember { mutableStateOf(false) }
 
     fun saveAndClose() {
         SettingsManager.gatewayBaseUrl = gatewayBaseUrl.trim()
-        SettingsManager.gatewayToken = gatewayToken.trim()
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
+        // Signing out already cleared the token; re-saving the stale field
+        // value would silently sign the user back in.
+        if (!signedOut) SettingsManager.gatewayToken = gatewayToken.trim()
         onBack()
     }
 
@@ -307,6 +311,24 @@ private fun GatewaySettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             SectionHeader("Gateway")
+            if (accountEmail != null && !signedOut) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text("Signed in as", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(accountEmail, style = MaterialTheme.typography.bodyLarge)
+                    }
+                    TextButton(onClick = {
+                        SettingsManager.signOut()
+                        signedOut = true
+                        onBack()
+                    }) { Text("Sign out") }
+                }
+            }
             MonoTextField(
                 value = gatewayBaseUrl,
                 onValueChange = { gatewayBaseUrl = it },
@@ -314,12 +336,14 @@ private fun GatewaySettingsScreen(
                 placeholder = "https://gateway.example.com",
                 keyboardType = KeyboardType.Uri,
             )
-            MonoTextField(
-                value = gatewayToken,
-                onValueChange = { gatewayToken = it },
-                label = "Access Token",
-                placeholder = "Your gateway access token",
-            )
+            if (accountEmail == null) {
+                MonoTextField(
+                    value = gatewayToken,
+                    onValueChange = { gatewayToken = it },
+                    label = "Access Token",
+                    placeholder = "Your gateway access token",
+                )
+            }
 
             // Glasses live POV streaming; unrelated to the gateway but equally
             // rarely touched.

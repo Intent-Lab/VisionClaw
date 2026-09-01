@@ -7,7 +7,9 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONException
 import org.json.JSONObject
 
@@ -123,6 +125,76 @@ object GatewayApi {
                     )
                 }
                 Result.success(tasks)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    sealed class AuthExchange {
+        data class Ready(val token: String, val userId: String, val email: String, val status: String) : AuthExchange()
+        data object NotReady : AuthExchange()
+        data object Expired : AuthExchange()
+        data class Error(val detail: String) : AuthExchange()
+    }
+
+    data class Me(val userId: String, val email: String, val status: String)
+
+    /** Browser URL that starts Google sign-in; the nonce ties the browser dance to this install. */
+    fun signInUrl(nonce: String): String =
+        "${SettingsManager.gatewayBaseUrl.trimEnd('/')}/auth/google?nonce=$nonce"
+
+    /**
+     * One-time pickup of the credential the gateway parked under the nonce
+     * after Google consent. 404 until consent completes, 410 once the nonce
+     * has expired or been used.
+     */
+    suspend fun exchangeNonce(nonce: String): AuthExchange = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().put("nonce", nonce).toString()
+                .toRequestBody("application/json".toMediaType())
+            val request = Request.Builder()
+                .url("${SettingsManager.gatewayBaseUrl.trimEnd('/')}/auth/exchange")
+                .post(body)
+                .build()
+            client.newCall(request).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                when (response.code) {
+                    200 -> {
+                        val json = JSONObject(text)
+                        AuthExchange.Ready(
+                            token = json.getString("token"),
+                            userId = json.optString("userId"),
+                            email = json.optString("email"),
+                            status = json.optString("status", "approved"),
+                        )
+                    }
+                    404 -> AuthExchange.NotReady
+                    410 -> AuthExchange.Expired
+                    else -> AuthExchange.Error(errorMessage(text) ?: "Server error ${response.code}")
+                }
+            }
+        } catch (e: IOException) {
+            AuthExchange.Error("Unreachable")
+        }
+    }
+
+    /** Account state for the stored token; 401 while pending or revoked is reported, not thrown. */
+    suspend fun fetchMe(): Result<Me> = withContext(Dispatchers.IO) {
+        try {
+            client.newCall(request("/me")).execute().use { response ->
+                val text = response.body?.string().orEmpty()
+                if (response.code != 200) {
+                    return@use Result.failure(IOException(errorMessage(text) ?: "Server error ${response.code}"))
+                }
+                val json = JSONObject(text)
+                Result.success(
+                    Me(
+                        userId = json.optString("userId"),
+                        email = json.optString("email"),
+                        status = json.optString("status", "approved"),
+                    ),
+                )
             }
         } catch (e: Exception) {
             Result.failure(e)
