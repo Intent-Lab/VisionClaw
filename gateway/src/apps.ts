@@ -50,6 +50,20 @@ export interface McpOAuth21App extends AppBase {
   clientName: string;
   /** Sent only if the server advertises scopes; most remote MCPs use one default scope. */
   scopes?: string[];
+  /**
+   * Pre-registered client, for servers that do not offer dynamic registration
+   * (Slack): the id/secret come from these env vars and no registration call
+   * is made. The app is hidden until both are set.
+   */
+  clientIdEnv?: string;
+  clientSecretEnv?: string;
+  tokenEndpointAuthMethod?: "client_secret_post" | "client_secret_basic";
+  /**
+   * Always send the RFC 8707 `resource` indicator. Otherwise it is sent only
+   * when the server's metadata advertises support -- some providers reject
+   * parameters they do not know.
+   */
+  sendResource?: boolean;
 }
 
 export type ConnectableApp = StaticOAuthApp | McpOAuth21App;
@@ -63,6 +77,26 @@ const GOOGLE_AUTHORIZE_PARAMS = {
   prompt: "consent",
   include_granted_scopes: "true",
 };
+
+/**
+ * User-token scopes requested at Slack consent. Sized for the study's
+ * scenarios (search, read and post in channels/DMs, post a receipt or a
+ * canvas); trim here and the consent screen follows. Every entry must also be
+ * enabled as a User Token Scope on the Slack app itself.
+ */
+export const SLACK_SCOPES = [
+  "search:read.public",
+  "search:read.private",
+  "chat:write",
+  "channels:read",
+  "channels:history",
+  "groups:history",
+  "im:history",
+  "users:read",
+  "files:write",
+  "canvases:read",
+  "canvases:write",
+];
 
 export const APPS: Record<string, ConnectableApp> = {
   /**
@@ -178,6 +212,28 @@ export const APPS: Record<string, ConnectableApp> = {
     mcpUrl: "https://mcp.notion.com/mcp",
     clientName: "VisionClaw",
     disabledEnv: "NOTION_DISABLED",
+    sendResource: true,
+  },
+
+  /**
+   * Slack's hosted MCP server (mcp.slack.com, GA 2026-02). Standard OAuth 2.1
+   * metadata and PKCE, but NO dynamic client registration: it must be backed
+   * by a Slack app you create (see README), whose id/secret live in the env.
+   * Only internal or directory-published apps may use it, so participants
+   * must be members of the workspace the app was created in. User tokens do
+   * not expire unless the app turns on token rotation -- leave it off.
+   */
+  slack: {
+    kind: "mcp-oauth21",
+    id: "slack",
+    displayName: "Slack",
+    mcpUrl: "https://mcp.slack.com/mcp",
+    clientName: "VisionClaw",
+    scopes: SLACK_SCOPES,
+    clientIdEnv: "SLACK_CLIENT_ID",
+    clientSecretEnv: "SLACK_CLIENT_SECRET",
+    tokenEndpointAuthMethod: "client_secret_post",
+    disabledEnv: "SLACK_DISABLED",
   },
 };
 
@@ -214,8 +270,20 @@ export function appCredentials(app: StaticOAuthApp): { clientId: string; clientS
   return { clientId, clientSecret };
 }
 
-/** Whether the app can be connected right now: static apps need their env
- * client; self-registering ones need nothing beyond their entry. */
+/** Pre-registered client for an MCP app that cannot self-register, or null
+ * when the app registers dynamically or its env is missing. */
+export function mcpClientCredentials(app: McpOAuth21App): { clientId: string; clientSecret: string } | null {
+  if (!app.clientIdEnv || !app.clientSecretEnv) return null;
+  const clientId = process.env[app.clientIdEnv];
+  const clientSecret = process.env[app.clientSecretEnv];
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret };
+}
+
+/** Whether the app can be connected right now: static apps and MCP apps with
+ * a pre-registered client need their env; self-registering ones need nothing
+ * beyond their entry. */
 export function appAvailable(app: ConnectableApp): boolean {
-  return app.kind === "mcp-oauth21" ? true : appCredentials(app) !== null;
+  if (app.kind === "mcp-oauth21") return app.clientIdEnv ? mcpClientCredentials(app) !== null : true;
+  return appCredentials(app) !== null;
 }

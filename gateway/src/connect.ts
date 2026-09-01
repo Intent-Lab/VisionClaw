@@ -6,6 +6,7 @@ import {
   appAvailable,
   appCredentials,
   getApp,
+  mcpClientCredentials,
   type ConnectableApp,
   type McpOAuth21App,
   type StaticOAuthApp,
@@ -213,6 +214,20 @@ interface AuthServerMetadata {
   code_challenge_methods_supported?: string[];
   scopes_supported?: string[];
   token_endpoint_auth_methods_supported?: string[];
+  resource_indicators_supported?: boolean;
+  /** The protected resource's own identifier (RFC 9728), when it published one. */
+  prmResource?: string;
+}
+
+/**
+ * RFC 8707 resource indicator to send, or undefined. Sent when the server
+ * advertises support or the app insists (Notion, which requires it); skipped
+ * otherwise, since some providers reject parameters they do not know. The
+ * value is the resource's published identifier, falling back to the MCP URL.
+ */
+function resourceFor(app: McpOAuth21App, meta: AuthServerMetadata): string | undefined {
+  if (!app.sendResource && !meta.resource_indicators_supported) return undefined;
+  return meta.prmResource ?? app.mcpUrl;
 }
 
 // Notion fronts its MCP with Cloudflare, which bans some non-browser
@@ -248,9 +263,10 @@ async function discoverAuthServer(app: McpOAuth21App): Promise<AuthServerMetadat
   if (hit && Date.now() - hit.at < META_TTL_MS) return hit.meta;
 
   const origin = new URL(app.mcpUrl).origin;
+  type Prm = { authorization_servers?: string[]; resource?: string };
   const prm =
-    (await fetchJson<{ authorization_servers?: string[] }>(wellKnown(app.mcpUrl, "oauth-protected-resource"))) ??
-    (await fetchJson<{ authorization_servers?: string[] }>(`${origin}/.well-known/oauth-protected-resource`));
+    (await fetchJson<Prm>(wellKnown(app.mcpUrl, "oauth-protected-resource"))) ??
+    (await fetchJson<Prm>(`${origin}/.well-known/oauth-protected-resource`));
   const authServer = prm?.authorization_servers?.[0] ?? origin;
 
   const meta =
@@ -259,6 +275,7 @@ async function discoverAuthServer(app: McpOAuth21App): Promise<AuthServerMetadat
   if (!meta?.authorization_endpoint || !meta.token_endpoint) {
     throw new Error(`${app.id}: no OAuth authorization server metadata at ${authServer}`);
   }
+  if (prm?.resource) meta.prmResource = prm.resource;
   metadataCache.set(app.id, { at: Date.now(), meta });
   console.log(`[connect] ${app.id} auth server: ${authServer}`);
   return meta;
@@ -275,6 +292,21 @@ async function ensureMcpClient(
   meta: AuthServerMetadata,
   redirectUri: string,
 ): Promise<McpClientRegistration> {
+  // Servers without dynamic registration (Slack) are backed by an app we
+  // created in their console; the id/secret come from the env, nothing is
+  // registered or persisted.
+  const preset = mcpClientCredentials(app);
+  if (preset) {
+    return {
+      clientId: preset.clientId,
+      clientSecret: preset.clientSecret,
+      tokenEndpointAuthMethod: app.tokenEndpointAuthMethod ?? "client_secret_post",
+      registeredAt: "env",
+      redirectUri,
+    };
+  }
+  if (app.clientIdEnv) throw new Error(`${app.id}: ${app.clientIdEnv}/${app.clientSecretEnv} are not set`);
+
   const store = await loadStore();
   store.shared.mcpClients ??= {};
   const existing = store.shared.mcpClients[app.id];
@@ -332,7 +364,7 @@ function refreshFor(reg: McpClientRegistration, meta: AuthServerMetadata, app: M
       reg.tokenEndpointAuthMethod === "none" || !reg.clientSecret
         ? { type: "none" }
         : { type: reg.tokenEndpointAuthMethod, client_secret: reg.clientSecret },
-    resource: app.mcpUrl,
+    resource: resourceFor(app, meta),
     scope: app.scopes?.join(" "),
   };
 }
@@ -352,23 +384,47 @@ function pkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
-/** Authorization-code exchange for a dynamically registered client (PKCE + resource indicator). */
+/**
+ * Token responses come in two shapes: the standard `{access_token, ...}` and
+ * Slack's `{ok, authed_user: {access_token, ...}}` envelope, which also
+ * reports failures as `{ok: false, error}` with HTTP 200.
+ */
+function parseTokenResponse(raw: unknown): OAuthTokens | { error: string } {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  if (body.ok === false) return { error: String(body.error ?? "provider rejected the grant") };
+  const src = (typeof body.authed_user === "object" && body.authed_user !== null
+    ? (body.authed_user as Record<string, unknown>)
+    : body) as Record<string, unknown>;
+  if (typeof src.access_token !== "string" || !src.access_token) {
+    return { error: "no access_token in the token response" };
+  }
+  return {
+    access_token: src.access_token,
+    refresh_token: typeof src.refresh_token === "string" ? src.refresh_token : undefined,
+    expires_in: typeof src.expires_in === "number" ? src.expires_in : undefined,
+    scope: typeof src.scope === "string" ? src.scope : undefined,
+  };
+}
+
+/** Authorization-code exchange for a remote MCP server's client (PKCE, optional resource indicator). */
 async function exchangeMcpAuthCode(
   meta: AuthServerMetadata,
   reg: McpClientRegistration,
   app: McpOAuth21App,
   args: { code: string; verifier: string; redirectUri: string },
-): Promise<OAuthTokens | null> {
+): Promise<OAuthTokens | { error: string }> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code: args.code,
     redirect_uri: args.redirectUri,
     client_id: reg.clientId,
     code_verifier: args.verifier,
-    resource: app.mcpUrl,
   });
+  const resource = resourceFor(app, meta);
+  if (resource) body.set("resource", resource);
   const headers: Record<string, string> = {
     "Content-Type": "application/x-www-form-urlencoded",
+    Accept: "application/json",
     "User-Agent": GATEWAY_UA,
   };
   if (reg.clientSecret && reg.tokenEndpointAuthMethod === "client_secret_post") {
@@ -377,11 +433,20 @@ async function exchangeMcpAuthCode(
     headers.Authorization = `Basic ${Buffer.from(`${reg.clientId}:${reg.clientSecret}`).toString("base64")}`;
   }
   const r = await fetch(meta.token_endpoint, { method: "POST", headers, body });
+  const text = await r.text();
   if (!r.ok) {
-    console.error(`[connect] ${app.id} token exchange failed:`, r.status, await r.text());
-    return null;
+    console.error(`[connect] ${app.id} token exchange failed:`, r.status, text.slice(0, 300));
+    return { error: `HTTP ${r.status}` };
   }
-  return (await r.json()) as OAuthTokens;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: "token response was not JSON" };
+  }
+  const result = parseTokenResponse(parsed);
+  if ("error" in result) console.error(`[connect] ${app.id} token exchange rejected:`, result.error);
+  return result;
 }
 
 /**
@@ -513,12 +578,17 @@ export function registerConnectRoutes(
             code_challenge: challenge,
             code_challenge_method: "S256",
             state,
-            resource: appDef.mcpUrl,
           });
+          const resource = resourceFor(appDef, meta);
+          if (resource) params.set("resource", resource);
           if (appDef.scopes?.length) params.set("scope", appDef.scopes.join(" "));
           res.redirect(`${meta.authorization_endpoint}?${params.toString()}`);
         } catch (err) {
           console.error(`[connect] ${appDef.id} could not start:`, err);
+          if (appDef.clientIdEnv && !mcpClientCredentials(appDef)) {
+            res.status(503).send(page("Not configured", `${appDef.displayName} is not set up on this gateway yet.`));
+            return;
+          }
           res.status(502).send(page("Could not connect", `${appDef.displayName} is not reachable right now. Please try again.`));
         }
       })();
@@ -573,11 +643,18 @@ export function registerConnectRoutes(
           res.status(400).send(page("Could not connect", "The sign-in link expired. Please try again from the app."));
           return;
         }
-        tokens = await exchangeMcpAuthCode(meta, reg, appDef, {
+        const exchanged = await exchangeMcpAuthCode(meta, reg, appDef, {
           code,
           verifier: entry.verifier,
           redirectUri: redirectUri(req, appDef.id),
         });
+        if ("error" in exchanged) {
+          res.status(502).send(
+            page("Could not connect", `${appDef.displayName} rejected the sign-in (${exchanged.error}). Please try again.`),
+          );
+          return;
+        }
+        tokens = exchanged;
         refresh = refreshFor(reg, meta, appDef);
       } else {
         const creds = appCredentials(appDef);

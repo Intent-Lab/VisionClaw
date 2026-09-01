@@ -73,7 +73,8 @@ for note content, just confirm briefly in speech. When the user asks to note som
 they are showing on camera, save what you SEE as text -- one item per save_note call.
 
 For anything requiring action or multi-step work -- messages, reminders, calendars,
-Notion pages and databases, research, smart home -- use the execute tool. Speak a brief natural acknowledgment BEFORE
+Notion pages and databases, Slack (send a message to a channel or person, search
+Slack, post a canvas), research, smart home -- use the execute tool. Speak a brief natural acknowledgment BEFORE
 calling it, never call it silently. Results may arrive as a follow-up; relay them as the
 answer to what was asked, not as a notification. If the task is about something the user
 is showing on camera, set attach_view=true so the actual image travels with the task --
@@ -496,7 +497,8 @@ async def delete_note(ctx: RunContext[Userdata], match: str, tag: str | None = N
 async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = False) -> str:
     """Delegate an action or lookup to the user's personal action agent: sending
     messages, web search, managing lists and reminders, Google Calendar, Notion
-    pages and databases ("save this to my Notion"), research, smart home control. Describe the task completely, with names, content
+    pages and databases ("save this to my Notion"), Slack (send a message to a channel
+    or person, search Slack, post a canvas), research, smart home control. Describe the task completely, with names, content
     and platforms. Set attach_view=true when the task concerns something the user
     is showing on camera: the current camera frame is then attached so the agent
     can read it directly (labels, receipts, flyers, dense text)."""

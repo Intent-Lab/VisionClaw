@@ -142,6 +142,40 @@ refresh; Anthropic refreshes them from the stored vault credential.
 The same `mcp-oauth21` app kind works for any remote MCP server that implements
 the authorization spec: add an entry in `apps.ts` with its `mcpUrl` and a
 `clientName`, and the discovery, registration, and consent flow are shared.
+Servers that publish metadata but do not offer dynamic client registration take
+the same entry plus `clientIdEnv`/`clientSecretEnv` for a client you registered
+in their console (Slack below).
+
+### Slack
+
+Slack connects through Slack's hosted MCP server (`https://mcp.slack.com/mcp`):
+standard OAuth 2.1 metadata and PKCE, but no dynamic client registration, so it
+must be backed by a Slack app you create:
+
+1. https://api.slack.com/apps -> Create New App -> From scratch, in the workspace
+   the study will use.
+2. OAuth & Permissions -> Redirect URLs -> add
+   `https://api.visionagents.app/connect/slack/callback` and save.
+3. OAuth & Permissions -> User Token Scopes -> add every scope in `SLACK_SCOPES`
+   (`apps.ts`): search:read.public, search:read.private, chat:write, channels:read,
+   channels:history, groups:history, im:history, users:read, files:write,
+   canvases:read, canvases:write. Trim the constant and the app in step if the
+   study needs less.
+4. Leave Token Rotation OFF (OAuth & Permissions -> Advanced token security).
+   Rotated tokens expire after 12 hours; without rotation, user tokens do not
+   expire, so the vault credential is stored without a refresh block.
+5. Basic Information -> App Credentials -> copy Client ID and Client Secret, then
+   `fly secrets set SLACK_CLIENT_ID=... SLACK_CLIENT_SECRET=... -a visionclaw-gateway`.
+   The app is hidden from `/apps` until both are set; `SLACK_DISABLED=true` hides it
+   again without a deploy.
+
+Constraint from Slack: only internal apps and directory-published apps may use the
+MCP server. An internal app works for members of the workspace it was created in,
+so every participant who should get Slack must belong to that workspace (a study
+workspace you invite them to is the simplest arrangement).
+
+What the user sees: Slack's consent screen for the requested user scopes; every
+tool call then acts as that user, under their own permissions.
 
 ## Google sign-in and accounts
 
