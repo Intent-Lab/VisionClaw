@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -439,6 +440,26 @@ private fun UiCardView(
                 )
             }
         }
+        if (card.type == "live" && card.url != null) {
+            // Live browser view (Browser Use). The URL runs JavaScript and opens
+            // a WebSocket to stream the remote browser, so JS + DOM storage are
+            // required. Fixed height so it floats mid-screen like a result card.
+            AndroidView(
+                factory = { ctx ->
+                    android.webkit.WebView(ctx).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        webViewClient = android.webkit.WebViewClient()
+                        loadUrl(card.url)
+                    }
+                },
+                onRelease = { it.destroy() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .clip(RoundedCornerShape(12.dp)),
+            )
+        } else {
         Column(
             modifier = Modifier
                 .verticalScroll(rememberScrollState())
@@ -525,6 +546,7 @@ private fun UiCardView(
                     }
                 }
             }
+        }
         }
     }
 }
