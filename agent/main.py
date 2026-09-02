@@ -286,6 +286,10 @@ MAX_HEARTBEATS = 4
 # How long to wait for a free turn slot before injecting a result relay, so it
 # does not collide with an active response or a barge-in.
 DELIVER_WAIT_S = 8
+# After a browse finishes, its cloud browser lingers on the final page for a
+# couple of minutes, so the live card keeps showing the result. Hold it for this
+# window, then clear it.
+BROWSE_KEEPALIVE_S = 90
 
 # The gateway echoes this ack when a task outlives its own 110s wait; it is an
 # instruction blob for a voice model, not an answer, so never relay it as one.
@@ -800,31 +804,19 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
         return "The browser could not start that task. Tell the user briefly and offer to try again."
 
     async def _finish_card(result: str | None) -> None:
-        # The live browser session ends when the task finishes, so the live view
-        # goes dead. Swap it for a persistent result card (same uuid) as the
-        # answer is delivered, instead of leaving a blank viewer or vanishing --
-        # but only if this run still owns the card (a later browse may own it).
+        # Keep the live view on screen after the task: the cloud browser lingers
+        # on the final page, so the user keeps seeing the result instead of the
+        # card vanishing or switching to a text card. Hold for a short window,
+        # then clear it -- unless a later browse has taken over the card (own it
+        # by run id), or this was a failure/deferral with nothing to show.
         if ctx.userdata.live_browse_run != run_id:
             return
-        ctx.userdata.live_browse_run = None
         if result and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
-            body = " ".join(result.split())
-            if len(body) > 400:
-                body = body[:397].rstrip() + "..."
-            title = " ".join(task.split())
-            if len(title) > 48:
-                title = title[:47].rstrip() + "..."
-            card = {"uuid": live_uuid, "version": 2, "type": "info",
-                    "title": title, "body": body, "fallback_text": body[:120]}
-            try:
-                await _publish_card(room, card)
-                ctx.userdata.tracer.emit("agent_action", tool="show_card", card_type="info",
-                                         title=title, auto=True)
-            except Exception:
-                logger.exception("failed to publish browse result card: user=%s", user_id)
-        else:
-            # Failed or still running: nothing to show, so clear the dead view.
-            await _dismiss_card(room, live_uuid)
+            await asyncio.sleep(BROWSE_KEEPALIVE_S)
+            if ctx.userdata.live_browse_run != run_id:
+                return  # a newer browse now owns the card; leave it alone
+        ctx.userdata.live_browse_run = None
+        await _dismiss_card(room, live_uuid)
 
     job = asyncio.ensure_future(_gateway_browse_await(user_id, run_id, task))
     ctx.userdata.browse_job = job
