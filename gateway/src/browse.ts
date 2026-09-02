@@ -44,14 +44,15 @@ export async function startBrowse(task: string): Promise<BrowseStart> {
       task,
       ...(model ? { model } : {}),
       maxCostUsd: cap,
-      // Portrait phone viewport so the live-view canvas fits the phone card
-      // (a desktop-width browser rendered into a ~360dp card shows only a
-      // cropped slice) and the target site serves its mobile layout.
+      // Landscape desktop viewport. The live-view card is wider than it is tall,
+      // so a portrait remote screen gets letterboxed with big empty side bars.
+      // A normal horizontal desktop size fills the card's width (small but full)
+      // and shows the regular desktop site, which reads far more naturally.
       browserSettings: {
         proxyCountryCode: "us",
         record: true,
-        screenWidth: Number(process.env.BROWSER_USE_SCREEN_W ?? 390),
-        screenHeight: Number(process.env.BROWSER_USE_SCREEN_H ?? 844),
+        screenWidth: Number(process.env.BROWSER_USE_SCREEN_W ?? 1280),
+        screenHeight: Number(process.env.BROWSER_USE_SCREEN_H ?? 800),
       },
     }),
   });
