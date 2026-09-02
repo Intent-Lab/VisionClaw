@@ -188,6 +188,11 @@ class Userdata:
     # run dismisses the card only while it still owns this slot, so an earlier
     # run finishing cannot tear down a newer run's card (the double-fire race).
     live_browse_run: str | None = None
+    # The in-flight browse job, if any. A second browse call while one is still
+    # running is refused instead of spinning up a second Browser Use run -- the
+    # model tends to re-fire the tool when the first is slow (double-fire), and
+    # two live CUA runs mean double cost and duplicate relays.
+    browse_job: "asyncio.Future[str] | None" = None
 
 
 _RELAY_STOPWORDS = {"finished", "earlier", "result", "research", "summary", "shopping", "however", "because"}
@@ -719,6 +724,15 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
     ctx.userdata.tracer.emit("agent_action", tool="browse", task=task)
     user_id = ctx.userdata.user_id
     room = ctx.userdata.room
+    # Refuse a second browse while one is still running -- do NOT start a second
+    # Browser Use run. The model re-fires this tool when the first call is slow;
+    # each run is a live CUA (cost + a duplicate relay), so serialize them.
+    inflight = ctx.userdata.browse_job
+    if inflight is not None and not inflight.done():
+        logger.info("browse re-entry blocked (one already running): user=%s task=%r", user_id, task[:120])
+        ctx.userdata.tracer.emit("agent_action_result", tool="browse", task=task[:200], blocked="already_running")
+        return ("A web browse you already started is still running. Do NOT start another and do NOT guess the "
+                "answer; tell the user briefly that you're still on it -- the result will arrive shortly.")
     start = await _gateway_browse_start(user_id, task)
     if start.get("disabled"):
         return "Web browsing is not enabled yet. Tell the user you cannot browse live sites right now."
@@ -752,6 +766,13 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
         await _dismiss_card(room, live_uuid)
 
     job = asyncio.ensure_future(_gateway_browse_await(user_id, run_id, task))
+    ctx.userdata.browse_job = job
+
+    def _clear_inflight(_fut: "asyncio.Future[str]") -> None:
+        if ctx.userdata.browse_job is job:
+            ctx.userdata.browse_job = None
+
+    job.add_done_callback(_clear_inflight)
     on_deliver = _dismiss_when_delivered if card_shown else None
     return await _run_delegated(ctx, task, "browse", job, on_deliver=on_deliver)
 
