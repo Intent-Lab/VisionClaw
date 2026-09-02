@@ -44,15 +44,16 @@ export async function startBrowse(task: string): Promise<BrowseStart> {
       task,
       ...(model ? { model } : {}),
       maxCostUsd: cap,
-      // Landscape desktop viewport. The live-view card is wider than it is tall,
-      // so a portrait remote screen gets letterboxed with big empty side bars.
-      // A normal horizontal desktop size fills the card's width (small but full)
-      // and shows the regular desktop site, which reads far more naturally.
+      // Desktop viewport sized to roughly match the card's aspect so the remote
+      // page fills it: wide enough (1280) that sites still render their desktop
+      // layout, but tall enough that a width-scaled render doesn't leave an empty
+      // band at the top or bottom of the card. Tunable via env if the card's
+      // proportions change.
       browserSettings: {
         proxyCountryCode: "us",
         record: true,
         screenWidth: Number(process.env.BROWSER_USE_SCREEN_W ?? 1280),
-        screenHeight: Number(process.env.BROWSER_USE_SCREEN_H ?? 800),
+        screenHeight: Number(process.env.BROWSER_USE_SCREEN_H ?? 1080),
       },
     }),
   });
