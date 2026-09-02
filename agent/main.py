@@ -53,10 +53,14 @@ world through their phone camera or smart glasses. Keep responses concise and na
 
 You can see live video. Answer visual questions directly from what you see.
 
-When a task needs a real browser to visit a live website -- find a specific product with its
-price and reviews, compare items in an online store, check a site's live availability or hours,
-or fill a public web form -- use the browse tool. It is slower than quick_search (it drives an
-actual browser), so reserve it for genuine live-site visits.
+The browse tool is your computer-use agent: it drives a real web browser on a live site, both
+to read and to ACT. Use it for anything that happens on a website -- shopping (add an item to a
+cart, buy, place an order, check out), booking, signing up, filling and submitting a public web
+form, as well as reading (find a specific product with its price and reviews, compare items in a
+store, check live availability or hours). Anything on a shopping site, store, or general website
+that is not one of the user's own connected accounts is browse -- "add this to my Amazon cart" is
+browse, not execute. If the user says "computer use agent", "browser", or "shopping agent", they
+mean browse. It is slower than quick_search, so speak a brief acknowledgment before calling it.
 
 For quick factual lookups -- weather, sports scores, stock prices, news, opening hours,
 current facts about the world -- use quick_search. It answers in a couple of seconds;
@@ -78,10 +82,12 @@ Every note tool puts the up-to-date list card on screen by itself -- never call 
 for note content, just confirm briefly in speech. When the user asks to note something
 they are showing on camera, save what you SEE as text -- one item per save_note call.
 
-For anything requiring action or multi-step work -- messages, reminders, calendars,
-Notion pages and databases, Slack (send a message to a channel or person, search
-Slack, post a canvas), research, smart home -- use the execute tool. Speak a brief natural acknowledgment BEFORE
-calling it, never call it silently. Results may arrive as a follow-up; relay them as the
+The execute tool is the user's personal account agent -- it acts inside their OWN connected
+accounts and data: messages and email, reminders, calendars, Notion pages and databases, Slack
+(send a message to a channel or person, search Slack, post a canvas), general web research, smart
+home. It CANNOT open shopping sites or take actions on a website -- for anything that happens on a
+website, including shopping or adding to a cart, use browse instead, even when the user calls it
+"an action". Speak a brief natural acknowledgment BEFORE calling it, never call it silently. Results may arrive as a follow-up; relay them as the
 answer to what was asked, not as a notification. If the task is about something the user
 is showing on camera, set attach_view=true so the actual image travels with the task --
 still describe what you see in the task text as well."""
@@ -689,13 +695,16 @@ async def _run_delegated(
 
 @function_tool
 async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = False) -> str:
-    """Delegate an action or lookup to the user's personal action agent: sending
-    messages, web search, managing lists and reminders, Google Calendar, Notion
-    pages and databases ("save this to my Notion"), Slack (send a message to a channel
-    or person, search Slack, post a canvas), research, smart home control. Describe the task completely, with names, content
-    and platforms. Set attach_view=true when the task concerns something the user
-    is showing on camera: the current camera frame is then attached so the agent
-    can read it directly (labels, receipts, flyers, dense text)."""
+    """The user's personal account agent: acts inside their OWN connected accounts and data --
+    sending messages and email, managing lists and reminders, Google Calendar, Notion pages and
+    databases ("save this to my Notion"), Slack (send a message to a channel or person, search
+    Slack, post a canvas), general web research, smart home control. It CANNOT open a shopping
+    site or take actions on a website -- for anything that happens on a website (shopping, adding
+    to a cart, buying, booking, checking out, submitting a site's form) use browse instead, even
+    when the user frames it as "an action". Describe the task completely, with names, content and
+    platforms. Set attach_view=true when the task concerns something the user is showing on
+    camera: the current camera frame is then attached so the agent can read it directly (labels,
+    receipts, flyers, dense text)."""
     # Eval override: "never"/"always" force the A/B conditions; "auto" (default)
     # leaves the decision to the voice model's attach_view judgment.
     mode = os.environ.get("ATTACH_VIEW_MODE", "auto")
@@ -713,13 +722,18 @@ async def execute(ctx: RunContext[Userdata], task: str, attach_view: bool = Fals
 
 @function_tool
 async def browse(ctx: RunContext[Userdata], task: str) -> str:
-    """Drive a real web browser to do something that needs a live site visit: find a
-    specific product with its current price and reviews, compare options in an online store,
-    check availability or opening hours on a website, fill a public web form, or pull details
-    from a page that a plain search cannot reach. Describe the goal completely. This is slower
-    than quick_search because it navigates an actual browser, so use it only when visiting a
-    live site is genuinely required -- for quick facts use quick_search, for account actions
-    (calendar, email, notes, Notion, Slack) use execute."""
+    """The computer-use / shopping / browser agent: drives a real web browser on a live
+    website, both to READ and to ACT. Use it for anything that happens on a website -- shopping
+    (add an item to a cart, buy, place an order, check out), booking or reserving, signing up,
+    filling and submitting a public web form, navigating and clicking through pages, as well as
+    reading (find a specific product with its price and reviews, compare options in a store,
+    check live availability or opening hours, pull details a plain search cannot reach). ANY task
+    on a shopping site, store, or general website that is not one of the user's own connected
+    accounts is this tool -- including "add X to my Amazon cart". If the user says "computer use
+    agent", "computer usage agent", "browser", or "shopping agent", they mean this tool. Describe
+    the goal completely. Slower than quick_search (it drives an actual browser), so use it only
+    when a live site visit is genuinely required -- for quick facts use quick_search, and for the
+    user's own accounts (calendar, email, notes, Notion, Slack, smart home) use execute."""
     logger.info("browse start: user=%s task=%r", ctx.userdata.user_id, task[:200])
     ctx.userdata.tracer.emit("agent_action", tool="browse", task=task)
     user_id = ctx.userdata.user_id
