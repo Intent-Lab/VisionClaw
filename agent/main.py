@@ -609,15 +609,15 @@ async def _run_delegated(
     task: str,
     tool: str,
     job: "asyncio.Future[str]",
-    on_deliver: Callable[[], Awaitable[None]] | None = None,
+    on_deliver: Callable[[str | None], Awaitable[None]] | None = None,
 ) -> str:
     """Shared delegation loop for slow tools (execute, browse): hold the turn a
     few seconds; if the result is not back, free the model, heartbeat, then relay
     the result when it lands -- verifying it was actually spoken, and parking it
     for the next call if the user hung up or the model never said it. on_deliver,
-    if given, is fired once the result has been handed to the model to speak, so
-    a live-view card stays up through the whole task and clears as the answer is
-    delivered -- never mid-task."""
+    if given, is fired with the result text once it is handed to the model to
+    speak (None on failure/deferral), so a live-view card can swap itself for a
+    result card as the answer is delivered -- never mid-task."""
     tracer = ctx.userdata.tracer
     user_id = ctx.userdata.user_id
     task_start = time.monotonic()
@@ -628,7 +628,7 @@ async def _run_delegated(
         tracer.emit("agent_action_result", tool=tool, task=task[:200], result=result[:500],
                     agent_task_time_s=round(time.monotonic() - task_start, 1))
         if on_deliver is not None:
-            _spawn_bg(on_deliver())
+            _spawn_bg(on_deliver(result))
         return result
 
     session = ctx.session
@@ -682,10 +682,11 @@ async def _run_delegated(
             logger.warning("session closed before result could be spoken: user=%s", user_id)
             if result is not None and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
                 await _park_result(user_id, task, result)
-        # The task is over (delivered, failed, or deferred): clear any live-view
-        # card now, as the answer is being spoken, not the instant it finished.
+        # The task is over (delivered, failed, or deferred): hand the result to
+        # on_deliver so a live-view card can become a result card as the answer
+        # is spoken, rather than the instant it finished.
         if on_deliver is not None:
-            _spawn_bg(on_deliver())
+            _spawn_bg(on_deliver(result))
         if not delivered or result is None or result.startswith(GATEWAY_DEFERRAL_PREFIX):
             return
         keywords = _relay_keywords(result)
@@ -798,14 +799,32 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
     if not run_id:
         return "The browser could not start that task. Tell the user briefly and offer to try again."
 
-    async def _dismiss_when_delivered() -> None:
-        # Give the answer a moment to start playing, then clear the card -- but
-        # only if this run still owns it (a later browse may have replaced it).
-        await asyncio.sleep(4)
+    async def _finish_card(result: str | None) -> None:
+        # The live browser session ends when the task finishes, so the live view
+        # goes dead. Swap it for a persistent result card (same uuid) as the
+        # answer is delivered, instead of leaving a blank viewer or vanishing --
+        # but only if this run still owns the card (a later browse may own it).
         if ctx.userdata.live_browse_run != run_id:
             return
         ctx.userdata.live_browse_run = None
-        await _dismiss_card(room, live_uuid)
+        if result and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
+            body = " ".join(result.split())
+            if len(body) > 400:
+                body = body[:397].rstrip() + "..."
+            title = " ".join(task.split())
+            if len(title) > 48:
+                title = title[:47].rstrip() + "..."
+            card = {"uuid": live_uuid, "version": 2, "type": "info",
+                    "title": title, "body": body, "fallback_text": body[:120]}
+            try:
+                await _publish_card(room, card)
+                ctx.userdata.tracer.emit("agent_action", tool="show_card", card_type="info",
+                                         title=title, auto=True)
+            except Exception:
+                logger.exception("failed to publish browse result card: user=%s", user_id)
+        else:
+            # Failed or still running: nothing to show, so clear the dead view.
+            await _dismiss_card(room, live_uuid)
 
     job = asyncio.ensure_future(_gateway_browse_await(user_id, run_id, task))
     ctx.userdata.browse_job = job
@@ -815,7 +834,7 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
             ctx.userdata.browse_job = None
 
     job.add_done_callback(_clear_inflight)
-    on_deliver = _dismiss_when_delivered if card_shown else None
+    on_deliver = _finish_card if card_shown else None
     return await _run_delegated(ctx, task, "browse", job, on_deliver=on_deliver)
 
 
