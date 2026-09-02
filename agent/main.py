@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -183,6 +184,10 @@ class Userdata:
     # Everything the assistant has said this session, in order; relay checks
     # read it to confirm a delivered result was actually spoken.
     spoken: list[str] = field(default_factory=list)
+    # The Browser Use run whose live-view card is currently on screen. A browse
+    # run dismisses the card only while it still owns this slot, so an earlier
+    # run finishing cannot tear down a newer run's card (the double-fire race).
+    live_browse_run: str | None = None
 
 
 _RELAY_STOPWORDS = {"finished", "earlier", "result", "research", "summary", "shopping", "however", "because"}
@@ -560,11 +565,26 @@ async def _dismiss_card(room, uuid: str) -> None:
         logger.exception("failed to dismiss card: uuid=%s", uuid)
 
 
-async def _run_delegated(ctx: RunContext[Userdata], task: str, tool: str, job: "asyncio.Future[str]") -> str:
+def _spawn_bg(coro: "Awaitable[None]") -> None:
+    t = asyncio.ensure_future(coro)
+    _relay_tasks.add(t)
+    t.add_done_callback(_relay_tasks.discard)
+
+
+async def _run_delegated(
+    ctx: RunContext[Userdata],
+    task: str,
+    tool: str,
+    job: "asyncio.Future[str]",
+    on_deliver: Callable[[], Awaitable[None]] | None = None,
+) -> str:
     """Shared delegation loop for slow tools (execute, browse): hold the turn a
     few seconds; if the result is not back, free the model, heartbeat, then relay
     the result when it lands -- verifying it was actually spoken, and parking it
-    for the next call if the user hung up or the model never said it."""
+    for the next call if the user hung up or the model never said it. on_deliver,
+    if given, is fired once the result has been handed to the model to speak, so
+    a live-view card stays up through the whole task and clears as the answer is
+    delivered -- never mid-task."""
     tracer = ctx.userdata.tracer
     user_id = ctx.userdata.user_id
     task_start = time.monotonic()
@@ -574,6 +594,8 @@ async def _run_delegated(ctx: RunContext[Userdata], task: str, tool: str, job: "
         logger.info("%s quick result: user=%s len=%d t=%.1f", tool, user_id, len(result), time.monotonic() - task_start)
         tracer.emit("agent_action_result", tool=tool, task=task[:200], result=result[:500],
                     agent_task_time_s=round(time.monotonic() - task_start, 1))
+        if on_deliver is not None:
+            _spawn_bg(on_deliver())
         return result
 
     session = ctx.session
@@ -614,14 +636,19 @@ async def _run_delegated(ctx: RunContext[Userdata], task: str, tool: str, job: "
                             "Now tell the user this result in your own words, in a few sentences, as the answer to "
                             "their earlier request. Do not thank them and do not ask what they need next until you "
                             "have said it. Speak the result now.")
+        delivered = True
         try:
             session.generate_reply(instructions=instructions)
         except Exception:
+            delivered = False
             logger.warning("session closed before result could be spoken: user=%s", user_id)
             if result is not None and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
                 await _park_result(user_id, task, result)
-            return
-        if result is None or result.startswith(GATEWAY_DEFERRAL_PREFIX):
+        # The task is over (delivered, failed, or deferred): clear any live-view
+        # card now, as the answer is being spoken, not the instant it finished.
+        if on_deliver is not None:
+            _spawn_bg(on_deliver())
+        if not delivered or result is None or result.startswith(GATEWAY_DEFERRAL_PREFIX):
             return
         keywords = _relay_keywords(result)
         needed = _relay_needed(keywords)
@@ -698,25 +725,35 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
     run_id = start.get("runId")
     live_url = start.get("liveUrl")
     live_uuid = "browse-live"
+    card_shown = False
     if live_url and room is not None:
         # Show what the browser is doing, mid-screen, exactly like a result card.
         card = {"uuid": live_uuid, "version": 1, "type": "live", "url": live_url,
                 "title": "Browsing the web", "fallback_text": "Watching the browser work."}
         try:
             await _publish_card(room, card)
+            # This run now owns the card slot; a newer browse takes it over and
+            # an older one finishing will find it no longer owned and leave it.
+            ctx.userdata.live_browse_run = run_id
+            card_shown = True
             ctx.userdata.tracer.emit("agent_action", tool="show_card", card_type="live", title="Browsing the web", auto=True)
         except Exception:
             logger.exception("failed to publish live card: user=%s", user_id)
     if not run_id:
         return "The browser could not start that task. Tell the user briefly and offer to try again."
+
+    async def _dismiss_when_delivered() -> None:
+        # Give the answer a moment to start playing, then clear the card -- but
+        # only if this run still owns it (a later browse may have replaced it).
+        await asyncio.sleep(4)
+        if ctx.userdata.live_browse_run != run_id:
+            return
+        ctx.userdata.live_browse_run = None
+        await _dismiss_card(room, live_uuid)
+
     job = asyncio.ensure_future(_gateway_browse_await(user_id, run_id, task))
-    # Dismiss the live view the moment the task finishes, whatever the outcome.
-    if live_url and room is not None:
-        def _on_done(_fut) -> None:
-            d = asyncio.create_task(_dismiss_card(room, live_uuid))
-            _relay_tasks.add(d); d.add_done_callback(_relay_tasks.discard)
-        job.add_done_callback(_on_done)
-    return await _run_delegated(ctx, task, "browse", job)
+    on_deliver = _dismiss_when_delivered if card_shown else None
+    return await _run_delegated(ctx, task, "browse", job, on_deliver=on_deliver)
 
 
 def build_llm(engine: str):

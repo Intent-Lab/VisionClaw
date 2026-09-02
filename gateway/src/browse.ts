@@ -44,7 +44,15 @@ export async function startBrowse(task: string): Promise<BrowseStart> {
       task,
       ...(model ? { model } : {}),
       maxCostUsd: cap,
-      browserSettings: { proxyCountryCode: "us", record: true },
+      // Portrait phone viewport so the live-view canvas fits the phone card
+      // (a desktop-width browser rendered into a ~360dp card shows only a
+      // cropped slice) and the target site serves its mobile layout.
+      browserSettings: {
+        proxyCountryCode: "us",
+        record: true,
+        screenWidth: Number(process.env.BROWSER_USE_SCREEN_W ?? 390),
+        screenHeight: Number(process.env.BROWSER_USE_SCREEN_H ?? 844),
+      },
     }),
   });
   if (!create.ok) {
