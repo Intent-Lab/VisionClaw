@@ -115,6 +115,9 @@ data class UiCard(
     val items: List<CardItem>,
     val imageUrl: String?,
     val fallbackText: String,
+    // Live-view URL for "live" cards (Browser Use live browser view). Rendered
+    // in a WebView instead of static content.
+    val url: String? = null,
     // Fetched lazily for image cards; arrives via a state update.
     val image: Bitmap? = null,
 )
@@ -274,8 +277,24 @@ class LiveKitSessionViewModel(
     }
 
     private fun handleCardPayload(payload: String) {
+        val json = try {
+            JSONObject(payload)
+        } catch (e: Exception) {
+            Log.w(TAG, "malformed card payload ignored (${payload.length} bytes)")
+            return
+        }
+        // Programmatic dismissal: {"uuid":..., "dismiss":true} clears the shown
+        // card (e.g. the browse live view when the task finishes). A later card
+        // publish supersedes the dismissal, matching dismissCard().
+        if (json.optBoolean("dismiss", false)) {
+            val uuid = json.optString("uuid").takeIf { it.isNotEmpty() }
+            Log.d(TAG, "card dismiss control received uuid=$uuid")
+            uuid?.let { dismissedCardUuid = it }
+            _uiState.update { it.copy(card = null) }
+            return
+        }
         val card = try {
-            parseCard(JSONObject(payload))
+            parseCard(json)
         } catch (e: Exception) {
             null
         }
@@ -324,6 +343,7 @@ class LiveKitSessionViewModel(
             items = items,
             imageUrl = json.optString("image_url").takeIf { it.startsWith("http") },
             fallbackText = json.optString("fallback_text"),
+            url = json.optString("url").takeIf { it.startsWith("http") },
         )
     }
 
