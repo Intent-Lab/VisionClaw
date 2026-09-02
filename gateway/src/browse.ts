@@ -88,12 +88,86 @@ export async function startBrowse(task: string): Promise<BrowseStart> {
   return { runId, liveUrl };
 }
 
+/** A readable record of what the computer-use agent actually did, for the trace. */
+export interface BrowseDetail {
+  status: string;
+  model?: string;
+  result?: string | null;
+  error?: string | null;
+  steps: string[]; // ordered agent narration + browser actions
+  stepCount: number; // number of browser actions taken
+  inputTokens?: number;
+  outputTokens?: number;
+  durationS?: number;
+}
+
 export interface BrowseOutcome {
   text: string | null;
   deferred: boolean;
   runId: string;
   cost?: string;
   recordingUrl?: string | null;
+  detail?: BrowseDetail;
+}
+
+/**
+ * Pull the run summary plus a compact, readable step list (the agent's plan
+ * narration and the browser actions it took), so the trace shows what the
+ * computer-use agent did -- not just that a task ran.
+ */
+export async function fetchRunDetail(runId: string): Promise<BrowseDetail> {
+  const run = (await (await fetch(`${BASE}/runs/${runId}`, { headers: buHeaders() })).json()) as {
+    status?: string;
+    result?: string | null;
+    error?: string | null;
+    model?: string;
+    totalInputTokens?: number;
+    totalOutputTokens?: number;
+    createdAt?: string;
+    updatedAt?: string;
+  };
+  const steps: string[] = [];
+  let stepCount = 0;
+  try {
+    const ev = await fetch(`${BASE}/runs/${runId}/events`, { headers: buHeaders() });
+    if (ev.ok) {
+      const { events } = (await ev.json()) as {
+        events?: Array<{ type?: string; data?: { part?: { type?: string; text?: string; tool?: string } } }>;
+      };
+      for (const e of events ?? []) {
+        if (e.type !== "core.event") continue;
+        const part = e.data?.part;
+        if (!part) continue;
+        if (part.type === "text" && part.text?.trim()) {
+          steps.push(`plan: ${part.text.trim().slice(0, 110)}`);
+        } else if (part.type === "tool" && part.tool) {
+          stepCount += 1;
+          steps.push(`action: ${part.tool}`);
+        }
+        // Keep the array well under the trace's 2000-char/field cap so it stays
+        // a real array, not a truncated string.
+        if (steps.length >= 15) break;
+      }
+    }
+  } catch {
+    // events are best-effort; the result + summary still stand
+  }
+  let durationS: number | undefined;
+  if (run.createdAt && run.updatedAt) {
+    const d = (Date.parse(run.updatedAt) - Date.parse(run.createdAt)) / 1000;
+    if (Number.isFinite(d) && d >= 0) durationS = Math.round(d);
+  }
+  return {
+    status: run.status ?? "unknown",
+    model: run.model,
+    result: run.result,
+    error: run.error,
+    steps,
+    stepCount,
+    inputTokens: run.totalInputTokens,
+    outputTokens: run.totalOutputTokens,
+    durationS,
+  };
 }
 
 /**
@@ -104,10 +178,10 @@ export interface BrowseOutcome {
 export async function awaitBrowse(
   runId: string,
   maxWaitMs: number,
-  onLate: (text: string, meta: { runId: string; cost?: string }) => void,
+  onLate: (text: string, meta: { runId: string; cost?: string; detail?: BrowseDetail }) => void,
 ): Promise<BrowseOutcome> {
   let timedOut = false;
-  const poll = (async (): Promise<{ text: string; cost?: string; recordingUrl?: string | null }> => {
+  const poll = (async (): Promise<{ text: string; cost?: string; detail: BrowseDetail }> => {
     for (;;) {
       await sleep(3000);
       let status = "";
@@ -118,16 +192,14 @@ export async function awaitBrowse(
         continue;
       }
       if (TERMINAL.has(status)) {
-        const full = (await (await fetch(`${BASE}/runs/${runId}`, { headers: buHeaders() })).json()) as {
-          result?: string | null;
-          error?: string | null;
-          totalCostUsd?: string;
-        };
+        const detail = await fetchRunDetail(runId);
+        const cost = (await (await fetch(`${BASE}/runs/${runId}`, { headers: buHeaders() })).json())
+          .totalCostUsd as string | undefined;
         const text =
           status === "completed"
-            ? full.result || "The browser task finished but returned no text."
-            : `The browser task did not finish (${status}${full.error ? ": " + full.error : ""}).`;
-        return { text, cost: full.totalCostUsd };
+            ? detail.result || "The browser task finished but returned no text."
+            : `The browser task did not finish (${status}${detail.error ? ": " + detail.error : ""}).`;
+        return { text, cost, detail };
       }
     }
   })();
@@ -142,11 +214,11 @@ export async function awaitBrowse(
 
   const finished = await Promise.race([poll, timeout]);
   if (finished !== null) {
-    return { text: finished.text, deferred: false, runId, cost: finished.cost };
+    return { text: finished.text, deferred: false, runId, cost: finished.cost, detail: finished.detail };
   }
   void poll
     .then((o) => {
-      if (timedOut && o.text) onLate(o.text, { runId, cost: o.cost });
+      if (timedOut && o.text) onLate(o.text, { runId, cost: o.cost, detail: o.detail });
     })
     .catch((err) => console.error("[browse] late poll failed:", err));
   return { text: null, deferred: true, runId };

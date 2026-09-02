@@ -9,7 +9,23 @@ import { ensureUser } from "./provision.js";
 import { runTurn, runTurnStreaming, queueContext, drainContext, type TurnStats } from "./turn.js";
 import { registerSocket, notifyUser, queuePending, drainPending } from "./notify.js";
 import { appendTrace, readTrace } from "./trace.js";
-import { startBrowse, awaitBrowse, browseEnabled } from "./browse.js";
+import { startBrowse, awaitBrowse, browseEnabled, type BrowseDetail } from "./browse.js";
+
+/** Flatten the computer-use agent's run detail into trace fields. */
+function browseDetailFields(d?: BrowseDetail): Record<string, unknown> {
+  if (!d) return {};
+  return {
+    status: d.status,
+    model: d.model,
+    result: d.result?.slice(0, 1000),
+    error: d.error ?? undefined,
+    steps: d.steps,
+    step_count: d.stepCount,
+    input_tokens: d.inputTokens,
+    output_tokens: d.outputTokens,
+    duration_s: d.durationS,
+  };
+}
 import { registerConnectRoutes } from "./connect.js";
 import { approvedAccountIds, initAuth, lookupToken, registerAuthRoutes, touchLastSeen } from "./auth.js";
 
@@ -354,7 +370,14 @@ app.post("/browse/await", async (req, res) => {
   try {
     const outcome = await awaitBrowse(runId, 170_000, (lateText, meta) => {
       appendTrace(userId, [
-        { type: "browser_task", task: task.slice(0, 200), outcome: "late", run_id: meta.runId, cost_usd: meta.cost },
+        {
+          type: "browser_task",
+          task: task.slice(0, 200),
+          outcome: "late",
+          run_id: meta.runId,
+          cost_usd: meta.cost,
+          ...browseDetailFields(meta.detail),
+        },
       ]);
       void recordTask(userId, task, lateText);
       if (!notifyUser(userId, wrap(lateText))) void queuePending(userId, wrap(lateText));
@@ -367,6 +390,7 @@ app.post("/browse/await", async (req, res) => {
           outcome: clientGone ? "caller_gone" : "quick",
           run_id: outcome.runId,
           cost_usd: outcome.cost,
+          ...browseDetailFields(outcome.detail),
         },
       ]);
       if (outcome.text) void recordTask(userId, task, outcome.text);
