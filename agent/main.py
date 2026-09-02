@@ -45,6 +45,7 @@ from livekit.agents import (
     function_tool,
 )
 from livekit.plugins import google, openai
+from openai.types.beta.realtime.session import TurnDetection
 
 logger = logging.getLogger("visionclaw-agent")
 
@@ -282,6 +283,9 @@ QUICK_ANSWER_S = 10
 # notes: a working agent should never be indistinguishable from a dead one.
 HEARTBEAT_S = 30
 MAX_HEARTBEATS = 4
+# How long to wait for a free turn slot before injecting a result relay, so it
+# does not collide with an active response or a barge-in.
+DELIVER_WAIT_S = 8
 
 # The gateway echoes this ack when a task outlives its own 110s wait; it is an
 # instruction blob for a voice model, not an answer, so never relay it as one.
@@ -582,6 +586,24 @@ def _spawn_bg(coro: "Awaitable[None]") -> None:
     t.add_done_callback(_relay_tasks.discard)
 
 
+def _session_busy(session: AgentSession) -> bool:
+    """True while a response is active (agent speaking/thinking) or the user is
+    mid-turn. Injecting a generate_reply now competes for the single active-
+    response slot and races with barge-in handling -- the exact condition that
+    left user turns unanswered on the OpenAI Realtime engine."""
+    return session.agent_state in ("speaking", "thinking") or session.user_state == "speaking"
+
+
+async def _await_session_free(session: AgentSession, timeout: float) -> bool:
+    """Wait until it is safe to inject a reply. Returns True if a free slot opened."""
+    deadline = time.monotonic() + timeout
+    while _session_busy(session):
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.25)
+    return True
+
+
 async def _run_delegated(
     ctx: RunContext[Userdata],
     task: str,
@@ -617,7 +639,9 @@ async def _run_delegated(
             done, _ = await asyncio.wait({job}, timeout=HEARTBEAT_S)
             if done:
                 break
-            if heartbeats < MAX_HEARTBEATS:
+            # Only slip a progress note in when nothing else is speaking and the
+            # user is not talking -- never stack it on an active response.
+            if heartbeats < MAX_HEARTBEATS and not _session_busy(session):
                 heartbeats += 1
                 try:
                     session.generate_reply(instructions=(
@@ -648,6 +672,9 @@ async def _run_delegated(
                             "their earlier request. Do not thank them and do not ask what they need next until you "
                             "have said it. Speak the result now.")
         delivered = True
+        # Wait for a free slot so this relay does not collide with an active
+        # response or a barge-in (the race that left user turns unanswered).
+        await _await_session_free(session, DELIVER_WAIT_S)
         try:
             session.generate_reply(instructions=instructions)
         except Exception:
@@ -672,6 +699,7 @@ async def _run_delegated(
                     return
             if attempt == 0:
                 tracer.emit("late_relay_retry", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
+                await _await_session_free(session, DELIVER_WAIT_S)
                 try:
                     session.generate_reply(instructions=(
                         "You still have not told the user the result of their task. The text between the markers "
@@ -796,8 +824,19 @@ def build_llm(engine: str):
         if not os.environ.get("OPENAI_API_KEY"):
             logger.warning("openai engine requested but OPENAI_API_KEY unset; using gemini")
         else:
+            # Pin turn detection instead of relying on plugin defaults: the server
+            # must auto-create a response when the user's turn ends (create_response)
+            # and interrupt the assistant on barge-in (interrupt_response). Without
+            # this, a barge-in during a tool exchange could leave the user's turn
+            # with no response -- dead air until they spoke again.
             return openai.realtime.RealtimeModel(
                 model=os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2.1"),
+                turn_detection=TurnDetection(
+                    type="semantic_vad",
+                    eagerness="medium",
+                    create_response=True,
+                    interrupt_response=True,
+                ),
             )
     return google.beta.realtime.RealtimeModel(
         model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025"),
