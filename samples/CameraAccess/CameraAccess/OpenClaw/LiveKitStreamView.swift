@@ -1,5 +1,6 @@
 import LiveKit
 import SwiftUI
+import WebKit
 
 /// Phone-mode main screen under LiveKit: camera preview, a gear, a call
 /// button. The overlays the direct connection accumulated -- status pills,
@@ -207,6 +208,13 @@ struct AgentCardView: View {
             .padding(6)
         }
       }
+      if card.type == "live", let urlString = card.url, let url = URL(string: urlString) {
+        // Live browser view (Browser Use): the CUA's screen, mid-card, while the
+        // browse task runs. A live viewer page -- needs JS + WebSocket, both on.
+        LiveWebView(url: url)
+          .frame(height: 320)
+          .clipShape(RoundedRectangle(cornerRadius: 10))
+      } else {
       ScrollView {
         VStack(alignment: .leading, spacing: 10) {
           if let value = card.value {
@@ -265,6 +273,7 @@ struct AgentCardView: View {
         }
       }
       .frame(maxHeight: 320)
+      }
     }
     .padding(14)
     .background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 18))
@@ -274,6 +283,27 @@ struct AgentCardView: View {
         if drag.translation.height < -30 { onDismiss() }
       }
     )
+  }
+}
+
+/// Minimal WKWebView wrapper for the live-view card. JavaScript is on (the live
+/// viewer is a JS + WebSocket page); WebSocket works in WKWebView by default.
+struct LiveWebView: UIViewRepresentable {
+  let url: URL
+
+  func makeUIView(context: Context) -> WKWebView {
+    let config = WKWebViewConfiguration()
+    config.defaultWebpagePreferences.allowsContentJavaScript = true
+    let webView = WKWebView(frame: .zero, configuration: config)
+    webView.isOpaque = false
+    webView.backgroundColor = .black
+    webView.scrollView.isScrollEnabled = false
+    webView.load(URLRequest(url: url))
+    return webView
+  }
+
+  func updateUIView(_ webView: WKWebView, context: Context) {
+    if webView.url != url { webView.load(URLRequest(url: url)) }
   }
 }
 

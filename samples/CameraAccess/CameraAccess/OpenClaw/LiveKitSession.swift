@@ -71,6 +71,9 @@ final class LiveKitSession: NSObject, ObservableObject {
     let facts: [Fact]
     let items: [Item]
     let imageURL: String?
+    /// For the "live" type: an https page (a live browser viewer) to load in a
+    /// webview. Requires JavaScript and a WebSocket, both on by default in WKWebView.
+    let url: String?
     let fallbackText: String
   }
 
@@ -351,10 +354,19 @@ final class LiveKitSession: NSObject, ObservableObject {
   private func handleCardJSON(_ json: String) {
     guard let data = json.data(using: .utf8),
           let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-          let uuid = dict["uuid"] as? String,
-          let type = dict["type"] as? String
+          let uuid = dict["uuid"] as? String
     else {
       NSLog("[LiveKit] ignoring malformed card payload (%d bytes)", json.count)
+      return
+    }
+    // Programmatic dismissal (e.g. a live-view card removed when its task ends):
+    // a control message, not a card to render.
+    if (dict["dismiss"] as? Bool) == true {
+      if card?.uuid == uuid { dismissCard() }
+      return
+    }
+    guard let type = dict["type"] as? String else {
+      NSLog("[LiveKit] ignoring card payload without a type (%d bytes)", json.count)
       return
     }
     let facts = ((dict["facts"] as? [[String: Any]]) ?? []).compactMap { f -> UICard.Fact? in
@@ -378,6 +390,7 @@ final class LiveKitSession: NSObject, ObservableObject {
       facts: facts,
       items: items,
       imageURL: dict["image_url"] as? String,
+      url: dict["url"] as? String,
       fallbackText: (dict["fallback_text"] as? String) ?? "")
   }
 
