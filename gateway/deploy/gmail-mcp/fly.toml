@@ -15,8 +15,10 @@
 #   fly secrets set GOOGLE_OAUTH_CLIENT_ID=<testing client> GOOGLE_OAUTH_CLIENT_SECRET=...
 #   fly deploy
 #
-# Then point the gateway at it (the trailing /mcp/ matters):
-#   GMAIL_MCP_URL=https://visionclaw-gmail-mcp.fly.dev/mcp/
+# Then point the gateway at it. Use NO trailing slash -- the server mounts at
+# /mcp and 307-redirects /mcp/ to http://.../mcp (non-HTTPS), which CMA blocks as
+# insecure and which also breaks credential-URL matching (409 on reconnect):
+#   GMAIL_MCP_URL=https://visionclaw-gmail-mcp.fly.dev/mcp
 #
 # Note: the vault credential is keyed to this URL. Changing it orphans every
 # stored credential and forces users to reconnect, so put a domain you own in
