@@ -76,6 +76,27 @@ struct VisionRootView: View {
         StreamSessionView(wearables: nil, wearablesVM: nil)
       }
     }
+    // Meta AI redirects back here to complete glasses registration. Handle the
+    // callback at the ROOT so it fires no matter which screen is showing --
+    // including the access-code gate. When it lived only inside the unlocked
+    // glasses screen, a callback that arrived while that screen was not mounted
+    // was dropped, so the DAT grant never completed and connecting looped back
+    // to Meta AI forever.
+    .onOpenURL { url in
+      NSLog("[CameraAccess] onOpenURL: \(url.absoluteString)")
+      guard wearables != nil,
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+        components.queryItems?.contains(where: { $0.name == "metaWearablesAction" }) == true
+      else { return }
+      Task {
+        do {
+          _ = try await Wearables.shared.handleUrl(url)
+          NSLog("[CameraAccess] handleUrl completed")
+        } catch {
+          NSLog("[CameraAccess] handleUrl failed: \(error.localizedDescription)")
+        }
+      }
+    }
     .sheet(isPresented: $showSettings) { SettingsView() }
   }
 }
@@ -498,7 +519,7 @@ private struct GlassesCapableRootView: View {
       }
       #endif
 
-    // Registration view handles the flow for connecting to the glasses via Meta AI
-    RegistrationView(viewModel: viewModel)
+    // The Meta AI callback is handled at the app root (see .onOpenURL there) so
+    // it works even while the access-code gate is showing.
   }
 }
