@@ -93,14 +93,18 @@ struct StreamSessionView: View {
         await liveKit.start()
       }
     }
-    .onChange(of: viewModel.isStreaming) { streaming in
-      // Glasses mode: the call rides the DAT stream's lifecycle -- frames
-      // start flowing, the room opens; the stream ends, the call ends.
+    .onChange(of: viewModel.streamingStatus) { status in
+      // Glasses mode: the call rides the DAT stream's lifecycle. Open the room
+      // only once frames are actually flowing (.streaming), so the buffer-track
+      // publish has a frame to settle its dimensions instead of timing out. A
+      // transient .waiting (glasses briefly asleep) keeps the call alive; only
+      // a real .stopped ends it. Gating on isStreaming (which is true during
+      // .waiting) opened the room before any frame and made the publish race.
       guard captureSource == .glasses else { return }
       Task {
-        if streaming {
+        if status == .streaming {
           await liveKit.start()
-        } else if liveKit.isActive {
+        } else if status == .stopped, liveKit.isActive {
           await liveKit.stop()
         }
       }

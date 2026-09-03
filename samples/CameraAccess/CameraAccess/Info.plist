@@ -30,6 +30,14 @@
 				<string>cameraaccess</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.visionclaw.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>visionclaw</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
@@ -74,17 +82,6 @@
 	<string>This app uses the microphone to have voice conversations with the AI assistant while streaming from your glasses.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleURLName</key>
-			<string>com.visionclaw.auth</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>visionclaw</string>
-			</array>
-		</dict>
-	</array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>This app reads and adds calendar events so the assistant can answer questions about your schedule and create events when you ask.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

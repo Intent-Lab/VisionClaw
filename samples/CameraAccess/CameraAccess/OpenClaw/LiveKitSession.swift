@@ -274,10 +274,23 @@ final class LiveKitSession: NSObject, ObservableObject {
           // Glasses frames arrive via pushGlassesFrame; publish a buffer
           // track with camera source so mute/freeze/agent logic is identical.
           let track = LocalVideoTrack.createBufferTrack(name: "glasses", source: .camera)
-          try await track.start()
-          _ = try await room.localParticipant.publish(videoTrack: track)
-          localVideoTrack = track
+          // Wire the capturer BEFORE publishing: the buffer publish waits for a
+          // first frame to settle video dimensions, and pushGlassesFrame must
+          // reach THIS track during that window (not the stopped preview track).
           glassesCapturerBox.capturer = track.capturer as? BufferCapturer
+          try await track.start()
+          // Publish so the agent sees the full DAT resolution -- make the glasses
+          // (720x1280) the only limiter. No simulcast, so the SFU can't hand the
+          // agent a downscaled layer; a bitrate high enough for crisp 720p; and
+          // maintainResolution so a congested network drops frame rate, never
+          // resolution. What the model sees then equals what DAT delivers.
+          _ = try await room.localParticipant.publish(
+            videoTrack: track,
+            options: VideoPublishOptions(
+              encoding: VideoEncoding(maxBitrate: 3_000_000, maxFps: 24),
+              simulcast: false,
+              degradationPreference: .maintainResolution))
+          localVideoTrack = track
         } else {
           // A video-call SDK defaults to the selfie camera; this app is a pair
           // of eyes on the world, so it opens on the back camera.
