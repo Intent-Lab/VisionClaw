@@ -504,6 +504,9 @@ private struct GlassesCapableRootView: View {
 
   var body: some View {
     StreamSessionView(wearables: wearables, wearablesVM: viewModel)
+      // Study engagement nudges: request notification permission once and
+      // schedule the periodic "look around and ask" reminders.
+      .task { NudgeScheduler.requestAuthorizationAndSchedule() }
       // Show error alerts for view model failures
       .alert("Error", isPresented: $viewModel.showError) {
         Button("OK") { viewModel.dismissError() }
