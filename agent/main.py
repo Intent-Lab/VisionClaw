@@ -105,7 +105,10 @@ class FrameHolder:
 
 
 def encode_latest_frame(holder: FrameHolder) -> str | None:
-    """JPEG-encode the latest frame (capped at 1024px, rotation applied) as base64."""
+    """JPEG-encode the latest frame (capped at 1280px, rotation applied) as base64.
+
+    1280 is the DAT source ceiling (glasses stream at 720x1280), so a full-res
+    frame passes through untouched -- DAT is the only limiter, not this cap."""
     frame = holder.frame
     if frame is None:
         return None
@@ -114,7 +117,7 @@ def encode_latest_frame(holder: FrameHolder) -> str | None:
     rot = holder.rotation % 360
     if rot:
         img = img.rotate(-rot, expand=True)
-    img.thumbnail((1024, 1024))
+    img.thumbnail((1280, 1280))
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=80)
     return base64.b64encode(buf.getvalue()).decode()
