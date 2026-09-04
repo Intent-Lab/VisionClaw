@@ -46,6 +46,8 @@ struct SettingsView: View {
   @State private var accountEmail: String?
   @State private var showResetConfirmation = false
   @State private var gatewayStatus: GatewayStatus = .checking
+  @State private var selectedPhoto: PhotosPickerItem? = nil
+  @State private var selectedImageData: Data? = nil
   // Applies immediately rather than on Save: the root view observes the same
   // key and swaps the capture pipeline live.
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
