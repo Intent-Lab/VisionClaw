@@ -12,9 +12,11 @@
 		8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B792E6F0A9800F56AB1 /* CameraAccessApp.swift */; };
 		8FD96B812E6F0A9800F56AB1 /* HomeScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B722E6F0A9800F56AB1 /* HomeScreenView.swift */; };
 		8FD96B872E6F0A9800F56AB1 /* StreamSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B6F2E6F0A9800F56AB1 /* StreamSessionViewModel.swift */; };
+		9DD6CC002F4A000000ED7098 /* VideoDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD6CBFF2F4A000000ED7098 /* VideoDecoder.swift */; };
 		8FD96B882E6F0A9800F56AB1 /* StreamSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B752E6F0A9800F56AB1 /* StreamSessionView.swift */; };
 		8FD96B8A2E6F0A9800F56AB1 /* PhotoPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B742E6F0A9800F56AB1 /* PhotoPreviewView.swift */; };
 		8FD96B8D2E6F0A9800F56AB1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8FD96B772E6F0A9800F56AB1 /* Assets.xcassets */; };
+		AA10CAFE0000000000000001 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA10CAFE0000000000000002 /* LiveKit */; };
 		8FD96B952E6F0F7D00F56AB1 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8FD96B942E6F0F7D00F56AB1 /* MWDATCore */; };
 		8FD96B952E6F0F7D00F56AB2 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 8FD96B942E6F0F7D00F56AB2 /* MWDATCamera */; };
 		8FFD5FF52E8422580035E446 /* CircleButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFD5FF22E8422580035E446 /* CircleButton.swift */; };
@@ -27,13 +29,11 @@
 		8FFD60602E84A2F70035E446 /* MainAppView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFD605F2E84A2F70035E446 /* MainAppView.swift */; };
 		8FFD60612E84A2F70035E446 /* DebugMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FFD605E2E84A2F70035E446 /* DebugMenuView.swift */; };
 		9DD6CAAF2F3C426600ED7098 /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD6CAAD2F3C426600ED7098 /* Secrets.swift */; };
-		9DD6CC002F4A000000ED7098 /* VideoDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD6CBFF2F4A000000ED7098 /* VideoDecoder.swift */; };
 		9DD894B22F4047630090B9B9 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894AF2F4047630090B9B9 /* SettingsManager.swift */; };
 		9DD894B32F4047630090B9B9 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894B02F4047630090B9B9 /* SettingsView.swift */; };
-		9DD894C22F4047630090B9C2 /* RecentTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894C12F4047630090B9C1 /* RecentTasksView.swift */; };
 		9DD894C42F4047630090B9C4 /* ConnectedAppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894C32F4047630090B9C3 /* ConnectedAppsView.swift */; };
+		9DD894C22F4047630090B9C2 /* RecentTasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD894C12F4047630090B9C1 /* RecentTasksView.swift */; };
 		A1B2C3D42F0A000200000001 /* GeminiConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D42F0A000100000001 /* GeminiConfig.swift */; };
-		AA10CAFE0000000000000001 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA10CAFE0000000000000002 /* LiveKit */; };
 		E66D30242E7DA71900470B48 /* MockDeviceKitButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */; };
 		E6A188482EB918740097D0E1 /* StreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A188472EB918740097D0E1 /* StreamView.swift */; };
 		E6DA451D2E79A63100E3F688 /* MockDeviceCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA45182E79A63100E3F688 /* MockDeviceCardView.swift */; };
@@ -70,6 +70,7 @@
 		8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugMenuViewModel.swift; sourceTree = "<group>"; };
 		8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearablesViewModel.swift; sourceTree = "<group>"; };
 		8FD96B6F2E6F0A9800F56AB1 /* StreamSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSessionViewModel.swift; sourceTree = "<group>"; };
+		9DD6CBFF2F4A000000ED7098 /* VideoDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDecoder.swift; sourceTree = "<group>"; };
 		8FD96B722E6F0A9800F56AB1 /* HomeScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScreenView.swift; sourceTree = "<group>"; };
 		8FD96B742E6F0A9800F56AB1 /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
 		8FD96B752E6F0A9800F56AB1 /* StreamSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSessionView.swift; sourceTree = "<group>"; };
@@ -88,11 +89,10 @@
 		8FFD605F2E84A2F70035E446 /* MainAppView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainAppView.swift; sourceTree = "<group>"; };
 		9DD6CAAD2F3C426600ED7098 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
 		9DD6CAAE2F3C426600ED7098 /* Secrets.swift.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = Secrets.swift.example; sourceTree = "<group>"; };
-		9DD6CBFF2F4A000000ED7098 /* VideoDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoDecoder.swift; sourceTree = "<group>"; };
 		9DD894AF2F4047630090B9B9 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
 		9DD894B02F4047630090B9B9 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
-		9DD894C12F4047630090B9C1 /* RecentTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentTasksView.swift; sourceTree = "<group>"; };
 		9DD894C32F4047630090B9C3 /* ConnectedAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedAppsView.swift; sourceTree = "<group>"; };
+		9DD894C12F4047630090B9C1 /* RecentTasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentTasksView.swift; sourceTree = "<group>"; };
 		A1B2C3D42F0A000100000001 /* GeminiConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfig.swift; sourceTree = "<group>"; };
 		E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceKitButton.swift; sourceTree = "<group>"; };
 		E699CC952E8150670052C240 /* CameraAccessTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CameraAccessTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -417,13 +417,13 @@
 				CODE_SIGN_ENTITLEMENTS = CameraAccess/CameraAccess.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = WY253UX7FC;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "";
 				INFOPLIST_FILE = CameraAccess/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -446,12 +446,12 @@
 				CODE_SIGN_ENTITLEMENTS = CameraAccess/CameraAccess.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 12;
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = WY253UX7FC;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = CameraAccess/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -472,11 +472,11 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 12;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.meta.wearables.external.CameraAccessTests;
@@ -501,11 +501,11 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
 				CODE_SIGN_STYLE = Manual;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 12;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.meta.wearables.external.CameraAccessTests;
@@ -573,7 +573,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.2;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -676,7 +676,7 @@
 			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
 			requirement = {
 				kind = exactVersion;
-				version = 0.4.0;
+				version = 0.9.0;
 			};
 		};
 		AA10CAFE0000000000000003 /* XCRemoteSwiftPackageReference "client-sdk-swift" */ = {
