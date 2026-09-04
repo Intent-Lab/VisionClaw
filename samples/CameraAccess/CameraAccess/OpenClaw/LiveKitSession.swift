@@ -290,6 +290,15 @@ final class LiveKitSession: NSObject, ObservableObject {
       NSLog("[Audio] inputs=[%@] output=[%@]",
             (diagSession.availableInputs ?? []).map { $0.portType.rawValue }.joined(separator: ","),
             diagSession.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))
+      // The glasses expose a Bluetooth HFP input; select it so the call routes to
+      // the glasses. HFP is two-way, so the output follows the input -- Maya's
+      // voice moves to the glasses too. Done once here as the call audio comes up
+      // (not repeatedly), so it doesn't trip the route-change "deafness" loop.
+      if let hfp = diagSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
+        try? diagSession.setPreferredInput(hfp)
+        NSLog("[Audio] selected glasses HFP; output now [%@]",
+              diagSession.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))
+      }
       // Camera failure (simulator, permission denied) degrades to voice-only
       // rather than killing the call.
       do {
