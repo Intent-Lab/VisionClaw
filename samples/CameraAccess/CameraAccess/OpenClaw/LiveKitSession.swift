@@ -95,6 +95,14 @@ final class LiveKitSession: NSObject, ObservableObject {
   override init() {
     super.init()
     room.add(delegate: self)
+    // Route call audio to the glasses (Bluetooth HFP) instead of the phone.
+    // LiveKit's playAndRecord config already allows Bluetooth, but it prefers the
+    // built-in speaker by default -- which overrode the glasses route once video
+    // streaming displaced the glasses' A2DP audio. Not preferring the speaker
+    // lets iOS route to the glasses' HFP (8kHz, two-way) when they're connected.
+    // Set once, up front -- never a mid-call setPreferredInput, which breaks the
+    // route (the "deafness" bug).
+    AudioManager.shared.isSpeakerOutputPreferred = false
   }
 
   var isActive: Bool { state == .connected || state == .connecting }
