@@ -283,6 +283,13 @@ final class LiveKitSession: NSObject, ObservableObject {
       let ticket = try await fetchTicket()
       try await room.connect(url: ticket.url, token: ticket.token)
       try await room.localParticipant.setMicrophone(enabled: true)
+      // Diagnose the audio route: do the glasses appear as a Bluetooth HFP input,
+      // and where is output actually going? This tells us whether iOS can route
+      // the call to the glasses at all, or if they aren't a system audio device.
+      let diagSession = AVAudioSession.sharedInstance()
+      NSLog("[Audio] inputs=[%@] output=[%@]",
+            (diagSession.availableInputs ?? []).map { $0.portType.rawValue }.joined(separator: ","),
+            diagSession.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))
       // Camera failure (simulator, permission denied) degrades to voice-only
       // rather than killing the call.
       do {
