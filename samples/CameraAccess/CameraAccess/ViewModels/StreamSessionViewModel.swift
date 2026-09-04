@@ -77,6 +77,11 @@ class StreamSessionViewModel: ObservableObject {
   // camera as soon as the session reaches `.started`, since a camera can only be
   // added to a started session.
   private var wantsStream: Bool = false
+  // True while the user is in a glasses call (set on start, cleared on hang-up).
+  // Governs auto-reconnect: a mid-call stream/session drop should recover the
+  // glasses stream, not tear the whole call down (DaeHo's "stuck / reconnecting").
+  private var userWantsCall = false
+  private var reconnectTask: Task<Void, Never>?
   // Listener tokens are used to manage DAT SDK event subscriptions
   private var sessionStateListenerToken: AnyListenerToken?
   private var stateListenerToken: AnyListenerToken?
@@ -187,9 +192,17 @@ class StreamSessionViewModel: ObservableObject {
     case .idle, .stopped:
       camera = nil
       deviceSession = nil
-      wantsStream = false
       currentVideoFrame = nil
-      streamingStatus = .stopped
+      if userWantsCall {
+        // Unexpected mid-call drop: keep the call alive (audio) and reconnect
+        // the glasses stream instead of tearing everything down.
+        glassesIssue = .reconnecting
+        streamingStatus = .waiting
+        scheduleReconnect()
+      } else {
+        wantsStream = false
+        streamingStatus = .stopped
+      }
     case .starting, .stopping:
       streamingStatus = .waiting
     case .paused:
@@ -324,6 +337,8 @@ class StreamSessionViewModel: ObservableObject {
       glassesIssue = .sdkUnavailable
       return
     }
+    userWantsCall = true
+    reconnectTask?.cancel()
     let permission = Permission.camera
     do {
       let status = try await wearables.checkPermissionStatus(permission)
@@ -373,9 +388,16 @@ class StreamSessionViewModel: ObservableObject {
       try session.start()
     } catch {
       glassesIssue = mapDeviceSessionError(error)
-      wantsStream = false
       deviceSession = nil
-      streamingStatus = .stopped
+      if userWantsCall {
+        // Transient create/start failure during a call: keep the call alive and
+        // keep retrying instead of ending it.
+        streamingStatus = .waiting
+        scheduleReconnect()
+      } else {
+        wantsStream = false
+        streamingStatus = .stopped
+      }
     }
   }
 
@@ -397,11 +419,38 @@ class StreamSessionViewModel: ObservableObject {
   /// Stops the camera stream and ends the device session. `stop()` is terminal
   /// and cascades to the stream; the state observers clear our references.
   func stopSession() async {
+    // User hang-up: stop recovering, then tear down.
+    userWantsCall = false
+    reconnectTask?.cancel()
+    reconnectTask = nil
     wantsStream = false
     if let camera {
       camera.stop()
     }
     deviceSession?.stop()
+  }
+
+  /// Recover a dropped glasses stream while the user is still in a call, without
+  /// killing the LiveKit call (audio keeps going). Retries on a slow cadence
+  /// until streaming resumes or the user hangs up.
+  private func scheduleReconnect() {
+    guard userWantsCall else { return }
+    reconnectTask?.cancel()
+    reconnectTask = Task { @MainActor [weak self] in
+      try? await Task.sleep(nanoseconds: 1_500_000_000)
+      guard let self, !Task.isCancelled, self.userWantsCall,
+            self.streamingStatus != .streaming else { return }
+      NSLog("[Stream] auto-reconnect")
+      if self.deviceSession == nil {
+        await self.startSession()
+      } else if self.camera == nil, self.deviceSession?.state == .started {
+        self.beginStream()
+      }
+      // Keep trying until frames flow again or the user hangs up.
+      if self.streamingStatus != .streaming, self.userWantsCall {
+        self.scheduleReconnect()
+      }
+    }
   }
 
   func dismissError() {
@@ -422,7 +471,14 @@ class StreamSessionViewModel: ObservableObject {
     switch state {
     case .stopped:
       currentVideoFrame = nil
-      streamingStatus = .stopped
+      if userWantsCall {
+        // Stream dropped mid-call: keep the call alive and reconnect.
+        glassesIssue = .reconnecting
+        streamingStatus = .waiting
+        scheduleReconnect()
+      } else {
+        streamingStatus = .stopped
+      }
     case .waitingForDevice, .starting, .stopping, .paused:
       streamingStatus = .waiting
     case .streaming:
