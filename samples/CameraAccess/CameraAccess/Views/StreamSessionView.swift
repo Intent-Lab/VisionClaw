@@ -71,11 +71,16 @@ struct StreamSessionView: View {
             .task {
               guard !glassesAutoStarted else { return }
               glassesAutoStarted = true
-              for _ in 0..<4 {
-                await viewModel.handleStartStreaming()
-                if viewModel.isStreaming { break }
-                try? await Task.sleep(nanoseconds: 10_000_000_000)
+              NSLog("[Stream] auto-start begin (waiting on glasses wake + BT handshake)")
+              await viewModel.handleStartStreaming()
+              // Poll fast so the loop reacts the instant the stream is up, and
+              // re-attempt the start every ~10s while the glasses are still waking
+              // (up to ~90s). The video itself is driven by the streamingStatus
+              // onChange, so this loop only governs retries, not the reveal.
+              for tick in 0..<180 {
                 if viewModel.isStreaming || captureSource != .glasses { break }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if tick > 0, tick % 20 == 0 { await viewModel.handleStartStreaming() }
               }
             }
         } else {
