@@ -83,6 +83,9 @@ final class LiveKitSession: NSObject, ObservableObject {
     card = nil
   }
   @Published private(set) var localVideoTrack: LocalVideoTrack?
+  // The glasses track is created and rendered locally immediately, but its
+  // publish to the agent is deferred until the first frame arrives (see start()).
+  private var pendingGlassesTrack: LocalVideoTrack?
   /// Camera-only preview while no call is active. The camera IS this app;
   /// hanging up stops the listening, not the seeing.
   @Published private(set) var previewTrack: LocalVideoTrack?
@@ -241,7 +244,12 @@ final class LiveKitSession: NSObject, ObservableObject {
     glassesCapturerBox.capturer?.capture(pixelBuffer)
     if !glassesCapturerBox.sawFrame {
       glassesCapturerBox.sawFrame = true
-      Task { @MainActor in self.hasGlassesFrame = true }
+      Task { @MainActor in
+        self.hasGlassesFrame = true
+        // First frame is here -- publish the deferred glasses track now that the
+        // buffer publish has a frame to settle its dimensions.
+        await self.publishPendingGlassesTrack()
+      }
     }
   }
 
@@ -271,26 +279,21 @@ final class LiveKitSession: NSObject, ObservableObject {
       // rather than killing the call.
       do {
         if usingGlassesSource {
-          // Glasses frames arrive via pushGlassesFrame; publish a buffer
-          // track with camera source so mute/freeze/agent logic is identical.
+          // Glasses frames arrive via pushGlassesFrame; a buffer track with
+          // camera source keeps mute/freeze/agent logic identical.
           let track = LocalVideoTrack.createBufferTrack(name: "glasses", source: .camera)
-          // Wire the capturer BEFORE publishing: the buffer publish waits for a
-          // first frame to settle video dimensions, and pushGlassesFrame must
-          // reach THIS track during that window (not the stopped preview track).
           glassesCapturerBox.capturer = track.capturer as? BufferCapturer
           try await track.start()
-          // Publish so the agent sees the full DAT resolution -- make the glasses
-          // (720x1280) the only limiter. No simulcast, so the SFU can't hand the
-          // agent a downscaled layer; a bitrate high enough for crisp 720p; and
-          // maintainResolution so a congested network drops frame rate, never
-          // resolution. What the model sees then equals what DAT delivers.
-          _ = try await room.localParticipant.publish(
-            videoTrack: track,
-            options: VideoPublishOptions(
-              encoding: VideoEncoding(maxBitrate: 3_000_000, maxFps: 24),
-              simulcast: false,
-              degradationPreference: .maintainResolution))
+          // Render locally right away -- a LocalVideoTrack shows its captured
+          // frames on screen even before it is published. DEFER the publish to
+          // the agent until the first frame actually arrives
+          // (publishPendingGlassesTrack, from pushGlassesFrame): the buffer
+          // publish blocks on a first frame to settle dimensions, and the first
+          // glasses frame can take >10s over the slow BT link -- which was timing
+          // the publish out (Code 101 -> voice-only) and leaving a black screen
+          // while frames poured in with no track to carry them.
           localVideoTrack = track
+          pendingGlassesTrack = track
         } else {
           // A video-call SDK defaults to the selfie camera; this app is a pair
           // of eyes on the world, so it opens on the back camera.
@@ -310,6 +313,9 @@ final class LiveKitSession: NSObject, ObservableObject {
       state = .connected
       resetZoom()
       refreshAgentStatus()
+      // Frames may already be flowing by now; publish immediately if so, else
+      // the first frame's callback triggers it.
+      if glassesCapturerBox.sawFrame { await publishPendingGlassesTrack() }
     } catch {
       state = .failed(error.localizedDescription)
       agentStatus = .none
@@ -319,9 +325,31 @@ final class LiveKitSession: NSObject, ObservableObject {
     }
   }
 
+  /// Publishes the deferred glasses video track once the first frame has arrived,
+  /// so the buffer publish settles its dimensions instantly instead of timing out
+  /// waiting for a frame. The track already renders locally.
+  private func publishPendingGlassesTrack() async {
+    guard let track = pendingGlassesTrack, state == .connected else { return }
+    pendingGlassesTrack = nil
+    do {
+      // No simulcast (the SFU can't hand the agent a downscaled layer), a bitrate
+      // high enough for crisp 720p, and maintainResolution so a congested network
+      // drops frame rate, never resolution -- DAT stays the only limiter.
+      _ = try await room.localParticipant.publish(
+        videoTrack: track,
+        options: VideoPublishOptions(
+          encoding: VideoEncoding(maxBitrate: 3_000_000, maxFps: 24),
+          simulcast: false,
+          degradationPreference: .maintainResolution))
+    } catch {
+      NSLog("[LiveKit] glasses video publish failed: %@", error.localizedDescription)
+    }
+  }
+
   func stop() async {
     await room.disconnect()
     localVideoTrack = nil
+    pendingGlassesTrack = nil
     state = .disconnected
     agentStatus = .none
     resetZoom()
