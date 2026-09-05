@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- App Store Connect / TestFlight export. Used only for the CLI path
+     (xcodebuild -exportArchive). The Xcode Organizer "Distribute App" GUI does
+     not need this file. If xcodebuild rejects "app-store-connect" on an older
+     Xcode, change it to "app-store". -->
+<plist version="1.0">
+<dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>teamID</key><string>WY253UX7FC</string>
+  <key>signingStyle</key><string>automatic</string>
+  <key>uploadSymbols</key><true/>
+  <key>destination</key><string>upload</string>
+</dict>
+</plist>

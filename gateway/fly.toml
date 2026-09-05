@@ -1,0 +1,51 @@
+# VisionClaw gateway, hosted so the app no longer depends on a machine at home.
+#
+#   fly apps create visionclaw-gateway
+#   fly volumes create gateway_data --size 1 --region sjc -a visionclaw-gateway
+#   fly secrets set ANTHROPIC_API_KEY=... GOOGLE_CLIENT_SECRET=... \
+#                   STATE_SECRET=... GATEWAY_TOKENS=... -a visionclaw-gateway
+#   fly deploy
+#   fly certs add api.visionagents.app -a visionclaw-gateway
+#
+# The OAuth redirect is derived from PUBLIC_BASE_URL, so that exact host must be
+# an authorized redirect URI on the Google OAuth client.
+
+app = 'visionclaw-gateway'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  PORT = '8788'
+  PUBLIC_BASE_URL = 'https://api.visionagents.app'
+  # On the volume: this file maps each user to their CMA session, vault, and
+  # memory store. Losing it strands those resources and silently re-provisions
+  # empty ones, so it must outlive any single machine.
+  STORE_PATH = '/data/gateway-store.json'
+  WORKSPACE_MCP_URL = 'https://mcp.visionagents.app/mcp'
+  AGENT_MODEL = 'claude-sonnet-5'
+  AGENT_EFFORT = 'none'
+  QUICK_ANSWER_TIMEOUT_MS = '45000'
+  # GOOGLE_CLIENT_ID is set with `fly secrets set` rather than living here, so a
+  # fork brings its own OAuth client instead of pointing at someone else's
+  # consent screen and unverified-user quota.
+
+[http_service]
+  internal_port = 8788
+  force_https = true
+  # Deliberately always-on, unlike the MCP server. Deferred turns are awaited
+  # in-process and pushed over a held-open WebSocket, so a stopped machine drops
+  # results that are still in flight rather than merely adding a cold start.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[mounts]]
+  source = 'gateway_data'
+  destination = '/data'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'

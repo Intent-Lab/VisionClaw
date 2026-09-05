@@ -82,11 +82,11 @@ struct HomeScreenView: View {
           }
 
           CustomButton(
-            title: "Start on iPhone",
+            title: "Use iPhone camera instead",
             style: .secondary,
             isDisabled: false
           ) {
-            viewModel.skipToIPhoneMode = true
+            SettingsManager.shared.captureSource = .iPhoneCamera
           }
         }
       }

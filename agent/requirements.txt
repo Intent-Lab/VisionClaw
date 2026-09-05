@@ -1,0 +1,6 @@
+livekit-agents[images]>=1.0
+livekit-plugins-openai>=1.0
+livekit-plugins-google>=1.0
+google-genai>=1.0
+Pillow>=10.0
+aiohttp>=3.9

@@ -27,11 +27,15 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     vectorDrawables { useSupportLibrary = true }
+    // Real phones are arm64; the x86/x86_64/arm32 native libs tripled the APK
+    // for the benefit of emulators nobody sideloads onto.
+    ndk { abiFilters += listOf("arm64-v8a") }
   }
 
   buildTypes {
     release {
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("debug")
     }
@@ -69,6 +73,9 @@ dependencies {
   // VisionClaw additions
   implementation(libs.okhttp)
   implementation(libs.webrtc)
+  implementation(libs.livekit.android)
+  implementation(libs.livekit.android.camerax)
+  implementation(libs.androidx.browser)
   implementation(libs.camerax.core)
   implementation(libs.camerax.camera2)
   implementation(libs.camerax.lifecycle)

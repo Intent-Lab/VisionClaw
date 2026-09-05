@@ -25,3 +25,12 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Compile-time-only Facebook infra annotations/preconditions the DAT SDK
+# references but never ships; R8-generated dontwarn set.
+# Please add these rules to your existing keep rules in order to suppress warnings.
+# This is generated automatically by the Android Gradle plugin.
+-dontwarn com.facebook.common.preconditions.Preconditions
+-dontwarn com.facebook.infer.annotation.Nullsafe
+-dontwarn com.facebook.infer.annotation.NullsafeStrict
+-dontwarn com.facebook.secure.sanitizer.intf.DataSanitizer

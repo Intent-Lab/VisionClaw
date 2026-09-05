@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/
+.env
+# Backups and per-environment overrides hold the same live keys as .env.
+.env.*
+!.env.example
