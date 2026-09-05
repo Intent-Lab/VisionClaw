@@ -28,8 +28,11 @@ class StreamingService : Service() {
 
   companion object {
     private const val TAG = "StreamingService"
-    private const val CHANNEL_ID = "streaming_channel"
-    private const val CHANNEL_NAME = "Camera Streaming"
+    // Channel settings are immutable once created on a device, so the quiet
+    // configuration lives under a fresh id and the old channel is deleted.
+    private const val LEGACY_CHANNEL_ID = "streaming_channel"
+    private const val CHANNEL_ID = "glasses_streaming"
+    private const val CHANNEL_NAME = "Glasses streaming"
     private const val NOTIFICATION_ID = 1001
     private const val WAKELOCK_TAG = "VisionClaw::StreamingWakeLock"
 
@@ -88,19 +91,25 @@ class StreamingService : Service() {
 
   private fun createNotificationChannel() {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      // The mandatory foreground-service notification is status, not an
+      // alert: minimal importance, silent, badge-free.
       val channel =
           NotificationChannel(
                   CHANNEL_ID,
                   CHANNEL_NAME,
-                  NotificationManager.IMPORTANCE_LOW,
+                  NotificationManager.IMPORTANCE_MIN,
               )
               .apply {
-                description = "Notifications for active camera streaming"
+                description = "Shown while VisionClaw streams video from your glasses"
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
+                enableLights(false)
               }
 
       val notificationManager = getSystemService(NotificationManager::class.java)
       notificationManager.createNotificationChannel(channel)
+      notificationManager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
     }
   }
 
@@ -116,12 +125,12 @@ class StreamingService : Service() {
         )
 
     return NotificationCompat.Builder(this, CHANNEL_ID)
-        .setContentTitle("Camera Streaming")
-        .setContentText("Streaming from your glasses...")
+        .setContentTitle("VisionClaw is streaming from your glasses")
         .setSmallIcon(R.drawable.ic_launcher_foreground)
         .setOngoing(true)
         .setContentIntent(pendingIntent)
-        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setPriority(NotificationCompat.PRIORITY_MIN)
+        .setSilent(true)
         .setCategory(NotificationCompat.CATEGORY_SERVICE)
         .build()
   }

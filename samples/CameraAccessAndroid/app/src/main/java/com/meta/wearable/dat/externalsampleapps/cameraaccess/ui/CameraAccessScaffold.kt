@@ -6,21 +6,17 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// CameraAccessScaffold - DAT Application Navigation Orchestrator
+// CameraAccessScaffold - Navigation Orchestrator
 //
-// This scaffold demonstrates a typical DAT application navigation pattern based on device
-// registration and streaming states from the DAT API.
+// Routing is driven by the capture source setting plus DAT registration state:
+// - Phone mode: LiveKitStreamScreen is the root -- camera preview + call button,
+//   no onboarding.
+// - Glasses mode, registered (or mock device): the same LiveKitStreamScreen with
+//   glasses frames as the video source; DAT streaming auto-starts, no
+//   start-choice interstitial.
+// - Glasses mode, NOT registered: HomeScreen shows the registration UI calling
+//   Wearables.startRegistration().
 //
-// DAT State-Based Navigation:
-// - HomeScreen: When NOT registered (uiState.isRegistered = false) Shows initial registration UI
-//   calling Wearables.startRegistration()
-// - NonStreamScreen: When registered (uiState.isRegistered = true) but not streaming Shows device
-//   selection, permission checking, and pre-streaming setup
-// - StreamScreen: When actively streaming (uiState.isStreaming = true) Shows live video from
-//   StreamSession.videoStream and photo capture UI
-//
-// The scaffold also provides a debug menu (in DEBUG builds) that gives access to
-// MockDeviceKitScreen for testing DAT functionality without physical devices.
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
@@ -33,30 +29,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,8 +64,22 @@ fun CameraAccessScaffold(
     modifier: Modifier = Modifier,
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
+  val liveKitViewModel: LiveKitSessionViewModel = composeViewModel()
   val snackbarHostState = remember { SnackbarHostState() }
-  val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+  // Builds ship without a gateway token (it is per-person identity), so an
+  // install with none configured -- or one whose account is still pending
+  // approval -- sees only the sign-in gate. The flow also drops a revoked
+  // account back here mid-session. Re-checked when Settings closes because
+  // the token can be edited or reset there.
+  val unlocked by SettingsManager.unlockedFlow.collectAsStateWithLifecycle()
+  LaunchedEffect(uiState.isSettingsVisible) {
+    if (!uiState.isSettingsVisible) SettingsManager.refreshUnlocked()
+  }
+  if (!unlocked) {
+    AccessCodeScreen(onUnlocked = { SettingsManager.refreshUnlocked() }, modifier = modifier)
+    return
+  }
 
   // Observe camera permission errors and show snackbar
   LaunchedEffect(uiState.recentError) {
@@ -78,6 +89,52 @@ fun CameraAccessScaffold(
     }
   }
 
+  // Swap capture pipelines live when the Settings choice changes. Both modes
+  // run the same LiveKit session, so an actual switch tears it down (video
+  // source is chosen at track creation) and the next screen auto-starts with
+  // the new source.
+  var previousSource by remember { mutableStateOf<CaptureSource?>(null) }
+  LaunchedEffect(captureSource) {
+    if (previousSource != null && previousSource != captureSource) {
+      liveKitViewModel.leave()
+    }
+    when (captureSource) {
+      CaptureSource.GLASSES ->
+          // Initializes the DAT SDK on first use (no-op afterwards) so phone
+          // mode never pays its startup cost.
+          viewModel.startMonitoring()
+      CaptureSource.PHONE ->
+          if (uiState.isStreaming) {
+            viewModel.navigateToDeviceSelection()
+          }
+    }
+    previousSource = captureSource
+  }
+
+  // Glasses mode never shows a start-choice page: entering it with registered
+  // glasses (or a mock device) runs the DAT permission flow automatically and
+  // the call screen's "Waiting for glasses video" placeholder is the loading
+  // state. One attempt per entry into glasses mode, so a denied permission
+  // surfaces once through the snackbar instead of looping.
+  var glassesStartAttempted by remember { mutableStateOf(false) }
+  var previousDeviceAvailable by remember { mutableStateOf(false) }
+  LaunchedEffect(captureSource, uiState.isRegistered, uiState.hasActiveDevice) {
+    if (captureSource == CaptureSource.PHONE) {
+      glassesStartAttempted = false
+    } else {
+      // Glasses waking up (no device -> device) re-arms the single attempt,
+      // so auto-start follows availability transitions instead of looping.
+      if (uiState.hasActiveDevice && !previousDeviceAvailable) {
+        glassesStartAttempted = false
+      }
+      if (uiState.isRegistered && !uiState.isStreaming && !glassesStartAttempted) {
+        glassesStartAttempted = true
+        viewModel.navigateToStreaming(onRequestWearablesPermission, quietIfUnavailable = true)
+      }
+    }
+    previousDeviceAvailable = uiState.hasActiveDevice
+  }
+
   Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     Box(modifier = Modifier.fillMaxSize()) {
       when {
@@ -85,16 +142,21 @@ fun CameraAccessScaffold(
             SettingsScreen(
                 onBack = { viewModel.hideSettings() },
             )
-        uiState.isStreaming ->
-            StreamScreen(
-                wearablesViewModel = viewModel,
-                isPhoneMode = uiState.isPhoneMode,
+        // Phone mode is the app's front door: no onboarding, no intermediate
+        // screen -- the camera preview + call button IS the home screen.
+        captureSource == CaptureSource.PHONE ->
+            LiveKitStreamScreen(
+                onOpenSettings = { viewModel.showSettings() },
             )
+        // Glasses mode with registered glasses: the SAME call screen, with
+        // glasses frames as the video source, is the root -- streaming
+        // auto-starts, so there is no start-choice interstitial.
         uiState.isRegistered ->
-            NonStreamScreen(
-                viewModel = viewModel,
-                onRequestWearablesPermission = onRequestWearablesPermission,
+            LiveKitStreamScreen(
+                onOpenSettings = { viewModel.showSettings() },
+                glassesIssue = uiState.glassesIssue,
             )
+        // Unregistered glasses mode: the connect screen.
         else ->
             HomeScreen(
                 viewModel = viewModel,
@@ -126,24 +188,6 @@ fun CameraAccessScaffold(
           },
       )
 
-      if (BuildConfig.DEBUG) {
-        FloatingActionButton(
-            onClick = { viewModel.showDebugMenu() },
-            modifier = Modifier.align(Alignment.CenterEnd),
-        ) {
-          Icon(Icons.Default.BugReport, contentDescription = "Debug Menu")
-        }
-
-        if (uiState.isDebugMenuVisible) {
-          ModalBottomSheet(
-              onDismissRequest = { viewModel.hideDebugMenu() },
-              sheetState = bottomSheetState,
-              modifier = Modifier.fillMaxSize(),
-          ) {
-            MockDeviceKitScreen(modifier = Modifier.fillMaxSize())
-          }
-        }
-      }
     }
   }
 }

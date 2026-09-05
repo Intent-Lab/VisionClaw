@@ -21,7 +21,8 @@ enum KeychainManager {
     return String(data: data, encoding: .utf8)
   }
 
-  static func set(_ key: String, value: String) {
+  @discardableResult
+  static func set(_ key: String, value: String) -> Bool {
     let data = Data(value.utf8)
 
     // Try update first (cheaper than delete+add)
@@ -36,8 +37,10 @@ enum KeychainManager {
     if updateStatus == errSecItemNotFound {
       var addQuery = query
       addQuery[kSecValueData as String] = data
-      SecItemAdd(addQuery as CFDictionary, nil)
+      return SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess
     }
+
+    return updateStatus == errSecSuccess
   }
 
   static func delete(_ key: String) {

@@ -80,6 +80,33 @@ fun WebRTCOverlay(
 }
 
 @Composable
+fun StatusPill(
+    label: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+@Composable
 fun RoomCodePill(
     code: String,
     modifier: Modifier = Modifier,

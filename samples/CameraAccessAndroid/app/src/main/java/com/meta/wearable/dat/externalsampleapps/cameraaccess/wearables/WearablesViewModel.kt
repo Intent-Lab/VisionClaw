@@ -18,6 +18,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 
 import android.app.Activity
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meta.wearable.dat.core.Wearables
@@ -25,6 +26,7 @@ import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.types.DeviceIdentifier
 import com.meta.wearable.dat.core.types.Permission
+import com.meta.wearable.dat.core.types.PermissionError
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
@@ -55,6 +57,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     if (monitoringStarted) {
       return
     }
+    WearablesInit.ensure(getApplication())
     monitoringStarted = true
 
     // Monitor device selector for active device
@@ -107,8 +110,12 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                   metadata.compatibility ==
                       com.meta.wearable.dat.core.types.DeviceCompatibility.DEVICE_UPDATE_REQUIRED
               ) {
-                val deviceName = metadata.name.ifEmpty { deviceId }
-                setRecentError("Device '$deviceName' requires an update to work with this app")
+                val deviceName = metadata.name.ifEmpty { deviceId.toString() }
+                // Glasses state renders inline on the call screen, not as an
+                // alarm-styled snackbar.
+                _uiState.update {
+                  it.copy(glassesIssue = GlassesIssue.DeviceUpdateRequired(deviceName))
+                }
               }
             }
           }
@@ -117,27 +124,56 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
   }
 
   fun startRegistration(activity: Activity) {
+    WearablesInit.ensure(activity)
     Wearables.startRegistration(activity)
   }
 
   fun startUnregistration(activity: Activity) {
+    WearablesInit.ensure(activity)
     Wearables.startUnregistration(activity)
   }
 
-  fun navigateToStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
+  fun navigateToStreaming(
+      onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
+      quietIfUnavailable: Boolean = false,
+  ) {
     viewModelScope.launch {
+      _uiState.update { it.copy(glassesIssue = null) }
       val permission = Permission.CAMERA // Camera permission is required for streaming
       val result = Wearables.checkPermissionStatus(permission)
 
       // Handle the result
       result.onFailure { error, _ ->
-        setRecentError("Permission check error: ${error.description}")
+        // Under auto-start the call screen's placeholder is the user-facing
+        // surface, so glasses conditions render there as typed states: asleep
+        // or disconnected glasses are the plain waiting state, the rest get a
+        // state-specific line. The snackbar remains only for the manual flow.
+        if (!quietIfUnavailable) {
+          setRecentError("Permission check error: ${error.description}")
+          return@launch
+        }
+        when (error) {
+          PermissionError.NO_DEVICE,
+          PermissionError.NO_DEVICE_WITH_CONNECTION -> {
+            Log.i(TAG, "glasses unavailable, waiting for a device: ${error.description}")
+          }
+          PermissionError.META_AI_NOT_INSTALLED -> {
+            _uiState.update { it.copy(glassesIssue = GlassesIssue.MetaAiMissing) }
+          }
+          PermissionError.CONNECTION_ERROR,
+          PermissionError.REQUEST_IN_PROGRESS,
+          PermissionError.REQUEST_TIMEOUT,
+          PermissionError.INTERNAL_ERROR -> {
+            Log.i(TAG, "glasses connection issue: ${error.description}")
+            _uiState.update { it.copy(glassesIssue = GlassesIssue.Reconnecting) }
+          }
+        }
         return@launch
       }
 
       val permissionStatus = result.getOrNull()
       if (permissionStatus == PermissionStatus.Granted) {
-        _uiState.update { it.copy(isStreaming = true) }
+        _uiState.update { it.copy(isStreaming = true, glassesIssue = null) }
         return@launch
       }
 
@@ -145,21 +181,21 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
       val requestedPermissionStatus = onRequestWearablesPermission(permission)
       when (requestedPermissionStatus) {
         PermissionStatus.Denied -> {
-          setRecentError("Permission denied")
+          if (quietIfUnavailable) {
+            _uiState.update { it.copy(glassesIssue = GlassesIssue.PermissionDenied) }
+          } else {
+            setRecentError("Permission denied")
+          }
         }
         PermissionStatus.Granted -> {
-          _uiState.update { it.copy(isStreaming = true) }
+          _uiState.update { it.copy(isStreaming = true, glassesIssue = null) }
         }
       }
     }
   }
 
-  fun navigateToPhoneMode() {
-    _uiState.update { it.copy(isStreaming = true, isPhoneMode = true) }
-  }
-
   fun navigateToDeviceSelection() {
-    _uiState.update { it.copy(isStreaming = false, isPhoneMode = false) }
+    _uiState.update { it.copy(isStreaming = false, glassesIssue = null) }
   }
 
   fun showSettings() {

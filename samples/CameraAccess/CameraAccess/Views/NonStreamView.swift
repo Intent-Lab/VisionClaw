@@ -105,13 +105,11 @@ struct NonStreamView: View {
         .padding(.bottom, 12)
 
         CustomButton(
-          title: "Start on iPhone",
+          title: "Use iPhone camera instead",
           style: .secondary,
           isDisabled: false
         ) {
-          Task {
-            await viewModel.handleStartIPhone()
-          }
+          SettingsManager.shared.captureSource = .iPhoneCamera
         }
 
         CustomButton(

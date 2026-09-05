@@ -44,6 +44,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @Composable
@@ -130,10 +132,11 @@ fun HomeScreen(
             },
         )
 
-        // Phone mode button
+        // Phone mode is a capture-source choice, not a navigation state: the
+        // scaffold routes on it, and it sticks across launches like on iOS.
         SwitchButton(
             label = "Start on Phone",
-            onClick = { viewModel.navigateToPhoneMode() },
+            onClick = { SettingsManager.captureSource = CaptureSource.PHONE },
         )
       }
     }
