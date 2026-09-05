@@ -31,21 +31,20 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meta.wearable.dat.camera.types.StreamSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamViewModel
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
 
+// Glasses-mode streaming screen. Voice moved to the LiveKit path (phone
+// mode); piping glasses frames into a LiveKit room is not wired up yet, so
+// the AI toggle here is a stub until it is.
 @Composable
 fun StreamScreen(
     wearablesViewModel: WearablesViewModel,
-    isPhoneMode: Boolean = false,
     modifier: Modifier = Modifier,
     streamViewModel: StreamViewModel =
         viewModel(
@@ -55,55 +54,30 @@ fun StreamScreen(
                     wearablesViewModel = wearablesViewModel,
                 ),
         ),
-    geminiViewModel: GeminiSessionViewModel = viewModel(),
     webrtcViewModel: WebRTCSessionViewModel = viewModel(),
 ) {
     val streamUiState by streamViewModel.uiState.collectAsStateWithLifecycle()
-    val geminiUiState by geminiViewModel.uiState.collectAsStateWithLifecycle()
     val webrtcUiState by webrtcViewModel.uiState.collectAsStateWithLifecycle()
-    val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
-
-    // Wire Gemini VM to Stream VM for frame forwarding
-    LaunchedEffect(geminiViewModel) {
-        streamViewModel.geminiViewModel = geminiViewModel
-    }
 
     // Wire WebRTC VM to Stream VM for frame forwarding
     LaunchedEffect(webrtcViewModel) {
         streamViewModel.webrtcViewModel = webrtcViewModel
     }
 
-    // Start stream or phone camera
-    LaunchedEffect(isPhoneMode) {
-        if (isPhoneMode) {
-            geminiViewModel.streamingMode = StreamingMode.PHONE
-            streamViewModel.startPhoneCamera(lifecycleOwner)
-        } else {
-            geminiViewModel.streamingMode = StreamingMode.GLASSES
-            streamViewModel.startStream()
-        }
+    LaunchedEffect(Unit) {
+        streamViewModel.startStream()
     }
 
     // Clean up on exit
     DisposableEffect(Unit) {
         onDispose {
-            if (geminiUiState.isGeminiActive) {
-                geminiViewModel.stopSession()
-            }
             if (webrtcUiState.isActive) {
                 webrtcViewModel.stopSession()
             }
         }
     }
 
-    // Show errors as toasts
-    LaunchedEffect(geminiUiState.errorMessage) {
-        geminiUiState.errorMessage?.let { msg ->
-            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-            geminiViewModel.clearError()
-        }
-    }
     LaunchedEffect(webrtcUiState.errorMessage) {
         webrtcUiState.errorMessage?.let { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -132,11 +106,6 @@ fun StreamScreen(
         Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             // Top overlays (below status bar)
             Column(modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(top = 8.dp)) {
-                // Gemini overlay
-                if (geminiUiState.isGeminiActive) {
-                    GeminiOverlay(uiState = geminiUiState)
-                }
-
                 // WebRTC overlay
                 if (webrtcUiState.isActive) {
                     Spacer(modifier = Modifier.height(4.dp))
@@ -147,20 +116,19 @@ fun StreamScreen(
             // Controls at bottom
             ControlsRow(
                 onStopStream = {
-                    if (geminiUiState.isGeminiActive) geminiViewModel.stopSession()
                     if (webrtcUiState.isActive) webrtcViewModel.stopSession()
                     streamViewModel.stopStream()
                     wearablesViewModel.navigateToDeviceSelection()
                 },
                 onCapturePhoto = { streamViewModel.capturePhoto() },
                 onToggleAI = {
-                    if (geminiUiState.isGeminiActive) {
-                        geminiViewModel.stopSession()
-                    } else {
-                        geminiViewModel.startSession()
-                    }
+                    Toast.makeText(
+                        context,
+                        "Voice is not yet available in glasses mode.",
+                        Toast.LENGTH_SHORT,
+                    ).show()
                 },
-                isAIActive = geminiUiState.isGeminiActive,
+                isAIActive = false,
                 onToggleLive = {
                     if (webrtcUiState.isActive) {
                         webrtcViewModel.stopSession()

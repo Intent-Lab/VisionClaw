@@ -30,9 +30,20 @@
 				<string>cameraaccess</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.visionclaw.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>visionclaw</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- App uses only exempt encryption (standard TLS/HTTPS): skips the TestFlight export-compliance prompt. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- Begin required section for Device Access Toolkit Apps -->
 	<!-- Meta Wearables Device Access Toolkit Setup -->
 	<key>MWDAT</key>
@@ -71,6 +82,10 @@
 	<string>This app uses the microphone to have voice conversations with the AI assistant while streaming from your glasses.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>This app reads and adds calendar events so the assistant can answer questions about your schedule and create events when you ask.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>This app creates reminders when you ask the assistant to remind you about something.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

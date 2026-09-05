@@ -1,93 +1,102 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.GatewayApi
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.GatewayStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.IntelligenceEngine
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 
-@OptIn(ExperimentalMaterial3Api::class)
+private enum class SettingsSubScreen { CONNECTED_APPS, RECENT_TASKS, GATEWAY }
+
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
-    var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
-    var openClawHost by remember { mutableStateOf(SettingsManager.openClawHost) }
-    var openClawPort by remember { mutableStateOf(SettingsManager.openClawPort.toString()) }
-    var openClawRemoteURL by remember { mutableStateOf(SettingsManager.openClawRemoteURL) }
-    var openClawHookToken by remember { mutableStateOf(SettingsManager.openClawHookToken) }
-    var openClawGatewayToken by remember { mutableStateOf(SettingsManager.openClawGatewayToken) }
-    var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
-    var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
-    var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
+    var subScreen by remember { mutableStateOf<SettingsSubScreen?>(null) }
+
+    when (subScreen) {
+        SettingsSubScreen.CONNECTED_APPS -> ConnectedAppsScreen(onBack = { subScreen = null })
+        SettingsSubScreen.RECENT_TASKS -> RecentTasksScreen(onBack = { subScreen = null })
+        SettingsSubScreen.GATEWAY -> GatewaySettingsScreen(onBack = { subScreen = null })
+        null -> SettingsMainScreen(
+            onBack = onBack,
+            onOpen = { subScreen = it },
+            modifier = modifier,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsMainScreen(
+    onBack: () -> Unit,
+    onOpen: (SettingsSubScreen) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
+    var intelligenceEngine by remember { mutableStateOf(SettingsManager.intelligenceEngine) }
+    var showCaptions by remember { mutableStateOf(SettingsManager.showCaptions) }
+    var gatewayStatus by remember { mutableStateOf<GatewayStatus>(GatewayStatus.Checking) }
     var showResetDialog by remember { mutableStateOf(false) }
 
-    fun save() {
-        SettingsManager.geminiAPIKey = geminiAPIKey.trim()
-        SettingsManager.geminiSystemPrompt = systemPrompt.trim()
-        SettingsManager.openClawHost = openClawHost.trim()
-        openClawPort.trim().toIntOrNull()?.let { SettingsManager.openClawPort = it }
-        SettingsManager.openClawRemoteURL = openClawRemoteURL.trim()
-        SettingsManager.openClawHookToken = openClawHookToken.trim()
-        SettingsManager.openClawGatewayToken = openClawGatewayToken.trim()
-        SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
-        SettingsManager.videoStreamingEnabled = videoStreamingEnabled
-        SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
+    LaunchedEffect(Unit) {
+        gatewayStatus = GatewayStatus.Checking
+        gatewayStatus = GatewayApi.checkStatus()
     }
 
-    fun reload() {
-        geminiAPIKey = SettingsManager.geminiAPIKey
-        systemPrompt = SettingsManager.geminiSystemPrompt
-        openClawHost = SettingsManager.openClawHost
-        openClawPort = SettingsManager.openClawPort.toString()
-        openClawRemoteURL = SettingsManager.openClawRemoteURL
-        openClawHookToken = SettingsManager.openClawHookToken
-        openClawGatewayToken = SettingsManager.openClawGatewayToken
-        webrtcSignalingURL = SettingsManager.webrtcSignalingURL
-        videoStreamingEnabled = SettingsManager.videoStreamingEnabled
-        proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
-    }
+    BackHandler { onBack() }
 
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
             title = { Text("Settings") },
             navigationIcon = {
-                IconButton(onClick = {
-                    save()
-                    onBack()
-                }) {
+                IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             },
@@ -101,116 +110,89 @@ fun SettingsScreen(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Gemini section
-            SectionHeader("Gemini API")
-            MonoTextField(
-                value = geminiAPIKey,
-                onValueChange = { geminiAPIKey = it },
-                label = "API Key",
-                placeholder = "Enter Gemini API key",
+            // Camera section: applies immediately -- the root scaffold observes
+            // the same flow and swaps the capture pipeline live.
+            SectionHeader("Camera")
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                CaptureSource.entries.forEachIndexed { index, source ->
+                    SegmentedButton(
+                        selected = source == captureSource,
+                        onClick = { SettingsManager.captureSource = source },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = CaptureSource.entries.size,
+                        ),
+                    ) {
+                        Text(source.label)
+                    }
+                }
+            }
+            FooterText(
+                if (captureSource == CaptureSource.GLASSES) {
+                    "Streams from your Meta glasses. Connecting them happens on the main screen."
+                } else {
+                    "Uses this phone's camera. The app opens straight into it, with voice ready."
+                },
             )
 
-            SectionHeader("System Prompt")
-            OutlinedTextField(
-                value = systemPrompt,
-                onValueChange = { systemPrompt = it },
-                label = { Text("System prompt") },
-                modifier = Modifier.fillMaxWidth().height(200.dp),
-                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            // Intelligence section
+            SectionHeader("Intelligence")
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                IntelligenceEngine.entries.forEachIndexed { index, engine ->
+                    SegmentedButton(
+                        selected = engine == intelligenceEngine,
+                        onClick = {
+                            intelligenceEngine = engine
+                            SettingsManager.intelligenceEngine = engine
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(
+                            index = index,
+                            count = IntelligenceEngine.entries.size,
+                        ),
+                    ) {
+                        Text(engine.label)
+                    }
+                }
+            }
+            FooterText(
+                if (intelligenceEngine == IntelligenceEngine.OPENAI) {
+                    "OpenAI gpt-realtime. Applies to the next call."
+                } else {
+                    "Google Gemini Live. Applies to the next call."
+                },
             )
-
-            // OpenClaw section
-            SectionHeader("OpenClaw")
-            MonoTextField(
-                value = openClawHost,
-                onValueChange = { openClawHost = it },
-                label = "Host",
-                placeholder = "http://your-mac.local",
-                keyboardType = KeyboardType.Uri,
-            )
-            MonoTextField(
-                value = openClawPort,
-                onValueChange = { openClawPort = it },
-                label = "Port",
-                placeholder = "18789",
-                keyboardType = KeyboardType.Number,
-            )
-            MonoTextField(
-                value = openClawRemoteURL,
-                onValueChange = { openClawRemoteURL = it },
-                label = "Remote URL (Tailscale / Public)",
-                placeholder = "http://100.x.x.x:18789",
-                keyboardType = KeyboardType.Uri,
-            )
-            Text(
-                "For use outside your home Wi-Fi. Tried first; falls back to local Host above.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            MonoTextField(
-                value = openClawHookToken,
-                onValueChange = { openClawHookToken = it },
-                label = "Hook Token",
-                placeholder = "Hook token",
-            )
-            MonoTextField(
-                value = openClawGatewayToken,
-                onValueChange = { openClawGatewayToken = it },
-                label = "Gateway Token",
-                placeholder = "Gateway auth token",
-            )
-
-            // WebRTC section
-            SectionHeader("WebRTC")
-            MonoTextField(
-                value = webrtcSignalingURL,
-                onValueChange = { webrtcSignalingURL = it },
-                label = "Signaling URL",
-                placeholder = "wss://your-server.example.com",
-                keyboardType = KeyboardType.Uri,
-            )
-
-            // Video
-            SectionHeader("Video")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text("Video Streaming", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Disable to save battery. Audio remains active.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Text("Show captions", style = MaterialTheme.typography.bodyLarge)
                 Switch(
-                    checked = videoStreamingEnabled,
-                    onCheckedChange = { videoStreamingEnabled = it },
+                    checked = showCaptions,
+                    onCheckedChange = {
+                        showCaptions = it
+                        SettingsManager.showCaptions = it
+                    },
                 )
             }
 
-            // Notifications
-            SectionHeader("Notifications")
+            // Gateway status + navigation rows
+            SectionHeader("Gateway")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
-                    Text("Proactive Notifications", style = MaterialTheme.typography.bodyLarge)
-                    Text(
-                        "Receive updates from OpenClaw spoken through glasses.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = proactiveNotificationsEnabled,
-                    onCheckedChange = { proactiveNotificationsEnabled = it },
-                )
+                Text("Status", style = MaterialTheme.typography.bodyLarge)
+                GatewayStatusLabel(status = gatewayStatus)
             }
+            NavigationRow("Connected Apps") { onOpen(SettingsSubScreen.CONNECTED_APPS) }
+            NavigationRow("Recent Tasks") { onOpen(SettingsSubScreen.RECENT_TASKS) }
+            // The URL ships with a working default and the token is captured
+            // on first launch, so most people never need to see them;
+            // surfacing them as primary fields made a configured setup look
+            // like one awaiting setup.
+            NavigationRow("Gateway settings") { onOpen(SettingsSubScreen.GATEWAY) }
 
             // Reset
             TextButton(onClick = { showResetDialog = true }) {
@@ -229,7 +211,8 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     SettingsManager.resetAll()
-                    reload()
+                    intelligenceEngine = SettingsManager.intelligenceEngine
+                    showCaptions = SettingsManager.showCaptions
                     showResetDialog = false
                 }) {
                     Text("Reset", color = Color.Red)
@@ -245,11 +228,154 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun SectionHeader(title: String) {
+private fun GatewayStatusLabel(
+    status: GatewayStatus,
+    modifier: Modifier = Modifier,
+) {
+    when (status) {
+        GatewayStatus.Checking ->
+            CircularProgressIndicator(modifier = modifier.size(16.dp), strokeWidth = 2.dp)
+        GatewayStatus.Ready ->
+            Text("Connected", color = AppColor.Green, modifier = modifier)
+        GatewayStatus.NotConfigured ->
+            Text("Not set up", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
+        GatewayStatus.Unauthorized ->
+            Text("Token rejected", color = AppColor.Red, modifier = modifier)
+        is GatewayStatus.Unreachable ->
+            Text(status.detail, color = AppColor.Red, modifier = modifier)
+    }
+}
+
+@Composable
+private fun NavigationRow(
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Gateway URL + token, tucked away like iOS's disclosure group. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GatewaySettingsScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var gatewayBaseUrl by remember { mutableStateOf(SettingsManager.gatewayBaseUrl) }
+    var gatewayToken by remember { mutableStateOf(SettingsManager.gatewayToken) }
+    var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
+    val accountEmail = SettingsManager.accountEmail
+    var signedOut by remember { mutableStateOf(false) }
+
+    fun saveAndClose() {
+        SettingsManager.gatewayBaseUrl = gatewayBaseUrl.trim()
+        SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
+        // Signing out already cleared the token; re-saving the stale field
+        // value would silently sign the user back in.
+        if (!signedOut) SettingsManager.gatewayToken = gatewayToken.trim()
+        onBack()
+    }
+
+    BackHandler { saveAndClose() }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("Gateway settings") },
+            navigationIcon = {
+                IconButton(onClick = { saveAndClose() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                }
+            },
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            SectionHeader("Gateway")
+            if (accountEmail != null && !signedOut) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text("Signed in as", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(accountEmail, style = MaterialTheme.typography.bodyLarge)
+                    }
+                    TextButton(onClick = {
+                        SettingsManager.signOut()
+                        signedOut = true
+                        onBack()
+                    }) { Text("Sign out") }
+                }
+            }
+            MonoTextField(
+                value = gatewayBaseUrl,
+                onValueChange = { gatewayBaseUrl = it },
+                label = "Gateway URL",
+                placeholder = "https://gateway.example.com",
+                keyboardType = KeyboardType.Uri,
+            )
+            if (accountEmail == null) {
+                MonoTextField(
+                    value = gatewayToken,
+                    onValueChange = { gatewayToken = it },
+                    label = "Access Token",
+                    placeholder = "Your gateway access token",
+                )
+            }
+
+            // Glasses live POV streaming; unrelated to the gateway but equally
+            // rarely touched.
+            SectionHeader("WebRTC")
+            MonoTextField(
+                value = webrtcSignalingURL,
+                onValueChange = { webrtcSignalingURL = it },
+                label = "Signaling URL",
+                placeholder = "wss://your-server.example.com",
+                keyboardType = KeyboardType.Uri,
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+internal fun SectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+@Composable
+internal fun FooterText(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 

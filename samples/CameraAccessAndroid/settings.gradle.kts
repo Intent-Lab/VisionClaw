@@ -45,6 +45,11 @@ dependencyResolutionManagement {
         password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
       }
     }
+    // LiveKit's audioswitch fork is published on JitPack only.
+    maven {
+      url = uri("https://jitpack.io")
+      content { includeGroupByRegex("com\\.github\\..*") }
+    }
   }
 }
 
