@@ -2,6 +2,8 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.Secrets
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,9 +42,11 @@ enum class CaptureSource(val value: String, val label: String) {
 
 object SettingsManager {
     private const val PREFS_NAME = "visionclaw_settings"
+    private const val SECURE_PREFS_NAME = "visionclaw_secure"
     private const val DEFAULT_SIGNALING_URL = "wss://YOUR_SIGNALING_SERVER"
 
     private lateinit var prefs: SharedPreferences
+    private lateinit var securePrefs: SharedPreferences
 
     private val _captureSourceFlow = MutableStateFlow(CaptureSource.PHONE)
     val captureSourceFlow: StateFlow<CaptureSource> = _captureSourceFlow.asStateFlow()
@@ -55,8 +59,26 @@ object SettingsManager {
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        securePrefs = EncryptedSharedPreferences.create(
+            context,
+            SECURE_PREFS_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+        migrateGatewayToken()
         _captureSourceFlow.value = CaptureSource.fromValue(prefs.getString("captureSource", null))
         refreshUnlocked()
+    }
+
+    private fun migrateGatewayToken() {
+        val legacyToken = prefs.getString("gatewayToken", null) ?: return
+        if (securePrefs.edit().putString("gatewayToken", legacyToken).commit()) {
+            prefs.edit().remove("gatewayToken").apply()
+        }
     }
 
     fun refreshUnlocked() {
@@ -76,9 +98,9 @@ object SettingsManager {
         set(value) = prefs.edit().putString("gatewayBaseUrl", value).apply()
 
     var gatewayToken: String
-        get() = prefs.getString("gatewayToken", null) ?: Secrets.gatewayToken
+        get() = securePrefs.getString("gatewayToken", null) ?: Secrets.gatewayToken
         set(value) {
-            prefs.edit().putString("gatewayToken", value).apply()
+            securePrefs.edit().putString("gatewayToken", value).apply()
             refreshUnlocked()
         }
 
@@ -104,8 +126,8 @@ object SettingsManager {
         get() = isGatewayConfigured && accountStatus != "pending"
 
     fun signOut() {
+        securePrefs.edit().remove("gatewayToken").apply()
         prefs.edit()
-            .remove("gatewayToken")
             .remove("accountEmail")
             .remove("accountUserId")
             .remove("accountStatus")
@@ -134,6 +156,7 @@ object SettingsManager {
         set(value) = prefs.edit().putString("webrtcSignalingURL", value).apply()
 
     fun resetAll() {
+        securePrefs.edit().clear().apply()
         prefs.edit().clear().apply()
         _captureSourceFlow.value = CaptureSource.PHONE
         refreshUnlocked()
