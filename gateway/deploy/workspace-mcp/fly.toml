@@ -1,0 +1,64 @@
+# Google Workspace MCP server (taylorwilsdon/google_workspace_mcp, MIT) run in
+# external-OAuth mode: it accepts the bearer token Anthropic's vault injects and
+# calls the Google REST APIs underneath, so it works with consumer Gmail accounts
+# where Google's own preview-gated Calendar MCP server does not.
+#
+# Deploy from a clone of the upstream repo with this file copied in:
+#   git clone https://github.com/taylorwilsdon/google_workspace_mcp.git
+#   cp <visionclaw>/gateway/deploy/workspace-mcp/fly.toml google_workspace_mcp/
+#   cd google_workspace_mcp && fly launch --no-deploy --copy-config --name <app>
+#   fly secrets set GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=...
+#   fly deploy
+#
+# Then point the gateway at it (the trailing /mcp/ matters):
+#   WORKSPACE_MCP_URL=https://<app>.fly.dev/mcp/
+#
+# Note: the vault credential is keyed to this URL. Changing it orphans every
+# stored credential and forces users to reconnect, so put a domain you own in
+# front before onboarding anyone.
+
+app = 'visionclaw-workspace-mcp'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+# The image already builds a venv (`uv sync --no-dev --extra disk --extra otel`),
+# but the stock CMD is a bare `uv run`, which re-syncs to a *different* target at
+# startup -- dev dependencies in, extras out. It spent ~21s undoing the build and
+# reinstalling 17 packages, downloading ruff into a production runtime, before the
+# port was bound. `--no-sync` runs the venv as built.
+#
+# This must be a single-element array, not [processes]: the image entrypoint is
+# ["/bin/sh", "-c"], and [processes] shell-splits its value into separate argv
+# entries, so sh runs only the first word and treats the rest as positional
+# parameters. uv then prints help and exits 2.
+[experimental]
+  cmd = ['uv run --no-sync main.py --transport streamable-http --tools calendar']
+
+[env]
+  MCP_ENABLE_OAUTH21 = 'true'
+  EXTERNAL_OAUTH21_PROVIDER = 'true'
+  # Memory-only credential storage: nothing to persist, safe to scale to zero.
+  WORKSPACE_MCP_STATELESS_MODE = 'true'
+  WORKSPACE_MCP_PORT = '8000'
+  WORKSPACE_EXTERNAL_URL = 'https://mcp.visionagents.app'
+  # Only the calendar tools are loaded; widen this (gmail, tasks, drive, ...)
+  # as you add registry entries with matching scopes.
+  TOOLS = 'calendar'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Scaling to zero is *safe* here (stateless, memory-only credentials) but not
+  # free: measured cold start was 32s before the --no-sync fix and ~10s after,
+  # against a 45s quick-answer budget. Python import cost is the floor, so the
+  # only way to stop paying it is to not stop the machine. ~$2/month.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'

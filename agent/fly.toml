@@ -1,0 +1,25 @@
+# VisionClaw voice agent worker. Registers with LiveKit and gets dispatched
+# into rooms; must be always-on like the gateway -- a stopped worker means
+# nobody answers when a user connects.
+#
+#   fly apps create visionclaw-agent
+#   fly secrets set LIVEKIT_URL=wss://... LIVEKIT_API_KEY=... LIVEKIT_API_SECRET=... \
+#                   GOOGLE_API_KEY=... GATEWAY_URL=https://api.visionagents.app \
+#                   GATEWAY_SERVICE_TOKEN=... -a visionclaw-agent
+#   fly deploy --local-only
+
+app = 'visionclaw-agent'
+primary_region = 'sjc'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  GEMINI_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025'
+  OPENAI_REALTIME_MODEL = 'gpt-realtime-2.1'
+
+# No [[services]] section at all: the worker has no inbound port, it dials OUT
+# to LiveKit. Machines without services never auto-stop, which is what we want.
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '1gb'

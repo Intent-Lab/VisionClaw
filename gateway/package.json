@@ -1,0 +1,29 @@
+{
+  "name": "visionclaw-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hosted action-agent gateway for VisionClaw: speaks the app's OpenClaw-compatible protocol in front, drives Anthropic Managed Agents behind.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "provision": "tsx src/provision-cli.ts",
+    "typecheck": "tsc --noEmit",
+    "trace": "tsx src/trace-cli.ts",
+    "trace:export": "tsx src/trace-export-cli.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "dotenv": "^17.0.0",
+    "express": "^5.1.0",
+    "livekit-server-sdk": "^2.17.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

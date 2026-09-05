@@ -11,7 +11,7 @@
 //
 // Main UI for video streaming from Meta wearable devices using the DAT SDK.
 // This view demonstrates the complete streaming API: video streaming with real-time display, photo capture,
-// and error handling. Extended with Gemini Live AI assistant and WebRTC live streaming integration.
+// and error handling. Extended with Gemini Live AI assistant integration.
 //
 
 import MWDATCore
@@ -19,9 +19,7 @@ import SwiftUI
 
 struct StreamView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var wearablesVM: WearablesViewModel
-  @ObservedObject var geminiVM: GeminiSessionViewModel
-  @ObservedObject var webrtcVM: WebRTCSessionViewModel
+  @State private var showSettings = false
 
   var body: some View {
     ZStack {
@@ -29,14 +27,27 @@ struct StreamView: View {
       Color.black
         .edgesIgnoringSafeArea(.all)
 
-      // Video backdrop: PiP when WebRTC connected, otherwise single local feed
-      if webrtcVM.isActive && webrtcVM.connectionState == .connected {
-        PiPVideoView(
-          localFrame: viewModel.currentVideoFrame,
-          remoteVideoTrack: webrtcVM.remoteVideoTrack,
-          hasRemoteVideo: webrtcVM.hasRemoteVideo
-        )
-      } else if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
+      // Settings access. In phone mode this view is the entire app, so
+      // without a gear here Settings is unreachable.
+      VStack {
+        HStack {
+          Spacer()
+          Button { showSettings = true } label: {
+            Image(systemName: "gearshape.fill")
+              .font(.system(size: 18))
+              .foregroundStyle(.white.opacity(0.85))
+              .padding(10)
+              .background(.black.opacity(0.35), in: Circle())
+          }
+          .padding(.trailing, 16)
+        }
+        Spacer()
+      }
+      .zIndex(2)
+      .sheet(isPresented: $showSettings) { SettingsView() }
+
+      // Video backdrop (glasses frames decoded by the DAT pipeline)
+      if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
         GeometryReader { geometry in
           Image(uiImage: videoFrame)
             .resizable()
@@ -51,53 +62,10 @@ struct StreamView: View {
           .foregroundColor(.white)
       }
 
-      // Gemini status overlay (top) + speaking indicator
-      if geminiVM.isGeminiActive {
-        VStack {
-          GeminiStatusBar(geminiVM: geminiVM)
-          Spacer()
-
-          VStack(spacing: 8) {
-            if !geminiVM.userTranscript.isEmpty || !geminiVM.aiTranscript.isEmpty {
-              TranscriptView(
-                userText: geminiVM.userTranscript,
-                aiText: geminiVM.aiTranscript
-              )
-            }
-
-            ToolCallStatusView(status: geminiVM.toolCallStatus)
-
-            if geminiVM.isModelSpeaking {
-              HStack(spacing: 8) {
-                Image(systemName: "speaker.wave.2.fill")
-                  .foregroundColor(.white)
-                  .font(.system(size: 14))
-                SpeakingIndicator()
-              }
-              .padding(.horizontal, 16)
-              .padding(.vertical, 8)
-              .background(Color.black.opacity(0.5))
-              .cornerRadius(20)
-            }
-          }
-          .padding(.bottom, 80)
-        }
-        .padding(.all, 24)
-      }
-
-      // WebRTC status overlay (top)
-      if webrtcVM.isActive {
-        VStack {
-          WebRTCStatusBar(webrtcVM: webrtcVM)
-          Spacer()
-        }
-        .padding(.all, 24)
-      }
-
       // Bottom controls layer
       VStack {
         Spacer()
-        ControlsView(viewModel: viewModel, geminiVM: geminiVM, webrtcVM: webrtcVM)
+        ControlsView(viewModel: viewModel)
       }
       .padding(.all, 24)
     }
@@ -105,12 +73,6 @@ struct StreamView: View {
       Task {
         if viewModel.streamingStatus != .stopped {
           await viewModel.stopSession()
-        }
-        if geminiVM.isGeminiActive {
-          geminiVM.stopSession()
-        }
-        if webrtcVM.isActive {
-          webrtcVM.stopSession()
         }
       }
     }
@@ -125,43 +87,29 @@ struct StreamView: View {
         )
       }
     }
-    // Gemini error alert
-    .alert("AI Assistant", isPresented: Binding(
-      get: { geminiVM.errorMessage != nil },
-      set: { if !$0 { geminiVM.errorMessage = nil } }
-    )) {
-      Button("OK") { geminiVM.errorMessage = nil }
-    } message: {
-      Text(geminiVM.errorMessage ?? "")
-    }
-    // WebRTC error alert
-    .alert("Live Stream", isPresented: Binding(
-      get: { webrtcVM.errorMessage != nil },
-      set: { if !$0 { webrtcVM.errorMessage = nil } }
-    )) {
-      Button("OK") { webrtcVM.errorMessage = nil }
-    } message: {
-      Text(webrtcVM.errorMessage ?? "")
-    }
   }
 }
 
 // Extracted controls for clarity
 struct ControlsView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var geminiVM: GeminiSessionViewModel
-  @ObservedObject var webrtcVM: WebRTCSessionViewModel
 
   var body: some View {
     // Controls row
     HStack(spacing: 8) {
-      CustomButton(
-        title: "Stop streaming",
-        style: .destructive,
-        isDisabled: false
-      ) {
-        Task {
-          await viewModel.stopSession()
+      // Glasses have a stop: they are a remote camera someone may be wearing.
+      // The phone camera IS the app -- stopping it just strands the screen on
+      // a spinner -- so phone mode has no stop; the AI button is the toggle
+      // that means something, and closing the app releases the camera.
+      if viewModel.streamingMode == .glasses {
+        CustomButton(
+          title: "Stop streaming",
+          style: .destructive,
+          isDisabled: false
+        ) {
+          Task {
+            await viewModel.stopSession()
+          }
         }
       }
 
@@ -172,39 +120,8 @@ struct ControlsView: View {
         }
       }
 
-      // Gemini AI button (disabled when WebRTC is active — audio conflict)
-      CircleButton(
-        icon: geminiVM.isGeminiActive ? "waveform.circle.fill" : "waveform.circle",
-        text: "AI"
-      ) {
-        Task {
-          if geminiVM.isGeminiActive {
-            geminiVM.stopSession()
-          } else {
-            await geminiVM.startSession()
-          }
-        }
-      }
-      .opacity(webrtcVM.isActive ? 0.4 : 1.0)
-      .disabled(webrtcVM.isActive)
-
-      // WebRTC Live Stream button (disabled when Gemini is active — audio conflict)
-      CircleButton(
-        icon: webrtcVM.isActive
-          ? "antenna.radiowaves.left.and.right.circle.fill"
-          : "antenna.radiowaves.left.and.right.circle",
-        text: "Live"
-      ) {
-        Task {
-          if webrtcVM.isActive {
-            webrtcVM.stopSession()
-          } else {
-            await webrtcVM.startSession()
-          }
-        }
-      }
-      .opacity(geminiVM.isGeminiActive ? 0.4 : 1.0)
-      .disabled(geminiVM.isGeminiActive)
     }
   }
 }
+
+
