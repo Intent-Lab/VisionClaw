@@ -348,9 +348,16 @@ final class LiveKitSession: NSObject, ObservableObject {
       // voice moves to the glasses too. Done once here as the call audio comes up
       // (not repeatedly), so it doesn't trip the route-change "deafness" loop.
       if let hfp = diagSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
-        try? diagSession.setPreferredInput(hfp)
-        NSLog("[Audio] selected glasses HFP; output now [%@]",
-              diagSession.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))
+        if diagSession.currentRoute.inputs.contains(where: { $0.portType == .bluetoothHFP }) {
+          // Already selected before the stream started, which is the order Meta
+          // asks for. Re-selecting a live input here is exactly the mid-call
+          // route change that has caused the glasses to go deaf.
+          NSLog("[Audio] glasses HFP already routed; leaving the route alone")
+        } else {
+          try? diagSession.setPreferredInput(hfp)
+          NSLog("[Audio] selected glasses HFP; output now [%@]",
+                diagSession.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))
+        }
       }
       // Camera failure (simulator, permission denied) degrades to voice-only
       // rather than killing the call.

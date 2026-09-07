@@ -700,7 +700,7 @@ class LiveKitSessionViewModel(
             // documented ladder, which lowers resolution BEFORE frame rate, so
             // the risk is losing the 504x896 tier. Drop back down if the source
             // reports 360x640 or background CPU becomes a problem.
-            StreamConfiguration(videoQuality = VideoQuality.HIGH, 30),
+            StreamConfiguration(videoQuality = VideoQuality.HIGH, 15),
         )
         glassesSession = session
         // Conversion is a plain memcpy but runs per frame; keep it off main.

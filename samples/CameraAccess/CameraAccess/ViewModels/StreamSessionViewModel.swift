@@ -106,18 +106,15 @@ class StreamSessionViewModel: ObservableObject {
   // matter what we changed. That was our request being rounded down, NOT the
   // link starving, so it was never evidence about available bandwidth.
   //
-  // 30, the top rung: ask for everything and let the SDK's ladder settle it.
-  // This is an experiment, and it cuts against the documented ladder, which
-  // lowers resolution BEFORE frame rate and never takes fps below 15. So the
-  // risk is that protecting 30fps costs us the 504x896 tier and drops us to
-  // 360x640. It answers a real question though: at 2fps the tier was already
-  // 504x896, so if it is still 504x896 at 30 then frame rate does not drive
-  // the tier at all and the choice is purely about CPU and smoothness.
-  //
-  // Revert to 7 (or 2) if either shows up: the decoded-frame log reports
-  // 360x640, or the app is killed during a locked-screen session, since
-  // background frames decode in software and 30fps is ~15x the work of 2.
-  private let requestedFrameRate: UInt = 30
+  // 15. Meta's docs say the delivered image can look worse than the reported
+  // tier because per-frame compression adapts to the Bluetooth Classic budget,
+  // and that asking for less yields higher visual quality per frame. At 30 the
+  // link opened at 720x1280, then laddered to 504x896 and spent the remaining
+  // bandwidth on frame count rather than frame quality. 15 is the rung below:
+  // still a large enough request to negotiate up, but leaving more bits per
+  // frame, which is what a vision model reading stills actually wants. It also
+  // halves the software decode cost while the screen is locked.
+  private let requestedFrameRate: UInt = 15
   private var fpsCount: Int = 0
   private var fpsWindowStart: Date = .now
   // One-shot guards so the compressed-frame path reports itself once, not per frame.
@@ -256,12 +253,41 @@ class StreamSessionViewModel: ObservableObject {
       camera = newCamera
       attachStreamListeners(to: newCamera.stream)
       // Subscribe before start() so no initial state transitions are missed.
-      newCamera.stream.start()
+      // Meta's ordering rule: the glasses HFP microphone must be configured and
+      // its route settled BEFORE the camera stream starts, or the audio route
+      // can fail silently and the call comes out of the phone instead.
+      Task { @MainActor [weak self] in
+        await self?.prepareGlassesAudioRoute()
+        newCamera.stream.start()
+      }
     } catch {
       camera = nil
       // Sleeping or out-of-range glasses are a wait, not a hard error.
       glassesIssue = mapDeviceSessionError(error)
     }
+  }
+
+  /// Selects the glasses HFP microphone and lets the route settle before the
+  /// camera stream starts, which is the order Meta's DAT guidance requires.
+  /// Best effort by design: the audio session category and activation belong to
+  /// LiveKit's AudioManager, which only comes up once the call starts, so this
+  /// pre-selects the input and the call path re-checks it afterwards. Skipping
+  /// an input that is already routed is deliberate, since re-selecting a live
+  /// input is the route churn that has made the glasses go deaf before.
+  private func prepareGlassesAudioRoute() async {
+    let session = AVAudioSession.sharedInstance()
+    guard let hfp = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) else {
+      NSLog("[Audio] no glasses HFP input yet; starting stream without it")
+      return
+    }
+    if session.currentRoute.inputs.contains(where: { $0.portType == .bluetoothHFP }) {
+      NSLog("[Audio] glasses HFP already routed before stream start")
+      return
+    }
+    try? session.setPreferredInput(hfp)
+    try? await Task.sleep(nanoseconds: 1_500_000_000)
+    let routed = session.currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
+    NSLog("[Audio] pre-stream HFP select, routed=%@", routed ? "yes" : "no")
   }
 
   private func attachStreamListeners(to stream: MWDATCamera.Stream) {
