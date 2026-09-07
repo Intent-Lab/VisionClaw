@@ -461,7 +461,17 @@ final class LiveKitSession: NSObject, ObservableObject {
           } else {
             sent = "stats pending"
           }
-          NSLog("[VideoStats] publishing %@ | sent to server %@", publishing, sent)
+          // App state is logged alongside so a locked-screen run self-labels:
+          // if "sent to server" fps falls to 0 only while app=background, the
+          // phone-to-server encode is what stops, not the glasses feed.
+          let appState: String
+          switch UIApplication.shared.applicationState {
+          case .active: appState = "active"
+          case .inactive: appState = "inactive"
+          case .background: appState = "background"
+          @unknown default: appState = "unknown"
+          }
+          NSLog("[VideoStats] app=%@ | publishing %@ | sent to server %@", appState, publishing, sent)
         }
         // Give the glasses video a grace to establish before falling back from
         // the connecting spinner to the "put them on" reminder.

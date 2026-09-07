@@ -153,9 +153,12 @@ class StreamSessionViewModel: ObservableObject {
         // before (the freeze, then the watchdog kill).
         self.onDecodedFrame?(pixelBuffer)
         self.decodedFrameCount &+= 1
-        if self.decodedFrameCount <= 3 || self.decodedFrameCount % 120 == 0 {
-          NSLog("[Stream] decoded frame #%d (%dx%d)", self.decodedFrameCount,
-                CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer))
+        // Every ~5s at 2fps, tagged with app state, so a locked-screen run
+        // shows whether VideoToolbox keeps decoding while backgrounded.
+        if self.decodedFrameCount <= 3 || self.decodedFrameCount % 10 == 0 {
+          NSLog("[Stream] decoded frame #%d (%dx%d) app=%@", self.decodedFrameCount,
+                CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer),
+                UIApplication.shared.applicationState == .background ? "background" : "foreground")
         }
       }
     }
@@ -314,8 +317,9 @@ class StreamSessionViewModel: ObservableObject {
           // Source == what the preview renders and what LiveKit is fed. If it
           // is below the requested label, the Bluetooth link auto-laddered the
           // glasses resolution down (not the phone-to-server leg).
-          NSLog("[Stream] delivered %.1f fps (requested %u), source %@ (requested %@)",
-                Double(self.fpsCount) / fpsElapsed, self.requestedFrameRate, srcDims, self.resolutionLabel)
+          NSLog("[Stream] delivered %.1f fps (requested %u), source %@ (requested %@) app=%@",
+                Double(self.fpsCount) / fpsElapsed, self.requestedFrameRate, srcDims, self.resolutionLabel,
+                UIApplication.shared.applicationState == .background ? "background" : "foreground")
           self.fpsCount = 0
           self.fpsWindowStart = .now
         }
