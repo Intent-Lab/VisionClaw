@@ -7,3 +7,6 @@ samples/CameraAccessAndroid/app/build/
 samples/CameraAccessAndroid/app/src/main/java/**/Secrets.kt
 samples/CameraAccessAndroid/build/
 samples/CameraAccessAndroid/local.properties
+
+# Machine-local symlinks to the DAT SDK skills (absolute paths, not portable)
+.claude/skills/
