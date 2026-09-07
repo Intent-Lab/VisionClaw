@@ -693,7 +693,11 @@ class LiveKitSessionViewModel(
         val session = Wearables.startStreamSession(
             getApplication(),
             glassesSelector,
-            StreamConfiguration(videoQuality = VideoQuality.MEDIUM, 24),
+            // Match iOS: highest resolution, low frame rate. Resolution and fps
+            // share the Bluetooth budget and the SDK drops resolution first, so
+            // a low fps keeps frames sharp, which suits a vision model that reads
+            // stills. Raise fps only after measuring link headroom.
+            StreamConfiguration(videoQuality = VideoQuality.HIGH, 5),
         )
         glassesSession = session
         // Conversion is a plain memcpy but runs per frame; keep it off main.
