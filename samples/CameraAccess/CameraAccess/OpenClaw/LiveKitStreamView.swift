@@ -73,7 +73,10 @@ struct LiveKitStreamView: View {
             }
           }
       }
+      // Suppressed while connecting or failed: those states own the centered
+      // spot with their own message, so the two never stack on each other.
       if captureSourceRaw == CaptureSource.glasses.rawValue,
+         session.state == .connected || session.state == .disconnected,
          !session.hasGlassesFrame || session.glassesFrameStale,
          let ph = glassesPlaceholder {
         VStack(spacing: 8) {
