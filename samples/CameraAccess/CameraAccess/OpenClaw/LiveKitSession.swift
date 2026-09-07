@@ -315,6 +315,14 @@ final class LiveKitSession: NSObject, ObservableObject {
           // Glasses frames arrive via pushGlassesFrame; a buffer track with
           // camera source keeps mute/freeze/agent logic identical.
           let track = LocalVideoTrack.createBufferTrack(name: "glasses", source: .camera)
+          // New track, new frame clock: the deferred publish must wait for a
+          // frame on THIS track. A sawFrame left true by the preview track
+          // otherwise published this still-empty call track at once, so the
+          // agent got a video track carrying no frames -- video renders locally
+          // while the server reports "no video access" (e.g. when the room
+          // connects before the glasses start streaming).
+          glassesCapturerBox.sawFrame = false
+          glassesCapturerBox.lastFrameAt = 0
           glassesCapturerBox.capturer = track.capturer as? BufferCapturer
           try await track.start()
           // Render locally right away -- a LocalVideoTrack shows its captured
@@ -362,9 +370,11 @@ final class LiveKitSession: NSObject, ObservableObject {
   /// Publishes the deferred glasses video track once the first frame has arrived,
   /// so the buffer publish settles its dimensions instantly instead of timing out
   /// waiting for a frame. The track already renders locally.
+  private var glassesPublishInFlight = false
   private func publishPendingGlassesTrack() async {
-    guard let track = pendingGlassesTrack, state == .connected else { return }
-    pendingGlassesTrack = nil
+    guard let track = pendingGlassesTrack, state == .connected, !glassesPublishInFlight else { return }
+    glassesPublishInFlight = true
+    defer { glassesPublishInFlight = false }
     do {
       // No simulcast (the SFU can't hand the agent a downscaled layer), a bitrate
       // high enough for crisp 720p, and maintainResolution so a congested network
@@ -375,8 +385,10 @@ final class LiveKitSession: NSObject, ObservableObject {
           encoding: VideoEncoding(maxBitrate: 3_000_000, maxFps: 24),
           simulcast: false,
           degradationPreference: .maintainResolution))
+      // Clear only on success so the frame monitor can retry a failed publish.
+      pendingGlassesTrack = nil
     } catch {
-      NSLog("[LiveKit] glasses video publish failed: %@", error.localizedDescription)
+      NSLog("[LiveKit] glasses video publish failed, will retry: %@", error.localizedDescription)
     }
   }
 
@@ -392,6 +404,12 @@ final class LiveKitSession: NSObject, ObservableObject {
         guard let self else { return }
         self.glassesFrameStale = self.hasGlassesFrame &&
           CFAbsoluteTimeGetCurrent() - self.glassesCapturerBox.lastFrameAt > 1.5
+        // Safety net: frames are flowing but the track never reached the room
+        // (a missed or failed publish on a connect-before-glasses order) --
+        // publish now so the agent actually gets video.
+        if self.state == .connected, self.pendingGlassesTrack != nil, self.glassesCapturerBox.sawFrame {
+          await self.publishPendingGlassesTrack()
+        }
       }
     }
   }
