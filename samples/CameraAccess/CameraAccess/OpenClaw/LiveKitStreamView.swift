@@ -16,22 +16,33 @@ struct LiveKitStreamView: View {
 
   // Quick glasses/phone source switch on the call screen. Flips the shared
   // capture-source setting; StreamSessionView's onChange swaps the pipeline.
+  // A single highlight bubble slides between the two slots (phone at index 0,
+  // glasses at index 1) with a spring, so tap and swipe both animate.
   private var captureSourceToggle: some View {
-    HStack(spacing: 0) {
-      ForEach(CaptureSource.allCases, id: \.rawValue) { source in
-        Button { captureSourceRaw = source.rawValue } label: {
-          Image(systemName: source == .glasses ? "eyeglasses" : "iphone")
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(captureSourceRaw == source.rawValue ? .white : .white.opacity(0.4))
-            .frame(width: 42, height: 30)
-            .background(captureSourceRaw == source.rawValue ? .white.opacity(0.18) : .clear, in: Capsule())
+    let itemWidth: CGFloat = 42
+    let itemHeight: CGFloat = 30
+    let selectedIndex = captureSourceRaw == CaptureSource.glasses.rawValue ? 1 : 0
+    return ZStack(alignment: .leading) {
+      Capsule()
+        .fill(.white.opacity(0.18))
+        .frame(width: itemWidth, height: itemHeight)
+        .offset(x: CGFloat(selectedIndex) * itemWidth)
+      HStack(spacing: 0) {
+        ForEach(CaptureSource.allCases, id: \.rawValue) { source in
+          Button { captureSourceRaw = source.rawValue } label: {
+            Image(systemName: source == .glasses ? "eyeglasses" : "iphone")
+              .font(.system(size: 15, weight: .medium))
+              .foregroundStyle(captureSourceRaw == source.rawValue ? .white : .white.opacity(0.4))
+              .frame(width: itemWidth, height: itemHeight)
+          }
+          .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
       }
     }
     .padding(3)
     .background(.black.opacity(0.35), in: Capsule())
     .padding(.leading, 16)
+    .animation(.spring(response: 0.3, dampingFraction: 0.72), value: captureSourceRaw)
   }
 
   var body: some View {

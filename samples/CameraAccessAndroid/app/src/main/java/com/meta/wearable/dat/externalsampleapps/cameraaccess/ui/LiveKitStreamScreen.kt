@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -71,6 +72,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -802,25 +804,44 @@ private fun CaptureSourceToggle(
     onSelect: (CaptureSource) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    val itemWidth = 44.dp
+    val itemHeight = 32.dp
+    // Phone at index 0 (left), glasses at index 1 (right), matching the swipe.
+    val selectedIndex = if (current == CaptureSource.GLASSES) 1 else 0
+    // Single highlight bubble that springs between the two slots on tap or swipe.
+    val bubbleOffset by animateDpAsState(
+        targetValue = itemWidth * selectedIndex,
+        label = "sourceBubble",
+    )
+    Box(
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.35f), CircleShape)
             .padding(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Phone on the left, glasses on the right, matching the swipe direction.
-        CaptureSourceToggleItem(
-            selected = current == CaptureSource.PHONE,
-            icon = Icons.Filled.Smartphone,
-            description = "Phone",
-            onClick = { onSelect(CaptureSource.PHONE) },
+        Box(
+            modifier = Modifier
+                .offset(x = bubbleOffset)
+                .size(itemWidth, itemHeight)
+                .background(Color.White.copy(alpha = 0.18f), CircleShape),
         )
-        CaptureSourceToggleItem(
-            selected = current == CaptureSource.GLASSES,
-            icon = Icons.Filled.Visibility,
-            description = "Glasses",
-            onClick = { onSelect(CaptureSource.GLASSES) },
-        )
+        Row {
+            CaptureSourceToggleItem(
+                selected = current == CaptureSource.PHONE,
+                icon = Icons.Filled.Smartphone,
+                description = "Phone",
+                width = itemWidth,
+                height = itemHeight,
+                onClick = { onSelect(CaptureSource.PHONE) },
+            )
+            CaptureSourceToggleItem(
+                selected = current == CaptureSource.GLASSES,
+                icon = Icons.Filled.Visibility,
+                description = "Glasses",
+                width = itemWidth,
+                height = itemHeight,
+                onClick = { onSelect(CaptureSource.GLASSES) },
+            )
+        }
     }
 }
 
@@ -829,14 +850,15 @@ private fun CaptureSourceToggleItem(
     selected: Boolean,
     icon: ImageVector,
     description: String,
+    width: Dp,
+    height: Dp,
     onClick: () -> Unit,
 ) {
     Box(
         modifier = Modifier
+            .size(width, height)
             .clip(CircleShape)
-            .background(if (selected) Color.White.copy(alpha = 0.18f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
