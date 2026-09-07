@@ -688,7 +688,9 @@ async def _run_delegated(
                 try:
                     session.generate_reply(instructions=(
                         "The background task is still running. Give a very brief progress note -- a few "
-                        "words at most, woven into the conversation, not an announcement."))
+                        "words at most, woven into the conversation, not an announcement. Do not name what "
+                        "you are waiting for, do not restate the request, and do not claim you lack the "
+                        "result: this note can reach the user after the result has already arrived."))
                 except Exception:
                     heartbeats = MAX_HEARTBEATS
         try:
@@ -734,14 +736,25 @@ async def _run_delegated(
         keywords = _relay_keywords(result)
         needed = _relay_needed(keywords)
         spoken = ctx.userdata.spoken
+        # Only speech from after the result was handed over can count as having
+        # relayed it. Counting the whole history let a progress note satisfy the
+        # check, because "still waiting on the Amazon results ... pack sizes,
+        # prices, ratings" shares its vocabulary with the result it is waiting
+        # for. The relay then declared success and stopped retrying on a
+        # delivery that had not happened yet.
+        baseline = len(spoken)
+
+        def relay_hits() -> int:
+            return _relay_hits(spoken[baseline:], keywords)
+
         for attempt in range(2):
             for _ in range(9):
                 await asyncio.sleep(5)
-                if not keywords or _relay_hits(spoken, keywords) >= needed:
-                    tracer.emit("late_relay_ok", attempt=attempt, hits=_relay_hits(spoken, keywords))
+                if not keywords or relay_hits() >= needed:
+                    tracer.emit("late_relay_ok", attempt=attempt, hits=relay_hits())
                     return
             if attempt == 0:
-                tracer.emit("late_relay_retry", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
+                tracer.emit("late_relay_retry", hits=relay_hits(), keywords=len(keywords))
                 await _await_session_free(session, DELIVER_WAIT_S)
                 try:
                     session.generate_reply(instructions=(
@@ -753,7 +766,7 @@ async def _run_delegated(
                 except Exception:
                     break
         logger.warning("late result not relayed; parking: user=%s task=%r", user_id, task[:80])
-        tracer.emit("late_relay_failed", hits=_relay_hits(spoken, keywords), keywords=len(keywords))
+        tracer.emit("late_relay_failed", hits=relay_hits(), keywords=len(keywords))
         await _park_result(user_id, task, result)
 
     t = asyncio.create_task(relay())
@@ -842,14 +855,24 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
         return "The browser could not start that task. Tell the user briefly and offer to try again."
 
     async def _finish_card(result: str | None) -> None:
-        # Keep the live view on screen after the task: the cloud browser lingers
-        # on the final page, so the user keeps seeing the result instead of the
-        # card vanishing or switching to a text card. Hold for a short window,
-        # then clear it -- unless a later browse has taken over the card (own it
-        # by run id), or this was a failure/deferral with nothing to show.
+        # Swap the live view for a result card as the answer is delivered, which
+        # is what on_deliver exists for. Holding the live WebView after the task
+        # assumed the cloud browser lingers on its final page; when that session
+        # ends instead, the view loses its socket and the user is left staring at
+        # the browser's own "Connection Lost" error for the whole keepalive.
+        # Reusing the same uuid replaces the card in place.
         if ctx.userdata.live_browse_run != run_id:
             return
         if result and not result.startswith(GATEWAY_DEFERRAL_PREFIX):
+            body = result if len(result) <= 1200 else result[:1200].rstrip() + "..."
+            try:
+                await _publish_card(room, {
+                    "uuid": live_uuid, "version": 1, "type": "info",
+                    "title": "Browsing the web", "body": body,
+                    "fallback_text": "Browsing finished.",
+                })
+            except Exception:
+                logger.exception("failed to publish browse result card: user=%s", user_id)
             await asyncio.sleep(BROWSE_KEEPALIVE_S)
             if ctx.userdata.live_browse_run != run_id:
                 return  # a newer browse now owns the card; leave it alone
