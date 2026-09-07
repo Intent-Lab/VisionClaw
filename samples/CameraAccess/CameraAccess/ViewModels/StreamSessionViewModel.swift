@@ -194,9 +194,11 @@ class StreamSessionViewModel: ObservableObject {
       deviceSession = nil
       currentVideoFrame = nil
       if userWantsCall {
-        // Unexpected mid-call drop: keep the call alive (audio) and reconnect
-        // the glasses stream instead of tearing everything down.
-        glassesIssue = .reconnecting
+        // Stream stopped mid-call, almost always because the glasses came off
+        // or folded (their camera cuts when doffed). Keep the call alive and
+        // keep retrying, but the actionable prompt is "put them on," not a
+        // "reconnecting" message that implies the link itself dropped.
+        glassesIssue = nil
         streamingStatus = .waiting
         scheduleReconnect()
       } else {
@@ -472,8 +474,10 @@ class StreamSessionViewModel: ObservableObject {
     case .stopped:
       currentVideoFrame = nil
       if userWantsCall {
-        // Stream dropped mid-call: keep the call alive and reconnect.
-        glassesIssue = .reconnecting
+        // Stream dropped mid-call, usually the glasses coming off or folding.
+        // Keep the call alive and keep retrying; prompt the user to put them
+        // on rather than showing a "reconnecting" message.
+        glassesIssue = nil
         streamingStatus = .waiting
         scheduleReconnect()
       } else {
