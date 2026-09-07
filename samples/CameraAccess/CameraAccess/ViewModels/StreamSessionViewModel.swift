@@ -54,13 +54,12 @@ class StreamSessionViewModel: ObservableObject {
     streamingStatus != .stopped
   }
 
+  // Ask the SDK rather than asserting. These were hardcoded strings, so every
+  // "requested 720x1280" we logged was an assumption about what .high means on
+  // this SDK and device, never a reading.
   var resolutionLabel: String {
-    switch selectedResolution {
-    case .low: return "360x640"
-    case .medium: return "504x896"
-    case .high: return "720x1280"
-    @unknown default: return "Unknown"
-    }
+    let size = selectedResolution.videoFrameSize
+    return "\(size.width)x\(size.height)"
   }
 
   // Photo capture properties
@@ -182,7 +181,15 @@ class StreamSessionViewModel: ObservableObject {
     // the top tier should fit. VideoFrame exposes the same sampleBuffer either
     // way; if these arrive still-compressed the frame handler logs it once and
     // no video flows, which is the signal to go back to .raw.
-    StreamConfiguration(
+    // What every tier actually resolves to on this SDK and device. If .high is
+    // not 720x1280 here, then 504x896 was the ceiling all along and there was
+    // never a step-down to chase.
+    NSLog("[Stream] SDK resolution tiers: %@ | requesting %@ @ %u fps, codec hvc1",
+          StreamingResolution.allCases
+            .map { "\($0)=\($0.videoFrameSize.width)x\($0.videoFrameSize.height)" }
+            .joined(separator: " "),
+          resolutionLabel, requestedFrameRate)
+    return StreamConfiguration(
       videoCodec: VideoCodec.hvc1,
       resolution: selectedResolution,
       frameRate: requestedFrameRate)
