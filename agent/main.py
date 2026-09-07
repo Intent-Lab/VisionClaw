@@ -44,6 +44,7 @@ from livekit.agents import (
     cli,
     function_tool,
 )
+from livekit.agents.voice import VoiceActivityVideoSampler
 from livekit.plugins import google, openai
 from openai.types.beta.realtime.session import TurnDetection
 
@@ -102,6 +103,10 @@ class FrameHolder:
     def __init__(self) -> None:
         self.frame: rtc.VideoFrame | None = None
         self.rotation: int = 0
+        # When the frame above reached this process. Lets staleness be measured
+        # rather than estimated. Agent-side age only: the glasses to phone and
+        # phone to SFU legs run on clocks we cannot read from here.
+        self.arrived_at: float = 0.0
 
 
 def encode_latest_frame(holder: FrameHolder) -> str | None:
@@ -112,6 +117,11 @@ def encode_latest_frame(holder: FrameHolder) -> str | None:
     frame = holder.frame
     if frame is None:
         return None
+    if holder.arrived_at:
+        logger.info(
+            "attach_view still: frame was %.0fms old at the agent",
+            (time.time() - holder.arrived_at) * 1000,
+        )
     rgba = frame.convert(rtc.VideoBufferType.RGBA)
     img = Image.frombuffer("RGBA", (rgba.width, rgba.height), bytes(rgba.data)).convert("RGB")
     rot = holder.rotation % 360
@@ -121,6 +131,31 @@ def encode_latest_frame(holder: FrameHolder) -> str | None:
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=80)
     return base64.b64encode(buf.getvalue()).decode()
+
+
+class StalenessSampler:
+    """Wraps the default video sampler and does not change what it admits. The
+    realtime model only ever sees a sampled subset (1fps while the user speaks,
+    0.3fps otherwise), so this gap, not the client frame rate, is what decides
+    how current the model's view is. Logging it turns that into a number."""
+
+    def __init__(self, holder: FrameHolder) -> None:
+        self._inner = VoiceActivityVideoSampler(speaking_fps=1.0, silent_fps=0.3)
+        self._holder = holder
+        self.last_admit: float = 0.0
+
+    def __call__(self, frame: rtc.VideoFrame, session) -> bool:
+        admitted = self._inner(frame, session)
+        if admitted:
+            now = time.time()
+            if self.last_admit:
+                logger.info(
+                    "video to model: %.2fs since the previous frame (user_state=%s)",
+                    now - self.last_admit,
+                    getattr(session, "user_state", "?"),
+                )
+            self.last_admit = now
+        return admitted
 
 
 class Tracer:
@@ -924,6 +959,7 @@ def _watch_video(ctx: JobContext, holder: FrameHolder) -> None:
             async for ev in stream:
                 holder.frame = ev.frame
                 holder.rotation = int(getattr(ev, "rotation", 0) or 0)
+                holder.arrived_at = time.time()
 
         t = asyncio.create_task(read())
         _relay_tasks.add(t)
@@ -1044,7 +1080,8 @@ async def entrypoint(ctx: JobContext):
     show_card = function_tool(_show_card, name="show_card")
 
     userdata = Userdata(user_id=user_id, frames=frames, tracer=tracer, room=ctx.room)
-    session = AgentSession(llm=build_llm(engine), userdata=userdata)
+    staleness = StalenessSampler(frames)
+    session = AgentSession(llm=build_llm(engine), userdata=userdata, video_sampler=staleness)
 
     # The transcript pair the study runs on: final ASR of what the user said,
     # and the voice model's spoken reply (from output transcription). Items with
@@ -1059,6 +1096,11 @@ async def entrypoint(ctx: JobContext):
         text = re.sub(r"<ctrl\d+>", "", text).strip()
         if not text or role not in ("user", "assistant"):
             return
+        if role == "user" and staleness.last_admit:
+            logger.info(
+                "view age at end of user turn: %.2fs",
+                time.time() - staleness.last_admit,
+            )
         if role == "assistant":
             userdata.spoken.append(text)
         tracer.emit(
