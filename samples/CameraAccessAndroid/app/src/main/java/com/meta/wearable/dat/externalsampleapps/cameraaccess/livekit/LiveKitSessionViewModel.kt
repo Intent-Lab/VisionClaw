@@ -694,11 +694,13 @@ class LiveKitSessionViewModel(
             getApplication(),
             glassesSelector,
             // Match iOS. Only 2, 7, 15, 24 and 30 are legal frame rates; anything
-            // else is snapped to a rung, so the 3 requested here was really being
-            // served as 2. 7 is the next rung up: it clears the agent's ~1fps
-            // sampling peak with headroom and keeps the frame a tool call
-            // attaches fresher (~143ms old rather than 500ms).
-            StreamConfiguration(videoQuality = VideoQuality.HIGH, 7),
+            // else is snapped to a rung, so the 3 previously requested here was
+            // really being served as 2. 30 is the top rung: ask for everything
+            // and let the SDK ladder settle it. Note this cuts against the
+            // documented ladder, which lowers resolution BEFORE frame rate, so
+            // the risk is losing the 504x896 tier. Drop back down if the source
+            // reports 360x640 or background CPU becomes a problem.
+            StreamConfiguration(videoQuality = VideoQuality.HIGH, 30),
         )
         glassesSession = session
         // Conversion is a plain memcpy but runs per frame; keep it off main.

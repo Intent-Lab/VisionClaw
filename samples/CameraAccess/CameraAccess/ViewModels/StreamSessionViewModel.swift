@@ -106,14 +106,18 @@ class StreamSessionViewModel: ObservableObject {
   // matter what we changed. That was our request being rounded down, NOT the
   // link starving, so it was never evidence about available bandwidth.
   //
-  // 7, the next rung up from 2. At 2 the delivered rate sagged to 1.4-1.8fps,
-  // which is under the agent's 1fps sampling peak plus jitter, and the frame a
-  // tool call attaches is only ever 1/fps old: 500ms at 2, ~143ms at 7. The
-  // link is on HEVC now, so the extra frames cost far less than they did on
-  // raw. Two things to watch after this change: whether the negotiated tier
-  // drops from 504x896 to 360x640, and background CPU, since frames are
-  // decoded in software while the screen is locked.
-  private let requestedFrameRate: UInt = 7
+  // 30, the top rung: ask for everything and let the SDK's ladder settle it.
+  // This is an experiment, and it cuts against the documented ladder, which
+  // lowers resolution BEFORE frame rate and never takes fps below 15. So the
+  // risk is that protecting 30fps costs us the 504x896 tier and drops us to
+  // 360x640. It answers a real question though: at 2fps the tier was already
+  // 504x896, so if it is still 504x896 at 30 then frame rate does not drive
+  // the tier at all and the choice is purely about CPU and smoothness.
+  //
+  // Revert to 7 (or 2) if either shows up: the decoded-frame log reports
+  // 360x640, or the app is killed during a locked-screen session, since
+  // background frames decode in software and 30fps is ~15x the work of 2.
+  private let requestedFrameRate: UInt = 30
   private var fpsCount: Int = 0
   private var fpsWindowStart: Date = .now
   // One-shot guards so the compressed-frame path reports itself once, not per frame.

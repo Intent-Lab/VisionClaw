@@ -83,7 +83,7 @@ class StreamViewModel(
                 getApplication(),
                 deviceSelector,
                 // Match iOS: highest resolution, legal frame rate (see LiveKitSessionViewModel).
-                StreamConfiguration(videoQuality = VideoQuality.HIGH, 7),
+                StreamConfiguration(videoQuality = VideoQuality.HIGH, 30),
             )
             .also { streamSession = it }
     _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
