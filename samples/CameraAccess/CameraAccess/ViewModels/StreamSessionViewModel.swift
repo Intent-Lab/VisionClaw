@@ -363,6 +363,14 @@ class StreamSessionViewModel: ObservableObject {
       Task { @MainActor [weak self] in
         guard let self else { return }
         guard let uiImage = UIImage(data: photoData.data) else { return }
+        // Photos travel a separate path from the video stream (the SDK pauses
+        // streaming during capture so the still gets the whole link), so they
+        // are not bound by the StreamingResolution tier. If this prints much
+        // larger than the stream, routing the model's detail requests through
+        // capturePhoto beats fighting the stream tier.
+        NSLog("[Photo] captured %.0fx%.0f (%d KB) -- stream tier is %@",
+              uiImage.size.width * uiImage.scale, uiImage.size.height * uiImage.scale,
+              photoData.data.count / 1024, self.resolutionLabel)
         self.capturedPhoto = uiImage
         self.showPhotoPreview = true
       }
