@@ -189,6 +189,17 @@ struct LiveKitStreamView: View {
         .padding(.bottom, 24)
       }
     }
+    .simultaneousGesture(
+      // Swipe left/right anywhere on the video to flip glasses <-> phone.
+      DragGesture(minimumDistance: 40)
+        .onEnded { value in
+          guard abs(value.translation.width) > abs(value.translation.height),
+                abs(value.translation.width) > 60 else { return }
+          captureSourceRaw = captureSourceRaw == CaptureSource.glasses.rawValue
+            ? CaptureSource.iPhoneCamera.rawValue
+            : CaptureSource.glasses.rawValue
+        }
+    )
     .sheet(isPresented: $showSettings) { SettingsView() }
     // Haptics are opt-in on iOS; a voice call that connects silently under a
     // pocketed phone gives no confirmation at all. Standard call-app grammar:
