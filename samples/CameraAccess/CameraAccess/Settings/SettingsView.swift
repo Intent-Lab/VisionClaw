@@ -49,7 +49,7 @@ struct SettingsView: View {
   // Applies immediately rather than on Save: the root view observes the same
   // key and swaps the capture pipeline live.
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
-  @AppStorage(IntelligenceEngine.defaultsKey) private var intelligenceRaw = IntelligenceEngine.gemini.rawValue
+  @AppStorage(IntelligenceEngine.defaultsKey) private var intelligenceRaw = IntelligenceEngine.openai.rawValue
   @AppStorage(SettingsManager.showCaptionsKey) private var showCaptions = true
 
   var body: some View {

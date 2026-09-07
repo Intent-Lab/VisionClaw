@@ -11,13 +11,15 @@ import kotlinx.coroutines.flow.asStateFlow
  * Which realtime model answers. The choice travels to the agent worker as
  * room-token metadata; the phone never talks to either provider directly.
  */
+// OpenAI is the default engine. The picker renders entries in declaration
+// order, so listing it first also makes it the left-hand segment.
 enum class IntelligenceEngine(val value: String, val label: String) {
-    GEMINI("gemini", "Gemini"),
-    OPENAI("openai", "OpenAI");
+    OPENAI("openai", "OpenAI"),
+    GEMINI("gemini", "Gemini");
 
     companion object {
         fun fromValue(value: String?): IntelligenceEngine =
-            entries.firstOrNull { it.value == value } ?: GEMINI
+            entries.firstOrNull { it.value == value } ?: OPENAI
     }
 }
 

@@ -12,16 +12,18 @@ enum AgentBackend: String, CaseIterable {
 
 /// Which realtime model answers. The choice travels to the agent worker as
 /// room-token metadata; the phone never talks to either provider directly.
+// OpenAI is the default engine. The picker renders allCases in declaration
+// order, so listing it first also makes it the left-hand segment.
 enum IntelligenceEngine: String, CaseIterable {
-  case gemini = "gemini"
   case openai = "openai"
+  case gemini = "gemini"
 
   static let defaultsKey = "intelligenceEngine"
 
   var label: String {
     switch self {
-    case .gemini: return "Gemini"
     case .openai: return "OpenAI"
+    case .gemini: return "Gemini"
     }
   }
 }
@@ -111,7 +113,7 @@ final class SettingsManager {
   var intelligenceEngine: IntelligenceEngine {
     get {
       guard let raw = defaults.string(forKey: IntelligenceEngine.defaultsKey),
-            let engine = IntelligenceEngine(rawValue: raw) else { return .gemini }
+            let engine = IntelligenceEngine(rawValue: raw) else { return .openai }
       return engine
     }
     set { defaults.set(newValue.rawValue, forKey: IntelligenceEngine.defaultsKey) }
