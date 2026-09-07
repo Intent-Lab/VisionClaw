@@ -175,12 +175,13 @@ fun LiveKitStreamScreen(
                         if (committed) change.consume()
                     }
                     if (committed && abs(dx) > switchThreshold) {
-                        // Directional and edge-bounded: swipe right selects
-                        // glasses (right mode), swipe left selects phone (left
-                        // mode). Off-edge swipes reselect the same mode rather
-                        // than wrapping, so a repeated swipe never flip-flops.
+                        // Directional and edge-bounded, paging convention:
+                        // swipe left pages to the mode on the right (glasses),
+                        // swipe right pages to the mode on the left (phone).
+                        // Off-edge swipes reselect the same mode rather than
+                        // wrapping, so a repeated swipe never flip-flops.
                         SettingsManager.captureSource =
-                            if (dx > 0) CaptureSource.GLASSES else CaptureSource.PHONE
+                            if (dx < 0) CaptureSource.GLASSES else CaptureSource.PHONE
                     }
                 }
             },
