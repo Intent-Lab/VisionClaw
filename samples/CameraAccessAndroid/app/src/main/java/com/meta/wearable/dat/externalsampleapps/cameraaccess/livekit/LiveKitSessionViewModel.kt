@@ -704,8 +704,11 @@ class LiveKitSessionViewModel(
         glassesFeedJobs += viewModelScope.launch(Dispatchers.Default) {
             var frames = 0L
             session.videoStream.collect { frame ->
-                if (frames == 0L || frames % 100 == 0L) {
-                    Log.i(TAG, "glasses frame #$frames ${frame.width}x${frame.height}")
+                // Source == what the preview renders and what LiveKit is fed.
+                // Below the requested HIGH means the Bluetooth link auto-laddered
+                // the glasses resolution down. ~every 2s at 5 fps.
+                if (frames == 0L || frames % 10 == 0L) {
+                    Log.i(TAG, "[VideoStats] glasses source ${frame.width}x${frame.height} (requested HIGH), frame #$frames")
                 }
                 frames++
                 glassesCapturer?.pushI420(frame.buffer, frame.width, frame.height)

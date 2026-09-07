@@ -267,8 +267,15 @@ class StreamSessionViewModel: ObservableObject {
         self.fpsCount += 1
         let fpsElapsed = Date.now.timeIntervalSince(self.fpsWindowStart)
         if fpsElapsed >= 3 {
-          NSLog("[Stream] delivered %.1f fps (requested %u)",
-                Double(self.fpsCount) / fpsElapsed, self.requestedFrameRate)
+          var srcDims = "?x?"
+          if let pb = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer) {
+            srcDims = "\(CVPixelBufferGetWidth(pb))x\(CVPixelBufferGetHeight(pb))"
+          }
+          // Source == what the preview renders and what LiveKit is fed. If it
+          // is below the requested label, the Bluetooth link auto-laddered the
+          // glasses resolution down (not the phone-to-server leg).
+          NSLog("[Stream] delivered %.1f fps (requested %u), source %@ (requested %@)",
+                Double(self.fpsCount) / fpsElapsed, self.requestedFrameRate, srcDims, self.resolutionLabel)
           self.fpsCount = 0
           self.fpsWindowStart = .now
         }

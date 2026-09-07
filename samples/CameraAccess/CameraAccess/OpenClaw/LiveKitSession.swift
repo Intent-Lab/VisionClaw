@@ -323,7 +323,9 @@ final class LiveKitSession: NSObject, ObservableObject {
         if usingGlassesSource {
           // Glasses frames arrive via pushGlassesFrame; a buffer track with
           // camera source keeps mute/freeze/agent logic identical.
-          let track = LocalVideoTrack.createBufferTrack(name: "glasses", source: .camera)
+          // reportStatistics enables the per-second outbound-rtp stats poll so
+          // we can log the actual encoded resolution/fps leaving the phone.
+          let track = LocalVideoTrack.createBufferTrack(name: "glasses", source: .camera, reportStatistics: true)
           // New track, new frame clock: the deferred publish must wait for a
           // frame on THIS track. A sawFrame left true by the preview track
           // otherwise published this still-empty call track at once, so the
@@ -411,11 +413,27 @@ final class LiveKitSession: NSObject, ObservableObject {
   private func startGlassesFrameMonitor() {
     glassesFrameMonitor?.cancel()
     glassesFrameMonitor = Task { @MainActor [weak self] in
+      var tick = 0
       while !Task.isCancelled {
         try? await Task.sleep(nanoseconds: 700_000_000)
         guard let self else { return }
         self.glassesFrameStale = self.hasGlassesFrame &&
           CFAbsoluteTimeGetCurrent() - self.glassesCapturerBox.lastFrameAt > 1.5
+        // Every ~2s: what LiveKit is publishing (capture size) and what the
+        // encoder is actually sending to the server (outbound-rtp). If "sent"
+        // is below "publishing", WebRTC downscaled for CPU or bandwidth.
+        tick += 1
+        if tick % 3 == 0, let track = self.localVideoTrack {
+          let publishing = track.dimensions.map { "\($0.width)x\($0.height)" } ?? "?x?"
+          let out = track.statistics?.outboundRtpStream.first
+          let sent: String
+          if let out, let w = out.frameWidth, let h = out.frameHeight {
+            sent = "\(w)x\(h) @ \(String(format: "%.1f", out.framesPerSecond ?? 0)) fps"
+          } else {
+            sent = "stats pending"
+          }
+          NSLog("[VideoStats] publishing %@ | sent to server %@", publishing, sent)
+        }
         // Give the glasses video a grace to establish before falling back from
         // the connecting spinner to the "put them on" reminder.
         if self.videoEstablishing, CFAbsoluteTimeGetCurrent() - self.callConnectedAt > 6.0 {
