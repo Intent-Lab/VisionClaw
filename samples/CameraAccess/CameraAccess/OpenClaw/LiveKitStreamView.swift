@@ -214,6 +214,11 @@ struct LiveKitStreamView: View {
       // mode instead of wrapping, so a repeated swipe never flip-flops.
       DragGesture(minimumDistance: 40)
         .onEnded { value in
+          // Never flip the source mid-transition. A swipe landing during the
+          // connect handshake races the in-flight start(): it can publish the
+          // wrong camera into a live room and strands a fresh room per flip
+          // (the gateway mints a new room per ticket).
+          guard session.state != .connecting, !session.videoEstablishing else { return }
           guard abs(value.translation.width) > abs(value.translation.height),
                 abs(value.translation.width) > 60 else { return }
           captureSourceRaw = value.translation.width < 0

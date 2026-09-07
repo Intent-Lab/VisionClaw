@@ -64,11 +64,18 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>bluetooth-central</string>
 		<string>bluetooth-peripheral</string>
 		<string>external-accessory</string>
 	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Needed to connect to Meta AI Glasses</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>This allows your phone to find and connect to your glasses over Wi-Fi, which carries far more video than Bluetooth.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_bonjour._tcp</string>
+	</array>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>To listen to audio from Meta AI Glasses</string>
 	<key>UISupportedExternalAccessoryProtocols</key>

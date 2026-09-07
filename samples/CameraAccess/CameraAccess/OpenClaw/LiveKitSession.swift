@@ -257,6 +257,10 @@ final class LiveKitSession: NSObject, ObservableObject {
   @Published private(set) var videoEstablishing = false
   private var callConnectedAt: CFAbsoluteTime = 0
 
+  /// Bumped by every start() and by stop(), so an in-flight start() can tell
+  /// that it was superseded while it was waiting on the network.
+  private var startGeneration = 0
+
   private let glassesCapturerBox = GlassesCapturerBox()
 
   /// Glasses frames from the DAT decoder land here and flow into whichever
@@ -292,6 +296,15 @@ final class LiveKitSession: NSObject, ObservableObject {
       state = .failed("Gateway not configured. Check Settings.")
       return
     }
+    // A start() spans two network round trips (ticket fetch, then room connect),
+    // and stop() cannot interrupt it. Without this token, a source flip during
+    // that window publishes the camera latched below into a room the app already
+    // believes it stopped, and the trailing state = .connected overwrites the
+    // .disconnected that stop() wrote, leaving a zombie session that blocks
+    // every later redial. Each start claims a generation; stop() and a stale
+    // source both invalidate it.
+    startGeneration &+= 1
+    let generation = startGeneration
     state = .connecting
     await stopPreview()
 
@@ -299,7 +312,19 @@ final class LiveKitSession: NSObject, ObservableObject {
 
     do {
       let ticket = try await fetchTicket()
+      guard generation == startGeneration,
+            usingGlassesSource == (SettingsManager.shared.captureSource == .glasses) else {
+        state = .disconnected
+        await startPreview()
+        return
+      }
       try await room.connect(url: ticket.url, token: ticket.token)
+      guard generation == startGeneration else {
+        await room.disconnect()
+        state = .disconnected
+        await startPreview()
+        return
+      }
       try await room.localParticipant.setMicrophone(enabled: true)
       // Diagnose the audio route: do the glasses appear as a Bluetooth HFP input,
       // and where is output actually going? This tells us whether iOS can route
@@ -454,6 +479,9 @@ final class LiveKitSession: NSObject, ObservableObject {
   }
 
   func stop() async {
+    // Invalidate any start() still waiting on the network so it cannot publish
+    // into, or resurrect, the session we are tearing down here.
+    startGeneration &+= 1
     await room.disconnect()
     localVideoTrack = nil
     pendingGlassesTrack = nil
