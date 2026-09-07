@@ -845,8 +845,11 @@ class LiveKitSessionViewModel(
      */
     private suspend fun fetchTicket(engine: IntelligenceEngine): Ticket = withContext(Dispatchers.IO) {
         val baseUrl = SettingsManager.gatewayBaseUrl.trimEnd('/')
+        // Capture mode travels with the ticket so the study can label a session
+        // even when no video track is ever published (see the iOS counterpart).
         val body = JSONObject()
             .put("engine", engine.value)
+            .put("source", if (SettingsManager.captureSource == CaptureSource.GLASSES) "glasses" else "phone")
             .toString()
             .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()

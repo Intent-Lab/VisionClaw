@@ -637,8 +637,13 @@ final class LiveKitSession: NSObject, ObservableObject {
     request.timeoutInterval = 20
     request.setValue("Bearer \(GeminiConfig.agentToken)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    // Capture mode travels with the ticket so the study can label a session
+    // even when no video track is ever published. Normalised to the wire
+    // vocabulary the gateway accepts: iOS stores the phone case as "iphone"
+    // while Android stores "phone", and the study wants one label across both.
     request.httpBody = try JSONSerialization.data(withJSONObject: [
-      "engine": SettingsManager.shared.intelligenceEngine.rawValue
+      "engine": SettingsManager.shared.intelligenceEngine.rawValue,
+      "source": SettingsManager.shared.captureSource == .glasses ? "glasses" : "phone",
     ])
 
     let (data, response) = try await URLSession.shared.data(for: request)

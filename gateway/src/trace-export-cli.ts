@@ -24,10 +24,13 @@ interface Session {
   end?: string;
   engine?: string;
   room?: string;
-  // glasses | phone. Emitted by the worker from the published video track name,
-  // so it records the mode a session actually ran in. The 2-day counterbalanced
-  // study filters on this.
-  source?: string;
+  // glasses | phone. observed comes from the published video track name and is
+  // the stronger evidence; declared comes from the client and is the only label
+  // available when a session never publishes video, which is precisely the case
+  // for glasses that never started streaming. conflict marks the two disagreeing.
+  sourceObserved?: string;
+  sourceDeclared?: string;
+  sourceConflict?: boolean;
   synthetic: boolean;
   events: Ev[];
 }
@@ -164,8 +167,13 @@ function groupSessions(events: Ev[]): Session[] {
       sessions.push(cur);
     }
     cur.events.push(e);
-    if (e.type === "capture_source" && typeof e.source === "string") {
-      cur.source = e.source;
+    if (e.type === "session_start" && typeof e.source_declared === "string" && e.source_declared) {
+      cur.sourceDeclared = e.source_declared;
+    }
+    if (e.type === "capture_source") {
+      if (typeof e.source === "string" && e.source !== "unknown") cur.sourceObserved = e.source;
+      if (typeof e.declared === "string" && e.declared) cur.sourceDeclared = e.declared;
+      if (e.mismatch === true) cur.sourceConflict = true;
     }
     if (e.type === "session_end") {
       cur.end = String(e.ts ?? "");
@@ -252,9 +260,17 @@ function eventsCsv(sessions: Session[]): string {
   return csv(rows);
 }
 
+// One place decides the condition label so the CSV and the summary can never
+// disagree: what was actually published wins, the client's own claim is the
+// fallback for a session that never published video, and an empty string means
+// genuinely unlabelled rather than a guess.
+function resolvedSource(s: Session): string {
+  return s.sourceObserved ?? s.sourceDeclared ?? "";
+}
+
 function sessionsCsv(sessions: Session[]): string {
   const rows: unknown[][] = [
-    ["index", "start", "end", "duration_s", "engine", "source", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial"],
+    ["index", "start", "end", "duration_s", "engine", "source", "source_observed", "source_declared", "source_conflict", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial"],
   ];
   for (const s of sessions) {
     const st = sessionStats(s);
@@ -264,7 +280,10 @@ function sessionsCsv(sessions: Session[]): string {
       s.end ?? "",
       durationS(s),
       s.engine ?? "",
-      s.source ?? "",
+      resolvedSource(s),
+      s.sourceObserved ?? "",
+      s.sourceDeclared ?? "",
+      s.sourceConflict ? "yes" : "",
       st.userTurns,
       st.agentTurns,
       JSON.stringify(st.byTool),
@@ -335,6 +354,20 @@ function summaryMd(userId: string, sessions: Session[], truncated: boolean): { m
   lines.push(`- User turns: ${userTurns}`);
   lines.push(`- Agent turns: ${agentTurns}`);
   lines.push(`- Actions: ${actions}`, "");
+  // The study's primary split. Unlabelled is called out rather than folded into
+  // a mode, because a missing label used to correlate with glasses-arm failures.
+  const modes: Record<string, number> = {};
+  for (const s of sessions) {
+    const key = resolvedSource(s) || "unlabelled";
+    modes[key] = (modes[key] ?? 0) + 1;
+  }
+  const conflicts = sessions.filter((s) => s.sourceConflict).length;
+  lines.push("## Capture mode", "");
+  lines.push("| Mode | Sessions |", "|---|---|");
+  for (const [m, n] of Object.entries(modes).sort((a, b) => b[1] - a[1])) lines.push(`| ${m} | ${n} |`);
+  if (conflicts)
+    lines.push("", `WARNING: ${conflicts} session(s) published a different mode than the client declared; see source_conflict in sessions.csv.`);
+  lines.push("");
   lines.push("## Actions by tool", "");
   if (Object.keys(byTool).length) {
     lines.push("| Tool | Count |", "|---|---|");

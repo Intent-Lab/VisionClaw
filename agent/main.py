@@ -981,16 +981,26 @@ CARD_TOOL_SCHEMA = {
 
 
 def _capture_source(track_name: str | None) -> str:
-    """Which mode a session actually ran in. The phone publishes the glasses
-    feed as a track named "glasses" on both platforms and the phone camera
-    under LiveKit's default camera name, so the published track name is ground
-    truth: it reflects what was really sent, not what the client claimed. That
-    distinction has mattered here, since a source-switch race once published
-    the phone camera while the app was in glasses mode."""
-    return "glasses" if (track_name or "").lower().startswith("glasses") else "phone"
+    """Which mode a session actually ran in, from the published track name.
+    Both clients name the glasses feed "glasses"; the phone camera comes from
+    the SDK's own publish path, which names it "camera" on iOS and leaves it
+    unnamed on Android (setCameraEnabled -> createVideoTrack(name = "")), so an
+    empty name reads as phone too. This is ground truth in the sense that it
+    reflects what was really sent rather than what the client claimed, which has
+    mattered here: a source-switch race once published the phone camera while
+    the app was in glasses mode. A name that is neither is "unknown" rather than
+    assumed, because a confidently wrong condition label is worse for the study
+    than a missing one."""
+    name = (track_name or "").strip().lower()
+    if name.startswith("glasses"):
+        return "glasses"
+    if name == "" or name.startswith("camera"):
+        return "phone"
+    return "unknown"
 
 
-def _watch_video(ctx: JobContext, holder: FrameHolder, tracer: "Tracer") -> None:
+def _watch_video(ctx: JobContext, holder: FrameHolder, tracer: "Tracer",
+                 declared_source: str | None = None) -> None:
     """Keep holder current with the user's camera. Runs beside the realtime
     model's own video consumption; this copy exists so tool calls can attach
     the exact frame the user is looking at. Also labels the session with the
@@ -1004,7 +1014,19 @@ def _watch_video(ctx: JobContext, holder: FrameHolder, tracer: "Tracer") -> None
             return
         seen.add(source)
         logger.info("capture source: %s (track=%r)", source, track_name)
-        tracer.emit("capture_source", source=source, track=track_name or "")
+        mismatch = declared_source not in (None, "", source) and source != "unknown"
+        tracer.emit(
+            "capture_source",
+            source=source,
+            track=track_name or "",
+            declared=declared_source or "",
+            # The client said one mode and published the other. Worth surfacing
+            # rather than silently trusting either: this is exactly what the
+            # source-switch race produced.
+            mismatch=mismatch,
+        )
+        if mismatch:
+            logger.warning("capture source mismatch: declared=%s observed=%s", declared_source, source)
 
     def start_reader(track: rtc.Track) -> None:
         async def read() -> None:
@@ -1043,14 +1065,20 @@ async def entrypoint(ctx: JobContext):
     except json.JSONDecodeError:
         meta = {}
     engine = meta.get("engine", "gemini")
+    # What the client said it was capturing. The observed track name is better
+    # evidence, but a glasses call whose glasses never stream publishes no video
+    # track at all, so without this those sessions would go unlabelled -- and
+    # they are exactly the glasses-arm failures, which would bias the study.
+    declared_source = meta.get("source") or None
     user_id = participant.identity or "demo"
     logger.info("session start: user=%s engine=%s", user_id, engine)
 
     tracer = Tracer(user_id)
-    tracer.emit("session_start", engine=engine, room=ctx.room.name)
+    tracer.emit("session_start", engine=engine, room=ctx.room.name,
+                source_declared=declared_source or "")
 
     frames = FrameHolder()
-    _watch_video(ctx, frames, tracer)
+    _watch_video(ctx, frames, tracer, declared_source)
     pump = asyncio.create_task(tracer.pump())
 
     async def _finish_trace() -> None:

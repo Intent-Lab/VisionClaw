@@ -441,10 +441,18 @@ app.post("/livekit-token", async (req, res) => {
   // The engine choice (gemini | openai) rides as participant metadata; the
   // worker reads it when the user joins and picks the realtime model.
   const engine = req.body?.engine === "openai" ? "openai" : "gemini";
+  // Capture mode rides along too, so the study can tell a glasses day from a
+  // phone day. The worker also derives it from the published track name, which
+  // is better evidence, but a glasses call whose glasses never stream publishes
+  // no video track at all. An absent or unrecognised value is left out rather
+  // than defaulted: an older client that does not send it should read as
+  // unknown, never as a confident wrong condition.
+  const rawSource = req.body?.source;
+  const source = rawSource === "glasses" || rawSource === "phone" ? rawSource : undefined;
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
     identity: userId,
     ttl: "15m",
-    metadata: JSON.stringify({ engine }),
+    metadata: JSON.stringify(source ? { engine, source } : { engine }),
   });
   // One room per call, not per user: agent dispatch fires on room creation,
   // so a redial into a still-draining room from the previous call would get
