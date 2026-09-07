@@ -696,8 +696,10 @@ class LiveKitSessionViewModel(
             // Match iOS: highest resolution, low frame rate. Resolution and fps
             // share the Bluetooth budget and the SDK drops resolution first, so
             // a low fps keeps frames sharp, which suits a vision model that reads
-            // stills. Raise fps only after measuring link headroom.
-            StreamConfiguration(videoQuality = VideoQuality.HIGH, 5),
+            // stills. Measured on iOS at 5 fps: the link laddered the source down
+            // to 504x896 and still delivered only ~2 fps, so 3 buys the
+            // resolution ladder headroom to hold the top tier.
+            StreamConfiguration(videoQuality = VideoQuality.HIGH, 3),
         )
         glassesSession = session
         // Conversion is a plain memcpy but runs per frame; keep it off main.

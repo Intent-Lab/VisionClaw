@@ -428,7 +428,11 @@ final class LiveKitSession: NSObject, ObservableObject {
           let out = track.statistics?.outboundRtpStream.first
           let sent: String
           if let out, let w = out.frameWidth, let h = out.frameHeight {
-            sent = "\(w)x\(h) @ \(String(format: "%.1f", out.framesPerSecond ?? 0)) fps"
+            // limit tells us whether the phone-side encoder is holding video
+            // back, and why: "cpu" (phone loaded, e.g. by preview rendering),
+            // "bandwidth" (phone-to-server network), or "none".
+            let limit = out.qualityLimitationReason?.rawValue ?? "n/a"
+            sent = "\(w)x\(h) @ \(String(format: "%.1f", out.framesPerSecond ?? 0)) fps, limit=\(limit)"
           } else {
             sent = "stats pending"
           }

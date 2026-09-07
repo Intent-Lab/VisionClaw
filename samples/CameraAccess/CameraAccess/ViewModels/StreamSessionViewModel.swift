@@ -105,7 +105,12 @@ class StreamSessionViewModel: ObservableObject {
   // which is what the vision model needs (it samples stills, not motion). Meta's
   // auto-ladder floor is 15fps, so the glasses may clamp this up; the fps log
   // below reports the actual delivered rate.
-  private let requestedFrameRate: UInt = 5
+  //
+  // Measured at 5: the link auto-laddered the source down to 504x896 and still
+  // only delivered ~2fps, so the requested config did not fit. Lowered to 3 to
+  // buy the resolution ladder headroom to hold 720x1280. The [Stream] log line
+  // reports source WxH, so a build at 3 tells us whether it recovered.
+  private let requestedFrameRate: UInt = 3
   private var fpsCount: Int = 0
   private var fpsWindowStart: Date = .now
 
