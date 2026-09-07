@@ -90,7 +90,17 @@ final class LiveKitSession: NSObject, ObservableObject {
   /// hanging up stops the listening, not the seeing.
   @Published private(set) var previewTrack: LocalVideoTrack?
 
-  let room = Room()
+  // suspendLocalVideoTracksInBackground defaults to true, and Room's
+  // appDidEnterBackground suspends every local video publication whose source
+  // is .camera -- which includes the glasses buffer track, since it publishes
+  // as .camera to keep mute/freeze/agent logic identical. Locking the phone
+  // therefore muted and stopped the glasses video exactly like the freeze
+  // button: frames kept arriving from the glasses and kept being pushed into
+  // the capturer, but the media track was disabled, so nothing reached the
+  // sender and the agent's held frame stayed frozen at the moment of lock.
+  // That option exists for apps whose AVCaptureSession dies in the background;
+  // these frames come from the glasses over Bluetooth, so it does not apply.
+  let room = Room(roomOptions: RoomOptions(suspendLocalVideoTracksInBackground: false))
 
   override init() {
     super.init()
