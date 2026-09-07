@@ -1182,9 +1182,13 @@ async def entrypoint(ctx: JobContext):
 
         keywords = _relay_keywords(joined)
         needed = _relay_needed(keywords)
+        # Same rule as the late relay: only speech from after the parked result
+        # was handed over can count as having said it, so anything spoken
+        # earlier in the call cannot satisfy the check by coincidence.
+        baseline = len(userdata.spoken)
 
         def relay_hits() -> int:
-            return _relay_hits(userdata.spoken, keywords)
+            return _relay_hits(userdata.spoken[baseline:], keywords)
 
         async def verify_relay() -> None:
             # Safety net: the drain is destructive, so if the assistant never
