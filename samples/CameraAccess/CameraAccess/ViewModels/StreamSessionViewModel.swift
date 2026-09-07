@@ -93,9 +93,10 @@ class StreamSessionViewModel: ObservableObject {
   private var deviceMonitorTask: Task<Void, Never>?
   // CPU-based CIContext for rendering decoded pixel buffers in background
   private let cpuCIContext = CIContext(options: [.useSoftwareRenderer: true])
-  // VideoDecoder for decompressing HEVC/H.264 frames in background
+  // Decompresses HEVC/H.264 samples into pixel buffers. The SDK returns
+  // compressed samples for the hvc1 codec, and for raw once backgrounded.
   private let videoDecoder = VideoDecoder()
-  private var backgroundFrameCount = 0
+  private var decodedFrameCount = 0
   private var bgDiagLogged = false
   // Throttles the (redundant, expensive) UIImage preview so it can't saturate
   // the main thread; the LiveKit feed itself is never throttled.
@@ -113,8 +114,9 @@ class StreamSessionViewModel: ObservableObject {
   private let requestedFrameRate: UInt = 3
   private var fpsCount: Int = 0
   private var fpsWindowStart: Date = .now
-  // One-shot guard so an undecodable-frame codec reports itself once, not per frame.
+  // One-shot guards so the compressed-frame path reports itself once, not per frame.
   private var loggedUndecodedFrame = false
+  private var loggedDecodeError = false
 
   init(wearables: WearablesInterface?) {
     self.wearables = wearables
@@ -146,17 +148,15 @@ class StreamSessionViewModel: ObservableObject {
       Task { @MainActor [weak self] in
         guard let self else { return }
         let pixelBuffer = decodedFrame.pixelBuffer
+        // Straight into the room. Deliberately no CPU CIContext render here:
+        // with a compressed codec this is the hot path for every frame, and a
+        // per-frame software image conversion is what saturated the main thread
+        // before (the freeze, then the watchdog kill).
         self.onDecodedFrame?(pixelBuffer)
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let rect = CGRect(x: 0, y: 0, width: width, height: height)
-        if let cgImage = self.cpuCIContext.createCGImage(ciImage, from: rect) {
-          let image = UIImage(cgImage: cgImage)
-          if self.backgroundFrameCount <= 5 || self.backgroundFrameCount % 120 == 0 {
-            NSLog("[Stream] Background frame #%d decoded and forwarded (%dx%d)",
-                  self.backgroundFrameCount, width, height)
-          }
+        self.decodedFrameCount &+= 1
+        if self.decodedFrameCount <= 3 || self.decodedFrameCount % 120 == 0 {
+          NSLog("[Stream] decoded frame #%d (%dx%d)", self.decodedFrameCount,
+                CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer))
         }
       }
     }
@@ -269,12 +269,23 @@ class StreamSessionViewModel: ObservableObject {
         let pixelBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer)
         if let pixelBuffer {
           self.onDecodedFrame?(pixelBuffer)
-        } else if !self.loggedUndecodedFrame {
-          // The codec handed back a still-compressed sample, so nothing can
-          // render it and no video reaches the screen or the agent. Loud once
-          // rather than a silent black screen: revert videoCodec to .raw.
-          self.loggedUndecodedFrame = true
-          NSLog("[Stream] frames carry no pixel buffer (compressed samples) -- no video will flow; revert videoCodec to .raw")
+        } else {
+          // Compressed sample. The SDK hands these back for hvc1, and for raw
+          // too once the app is backgrounded. VideoDecoder turns them into
+          // pixel buffers and its callback forwards them on from there.
+          if !self.loggedUndecodedFrame {
+            self.loggedUndecodedFrame = true
+            NSLog("[Stream] compressed frames, decoding via VideoDecoder")
+          }
+          do {
+            try self.videoDecoder.decode(videoFrame.sampleBuffer)
+          } catch {
+            if !self.loggedDecodeError {
+              self.loggedDecodeError = true
+              NSLog("[Stream] frame decode failed: %@ -- revert videoCodec to .raw",
+                    String(describing: error))
+            }
+          }
         }
         if !self.hasReceivedFirstFrame {
           self.hasReceivedFirstFrame = true
