@@ -175,12 +175,12 @@ fun LiveKitStreamScreen(
                         if (committed) change.consume()
                     }
                     if (committed && abs(dx) > switchThreshold) {
+                        // Directional and edge-bounded: swipe right selects
+                        // glasses (right mode), swipe left selects phone (left
+                        // mode). Off-edge swipes reselect the same mode rather
+                        // than wrapping, so a repeated swipe never flip-flops.
                         SettingsManager.captureSource =
-                            if (SettingsManager.captureSource == CaptureSource.GLASSES) {
-                                CaptureSource.PHONE
-                            } else {
-                                CaptureSource.GLASSES
-                            }
+                            if (dx > 0) CaptureSource.GLASSES else CaptureSource.PHONE
                     }
                 }
             },
@@ -807,17 +807,18 @@ private fun CaptureSourceToggle(
             .padding(3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CaptureSourceToggleItem(
-            selected = current == CaptureSource.GLASSES,
-            icon = Icons.Filled.Visibility,
-            description = "Glasses",
-            onClick = { onSelect(CaptureSource.GLASSES) },
-        )
+        // Phone on the left, glasses on the right, matching the swipe direction.
         CaptureSourceToggleItem(
             selected = current == CaptureSource.PHONE,
             icon = Icons.Filled.Smartphone,
             description = "Phone",
             onClick = { onSelect(CaptureSource.PHONE) },
+        )
+        CaptureSourceToggleItem(
+            selected = current == CaptureSource.GLASSES,
+            icon = Icons.Filled.Visibility,
+            description = "Glasses",
+            onClick = { onSelect(CaptureSource.GLASSES) },
         )
     }
 }

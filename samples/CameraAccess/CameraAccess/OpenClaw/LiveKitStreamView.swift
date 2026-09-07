@@ -190,14 +190,17 @@ struct LiveKitStreamView: View {
       }
     }
     .simultaneousGesture(
-      // Swipe left/right anywhere on the video to flip glasses <-> phone.
+      // Directional and edge-bounded, like a two-position slider: swipe right
+      // selects glasses (the right mode), swipe left selects phone (the left
+      // mode). At an edge, swiping further off it reselects the same mode
+      // instead of wrapping, so a repeated swipe never flip-flops.
       DragGesture(minimumDistance: 40)
         .onEnded { value in
           guard abs(value.translation.width) > abs(value.translation.height),
                 abs(value.translation.width) > 60 else { return }
-          captureSourceRaw = captureSourceRaw == CaptureSource.glasses.rawValue
-            ? CaptureSource.iPhoneCamera.rawValue
-            : CaptureSource.glasses.rawValue
+          captureSourceRaw = value.translation.width > 0
+            ? CaptureSource.glasses.rawValue
+            : CaptureSource.iPhoneCamera.rawValue
         }
     )
     .sheet(isPresented: $showSettings) { SettingsView() }
