@@ -113,6 +113,8 @@ class StreamSessionViewModel: ObservableObject {
   private let requestedFrameRate: UInt = 3
   private var fpsCount: Int = 0
   private var fpsWindowStart: Date = .now
+  // One-shot guard so an undecodable-frame codec reports itself once, not per frame.
+  private var loggedUndecodedFrame = false
 
   init(wearables: WearablesInterface?) {
     self.wearables = wearables
@@ -170,10 +172,18 @@ class StreamSessionViewModel: ObservableObject {
 
   private func streamConfig() -> StreamConfiguration {
     // 720x1280 (.high) for the most detail the glasses will stream. A low frame
-    // rate trades motion smoothness for sharper frames on the Bluetooth-limited
-    // link, which suits a vision model that reads stills.
+    // rate trades motion smoothness for sharper frames on the link, which suits
+    // a vision model that reads stills.
+    //
+    // hvc1 (HEVC) rather than raw: raw 720x1280 NV12 is ~1.38MB per frame
+    // (~33Mbps at 3fps), far more than the glasses link carries, so the SDK
+    // laddered the source down to 504x896 and still only delivered ~2fps no
+    // matter what frame rate was requested. HEVC is roughly 10-30x smaller, so
+    // the top tier should fit. VideoFrame exposes the same sampleBuffer either
+    // way; if these arrive still-compressed the frame handler logs it once and
+    // no video flows, which is the signal to go back to .raw.
     StreamConfiguration(
-      videoCodec: VideoCodec.raw,
+      videoCodec: VideoCodec.hvc1,
       resolution: selectedResolution,
       frameRate: requestedFrameRate)
   }
@@ -253,16 +263,23 @@ class StreamSessionViewModel: ObservableObject {
         guard let self else { return }
 
         // Feed LiveKit every frame -- this is the call's actual video and must
-        // run at full frame rate. Raw frames (VideoCodec.raw) carry the pixel
-        // buffer directly; hand it straight to the room in both foreground and
+        // run at full frame rate. A decoded frame carries the pixel buffer
+        // directly; hand it straight to the room in both foreground and
         // background so the agent keeps seeing the glasses with the screen off.
-        if let pixelBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer) {
+        let pixelBuffer = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer)
+        if let pixelBuffer {
           self.onDecodedFrame?(pixelBuffer)
+        } else if !self.loggedUndecodedFrame {
+          // The codec handed back a still-compressed sample, so nothing can
+          // render it and no video reaches the screen or the agent. Loud once
+          // rather than a silent black screen: revert videoCodec to .raw.
+          self.loggedUndecodedFrame = true
+          NSLog("[Stream] frames carry no pixel buffer (compressed samples) -- no video will flow; revert videoCodec to .raw")
         }
         if !self.hasReceivedFirstFrame {
           self.hasReceivedFirstFrame = true
           self.fpsWindowStart = .now
-          if let pb = CMSampleBufferGetImageBuffer(videoFrame.sampleBuffer) {
+          if let pb = pixelBuffer {
             NSLog("[Stream] first glasses frame %dx%d (config %@)",
                   CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb), self.resolutionLabel)
           }
