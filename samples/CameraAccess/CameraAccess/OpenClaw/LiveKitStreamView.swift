@@ -12,6 +12,27 @@ struct LiveKitStreamView: View {
   /// app's own voice for glasses-state conditions (never alert dialogs).
   var glassesPlaceholder: (title: String, caption: String)? = nil
   @State private var showSettings = false
+  @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
+
+  // Quick glasses/phone source switch on the call screen. Flips the shared
+  // capture-source setting; StreamSessionView's onChange swaps the pipeline.
+  private var captureSourceToggle: some View {
+    HStack(spacing: 0) {
+      ForEach(CaptureSource.allCases, id: \.rawValue) { source in
+        Button { captureSourceRaw = source.rawValue } label: {
+          Image(systemName: source == .glasses ? "eyeglasses" : "iphone")
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(captureSourceRaw == source.rawValue ? .white : .white.opacity(0.4))
+            .frame(width: 42, height: 30)
+            .background(captureSourceRaw == source.rawValue ? .white.opacity(0.18) : .clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
+      }
+    }
+    .padding(3)
+    .background(.black.opacity(0.35), in: Capsule())
+    .padding(.leading, 16)
+  }
 
   var body: some View {
     ZStack {
@@ -144,6 +165,7 @@ struct LiveKitStreamView: View {
 
       VStack {
         HStack {
+          captureSourceToggle
           Spacer()
           Button { showSettings = true } label: {
             Image(systemName: "gearshape.fill")
