@@ -106,11 +106,14 @@ class StreamSessionViewModel: ObservableObject {
   // matter what we changed. That was our request being rounded down, NOT the
   // link starving, so it was never evidence about available bandwidth.
   //
-  // 2 is deliberate: it is the lowest legal rung, so each frame gets the most
-  // of the link (lower frame rate yields higher visual quality per frame), and
-  // the agent samples at most 1fps anyway. If the Wi-Fi transport engages and
-  // resolution reaches 720x1280, 7 becomes worth trying for fresher stills.
-  private let requestedFrameRate: UInt = 2
+  // 7, the next rung up from 2. At 2 the delivered rate sagged to 1.4-1.8fps,
+  // which is under the agent's 1fps sampling peak plus jitter, and the frame a
+  // tool call attaches is only ever 1/fps old: 500ms at 2, ~143ms at 7. The
+  // link is on HEVC now, so the extra frames cost far less than they did on
+  // raw. Two things to watch after this change: whether the negotiated tier
+  // drops from 504x896 to 360x640, and background CPU, since frames are
+  // decoded in software while the screen is locked.
+  private let requestedFrameRate: UInt = 7
   private var fpsCount: Int = 0
   private var fpsWindowStart: Date = .now
   // One-shot guards so the compressed-frame path reports itself once, not per frame.

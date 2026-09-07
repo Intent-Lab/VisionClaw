@@ -82,8 +82,8 @@ class StreamViewModel(
         Wearables.startStreamSession(
                 getApplication(),
                 deviceSelector,
-                // Match iOS: highest resolution, low frame rate (see LiveKitSessionViewModel).
-                StreamConfiguration(videoQuality = VideoQuality.HIGH, 3),
+                // Match iOS: highest resolution, legal frame rate (see LiveKitSessionViewModel).
+                StreamConfiguration(videoQuality = VideoQuality.HIGH, 7),
             )
             .also { streamSession = it }
     _uiState.update { it.copy(streamingMode = StreamingMode.GLASSES) }
