@@ -236,11 +236,19 @@ final class LiveKitSession: NSObject, ObservableObject {
   private final class GlassesCapturerBox: @unchecked Sendable {
     var capturer: BufferCapturer?
     var sawFrame = false
+    var lastFrameAt: CFAbsoluteTime = 0
   }
 
   /// Flips on the first glasses frame; the call screen shows its waiting
   /// placeholder until then.
   @Published private(set) var hasGlassesFrame = false
+
+  /// Frames stopped arriving after they had started -- the glasses were taken
+  /// off or folded (their camera cuts when doffed). Brings the "put them on"
+  /// reminder back even after the first frame, so the screen never sits black
+  /// with no guidance.
+  @Published private(set) var glassesFrameStale = false
+  private var glassesFrameMonitor: Task<Void, Never>?
 
   private let glassesCapturerBox = GlassesCapturerBox()
 
@@ -250,6 +258,7 @@ final class LiveKitSession: NSObject, ObservableObject {
   /// pinned frame.
   nonisolated func pushGlassesFrame(_ pixelBuffer: CVPixelBuffer) {
     glassesCapturerBox.capturer?.capture(pixelBuffer)
+    glassesCapturerBox.lastFrameAt = CFAbsoluteTimeGetCurrent()
     if !glassesCapturerBox.sawFrame {
       glassesCapturerBox.sawFrame = true
       Task { @MainActor in
@@ -337,6 +346,7 @@ final class LiveKitSession: NSObject, ObservableObject {
       state = .connected
       resetZoom()
       refreshAgentStatus()
+      if usingGlassesSource { startGlassesFrameMonitor() }
       // Frames may already be flowing by now; publish immediately if so, else
       // the first frame's callback triggers it.
       if glassesCapturerBox.sawFrame { await publishPendingGlassesTrack() }
@@ -370,6 +380,22 @@ final class LiveKitSession: NSObject, ObservableObject {
     }
   }
 
+  /// Watches the glasses frame clock while a glasses call is up: once frames
+  /// have started, if none arrive for ~1.5s the glasses are off or folded, so
+  /// flag the stream stale to surface the "put them on" reminder. One cheap
+  /// tick, cancelled on stop.
+  private func startGlassesFrameMonitor() {
+    glassesFrameMonitor?.cancel()
+    glassesFrameMonitor = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 700_000_000)
+        guard let self else { return }
+        self.glassesFrameStale = self.hasGlassesFrame &&
+          CFAbsoluteTimeGetCurrent() - self.glassesCapturerBox.lastFrameAt > 1.5
+      }
+    }
+  }
+
   func stop() async {
     await room.disconnect()
     localVideoTrack = nil
@@ -381,8 +407,12 @@ final class LiveKitSession: NSObject, ObservableObject {
     caption = nil
     captionClearTask?.cancel()
     card = nil
+    glassesFrameMonitor?.cancel()
+    glassesFrameMonitor = nil
     glassesCapturerBox.sawFrame = false
+    glassesCapturerBox.lastFrameAt = 0
     hasGlassesFrame = false
+    glassesFrameStale = false
     await startPreview()
   }
 

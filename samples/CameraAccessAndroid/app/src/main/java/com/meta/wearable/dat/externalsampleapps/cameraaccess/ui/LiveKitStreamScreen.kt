@@ -224,9 +224,10 @@ fun LiveKitStreamScreen(
                     "Glasses update required" to
                         "Device '${glassesIssue.deviceName}' requires an update to work with this app."
                 GlassesIssue.Reconnecting ->
-                    "Reconnecting to glasses" to "Video will appear when your glasses start streaming."
+                    "Reconnecting to glasses" to "Make sure your glasses are on and the hinges are open."
                 null ->
-                    "Waiting for glasses video" to "Video will appear when your glasses start streaming."
+                    "Put on your glasses" to
+                        "Open the hinges and put them on. The camera turns off when they're folded or off your face."
             }
             Column(
                 modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),

@@ -73,7 +73,9 @@ struct LiveKitStreamView: View {
             }
           }
       }
-      if session.usingGlassesSource && !session.hasGlassesFrame, let ph = glassesPlaceholder {
+      if captureSourceRaw == CaptureSource.glasses.rawValue,
+         !session.hasGlassesFrame || session.glassesFrameStale,
+         let ph = glassesPlaceholder {
         VStack(spacing: 8) {
           Text(ph.title)
             .font(.title3.weight(.semibold))

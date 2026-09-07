@@ -43,8 +43,8 @@ struct StreamSessionView: View {
     case .reconnecting:
       return ("Reconnecting to glasses", "Make sure your glasses are on and the hinges are open.")
     case nil:
-      return ("Waking up your glasses",
-              "Put them on and open the hinges. The camera turns off when they're folded or off your face. The first frame can take up to a minute.")
+      return ("Put on your glasses",
+              "Open the hinges and put them on. The camera turns off when they're folded or off your face.")
     }
   }
 
