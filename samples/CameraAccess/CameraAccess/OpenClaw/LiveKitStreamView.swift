@@ -73,10 +73,12 @@ struct LiveKitStreamView: View {
             }
           }
       }
-      // Suppressed while connecting or failed: those states own the centered
-      // spot with their own message, so the two never stack on each other.
+      // Suppressed while connecting, establishing video, or failed: those
+      // states own the centered spot with their own message, so the two never
+      // stack on each other.
       if captureSourceRaw == CaptureSource.glasses.rawValue,
          session.state == .connected || session.state == .disconnected,
+         !session.videoEstablishing,
          !session.hasGlassesFrame || session.glassesFrameStale,
          let ph = glassesPlaceholder {
         VStack(spacing: 8) {
@@ -100,7 +102,7 @@ struct LiveKitStreamView: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 32)
         }
-      } else if session.state == .connecting {
+      } else if session.state == .connecting || session.videoEstablishing {
         VStack(spacing: 16) {
           ProgressView().tint(.white)
           Text("Connecting")

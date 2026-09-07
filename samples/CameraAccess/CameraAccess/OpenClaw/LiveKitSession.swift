@@ -250,6 +250,13 @@ final class LiveKitSession: NSObject, ObservableObject {
   @Published private(set) var glassesFrameStale = false
   private var glassesFrameMonitor: Task<Void, Never>?
 
+  /// True from the moment a glasses call connects until its first video frame
+  /// arrives (or a short grace elapses). Keeps the "Connecting" spinner up
+  /// while the glasses video is still establishing, so a call that is merely
+  /// warming up never flashes the "put them on" reminder.
+  @Published private(set) var videoEstablishing = false
+  private var callConnectedAt: CFAbsoluteTime = 0
+
   private let glassesCapturerBox = GlassesCapturerBox()
 
   /// Glasses frames from the DAT decoder land here and flow into whichever
@@ -263,6 +270,8 @@ final class LiveKitSession: NSObject, ObservableObject {
       glassesCapturerBox.sawFrame = true
       Task { @MainActor in
         self.hasGlassesFrame = true
+        // Video has established: drop the connecting spinner.
+        self.videoEstablishing = false
         // First frame is here -- publish the deferred glasses track now that the
         // buffer publish has a frame to settle its dimensions.
         await self.publishPendingGlassesTrack()
@@ -322,7 +331,6 @@ final class LiveKitSession: NSObject, ObservableObject {
           // while the server reports "no video access" (e.g. when the room
           // connects before the glasses start streaming).
           glassesCapturerBox.sawFrame = false
-          glassesCapturerBox.lastFrameAt = 0
           glassesCapturerBox.capturer = track.capturer as? BufferCapturer
           try await track.start()
           // Render locally right away -- a LocalVideoTrack shows its captured
@@ -354,7 +362,11 @@ final class LiveKitSession: NSObject, ObservableObject {
       state = .connected
       resetZoom()
       refreshAgentStatus()
-      if usingGlassesSource { startGlassesFrameMonitor() }
+      if usingGlassesSource {
+        videoEstablishing = true
+        callConnectedAt = CFAbsoluteTimeGetCurrent()
+        startGlassesFrameMonitor()
+      }
       // Frames may already be flowing by now; publish immediately if so, else
       // the first frame's callback triggers it.
       if glassesCapturerBox.sawFrame { await publishPendingGlassesTrack() }
@@ -404,6 +416,11 @@ final class LiveKitSession: NSObject, ObservableObject {
         guard let self else { return }
         self.glassesFrameStale = self.hasGlassesFrame &&
           CFAbsoluteTimeGetCurrent() - self.glassesCapturerBox.lastFrameAt > 1.5
+        // Give the glasses video a grace to establish before falling back from
+        // the connecting spinner to the "put them on" reminder.
+        if self.videoEstablishing, CFAbsoluteTimeGetCurrent() - self.callConnectedAt > 6.0 {
+          self.videoEstablishing = false
+        }
         // Safety net: frames are flowing but the track never reached the room
         // (a missed or failed publish on a connect-before-glasses order) --
         // publish now so the agent actually gets video.
@@ -431,6 +448,7 @@ final class LiveKitSession: NSObject, ObservableObject {
     glassesCapturerBox.lastFrameAt = 0
     hasGlassesFrame = false
     glassesFrameStale = false
+    videoEstablishing = false
     await startPreview()
   }
 

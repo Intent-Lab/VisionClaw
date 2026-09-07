@@ -212,6 +212,7 @@ fun LiveKitStreamScreen(
         }
 
         if (uiState.isGlassesSource && !uiState.glassesStreaming &&
+            !uiState.videoEstablishing &&
             uiState.frozenFrame == null && uiState.state != SessionState.Connecting &&
             uiState.state !is SessionState.Failed
         ) {
@@ -301,6 +302,23 @@ fun LiveKitStreamScreen(
                 }
             }
             else -> {}
+        }
+
+        // Connected but glasses video is still establishing: keep the same
+        // connecting spinner up instead of flashing the put-them-on reminder.
+        if (uiState.videoEstablishing && uiState.state == SessionState.Connected) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                CircularProgressIndicator(color = Color.White)
+                Text(
+                    text = "Connecting",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 15.sp,
+                )
+            }
         }
 
         // Pinned frame floats as a card over the still-live view: the user

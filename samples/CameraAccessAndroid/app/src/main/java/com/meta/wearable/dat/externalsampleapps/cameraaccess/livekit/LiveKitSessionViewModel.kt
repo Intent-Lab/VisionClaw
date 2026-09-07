@@ -144,6 +144,11 @@ data class LiveKitUiState(
     // The rest of the call (mic, speaker, agent) is identical.
     val isGlassesSource: Boolean = false,
     val glassesStreaming: Boolean = false,
+    // True from the moment a glasses call connects until its first video frame
+    // (or a short grace elapses). Keeps the connecting spinner up while the
+    // glasses video is still establishing, instead of flashing the "put them
+    // on" reminder over a call that is only warming up.
+    val videoEstablishing: Boolean = false,
     val caption: Caption? = null,
     val card: UiCard? = null,
 ) {
@@ -212,6 +217,11 @@ class LiveKitSessionViewModel(
     // DAT collector pushes into it. A disposed capturer drops pushes, so a
     // stale reference during track handoff is harmless.
     @Volatile private var glassesCapturer: GlassesVideoCapturer? = null
+
+    // Clears videoEstablishing after a grace so the connecting spinner falls
+    // back to the "put them on" reminder if glasses video never establishes.
+    private var videoEstablishingJob: Job? = null
+    private val videoEstablishGraceMs = 6_000L
 
     private val httpClient = OkHttpClient.Builder()
         .callTimeout(20, TimeUnit.SECONDS)
@@ -551,7 +561,15 @@ class LiveKitSessionViewModel(
             } catch (e: Exception) {
                 Log.w(TAG, "video unavailable, voice-only: ${e.message}")
             }
-            _uiState.update { it.copy(state = SessionState.Connected, zoomFactor = 1f) }
+            _uiState.update {
+                it.copy(
+                    state = SessionState.Connected,
+                    zoomFactor = 1f,
+                    // Establishing only if the glasses feed is not already live.
+                    videoEstablishing = glasses && !it.glassesStreaming,
+                )
+            }
+            if (glasses) startVideoEstablishGrace()
             refreshAgentStatus()
         } catch (e: Exception) {
             Log.w(TAG, "call failed: ${e.message}")
@@ -568,6 +586,14 @@ class LiveKitSessionViewModel(
         }
     }
 
+    private fun startVideoEstablishGrace() {
+        videoEstablishingJob?.cancel()
+        videoEstablishingJob = viewModelScope.launch {
+            delay(videoEstablishGraceMs)
+            _uiState.update { if (it.videoEstablishing) it.copy(videoEstablishing = false) else it }
+        }
+    }
+
     fun stop() {
         viewModelScope.launch {
             disconnectInternal()
@@ -580,6 +606,7 @@ class LiveKitSessionViewModel(
         attachGrabber(null)
         connectedEngine = null
         captionClearJob?.cancel()
+        videoEstablishingJob?.cancel()
         dismissedCardUuid = null
         _uiState.update {
             it.copy(
@@ -590,6 +617,7 @@ class LiveKitSessionViewModel(
                 zoomFactor = 1f,
                 caption = null,
                 card = null,
+                videoEstablishing = false,
             )
         }
     }
@@ -682,8 +710,15 @@ class LiveKitSessionViewModel(
         glassesFeedJobs += viewModelScope.launch {
             session.state.collect { sessionState ->
                 Log.i(TAG, "glasses session state: $sessionState")
-                _uiState.update { it.copy(glassesStreaming = sessionState == StreamSessionState.STREAMING) }
-                if (sessionState == StreamSessionState.STREAMING) {
+                val streaming = sessionState == StreamSessionState.STREAMING
+                _uiState.update {
+                    it.copy(
+                        glassesStreaming = streaming,
+                        // Video is live: drop the connecting spinner.
+                        videoEstablishing = if (streaming) false else it.videoEstablishing,
+                    )
+                }
+                if (streaming) {
                     glassesRetryCount = 0
                     glassesRetryJob?.cancel()
                     glassesRetryJob = null
