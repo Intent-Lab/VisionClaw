@@ -11,6 +11,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -36,6 +38,8 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -53,6 +57,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -75,11 +82,13 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSess
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.SessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.UiCard
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.CaptureSource
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.GlassesIssue
 import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
+import kotlin.math.abs
 import livekit.org.webrtc.RendererCommon
 
 /**
@@ -98,6 +107,7 @@ fun LiveKitStreamScreen(
     viewModel: LiveKitSessionViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         if (!viewModel.autoStartIfNeeded()) {
@@ -135,7 +145,46 @@ fun LiveKitStreamScreen(
         )
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            // Swipe left/right anywhere on the video flips glasses <-> phone,
+            // mirroring the top-bar toggle. Runs on the Initial pass and only
+            // commits to a clearly-horizontal one-finger drag, so pinch-zoom
+            // (two fingers), long-press-to-freeze, and the bottom-sheet's
+            // vertical drag are all left untouched.
+            .pointerInput(Unit) {
+                val switchThreshold = 60.dp.toPx()
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var committed = false
+                    var dx = 0f
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (event.changes.size > 1) break
+                        val change = event.changes.first()
+                        if (change.changedToUp()) break
+                        dx = change.position.x - down.position.x
+                        val dy = change.position.y - down.position.y
+                        if (!committed) {
+                            if (abs(dy) > slop && abs(dy) >= abs(dx)) break
+                            if (abs(dx) > slop && abs(dx) > abs(dy)) committed = true
+                        }
+                        if (committed) change.consume()
+                    }
+                    if (committed && abs(dx) > switchThreshold) {
+                        SettingsManager.captureSource =
+                            if (SettingsManager.captureSource == CaptureSource.GLASSES) {
+                                CaptureSource.PHONE
+                            } else {
+                                CaptureSource.GLASSES
+                            }
+                    }
+                }
+            },
+    ) {
         val track = uiState.displayTrack
         if (track != null) {
             // Pinch zoom drives the phone camera; glasses have no camera
@@ -205,7 +254,8 @@ fun LiveKitStreamScreen(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
-                    .padding(start = 16.dp, top = 16.dp)
+                    // Below the capture-source toggle, which owns the top-left corner.
+                    .padding(start = 16.dp, top = 60.dp)
                     .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(50))
                     .padding(horizontal = 10.dp, vertical = 6.dp),
             )
@@ -312,6 +362,17 @@ fun LiveKitStreamScreen(
                     .padding(8.dp),
             )
         }
+
+        // Capture-source switch, top-left opposite the gear: flip glasses <->
+        // phone without opening Settings, the tap counterpart to the swipe.
+        CaptureSourceToggle(
+            current = captureSource,
+            onSelect = { SettingsManager.captureSource = it },
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(start = 8.dp, top = 4.dp),
+        )
 
         // Generative UI card from the agent's show_card tool: one card at a
         // time floating over the upper portion, below the status pill, clear
@@ -724,6 +785,63 @@ private fun FreezeButton(
                 .size(innerSize)
                 .clip(CircleShape)
                 .background(color),
+        )
+    }
+}
+
+/**
+ * Compact glasses/phone switch that lives on the call screen, styled like the
+ * gear. No glasses glyph ships in the icon set, so the eye stands in for the
+ * glasses' point of view. Writes straight to SettingsManager; the root
+ * scaffold observes the same flow and swaps the capture pipeline live.
+ */
+@Composable
+private fun CaptureSourceToggle(
+    current: CaptureSource,
+    onSelect: (CaptureSource) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.35f), CircleShape)
+            .padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CaptureSourceToggleItem(
+            selected = current == CaptureSource.GLASSES,
+            icon = Icons.Filled.Visibility,
+            description = "Glasses",
+            onClick = { onSelect(CaptureSource.GLASSES) },
+        )
+        CaptureSourceToggleItem(
+            selected = current == CaptureSource.PHONE,
+            icon = Icons.Filled.Smartphone,
+            description = "Phone",
+            onClick = { onSelect(CaptureSource.PHONE) },
+        )
+    }
+}
+
+@Composable
+private fun CaptureSourceToggleItem(
+    selected: Boolean,
+    icon: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) Color.White.copy(alpha = 0.18f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = description,
+            tint = if (selected) Color.White else Color.White.copy(alpha = 0.4f),
+            modifier = Modifier.size(20.dp),
         )
     }
 }
