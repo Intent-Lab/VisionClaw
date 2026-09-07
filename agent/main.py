@@ -718,7 +718,16 @@ async def _run_delegated(
         delivered = True
         # Wait for a free slot so this relay does not collide with an active
         # response or a barge-in (the race that left user turns unanswered).
-        await _await_session_free(session, DELIVER_WAIT_S)
+        wait_start = time.monotonic()
+        free = await _await_session_free(session, DELIVER_WAIT_S)
+        waited = time.monotonic() - wait_start
+        # Separates waiting from speaking. The agent_utterance timestamp marks
+        # when an utterance FINISHED, so without this the whole gap between the
+        # result landing and the answer being recorded looks like a stall, when
+        # most of it is the model reading a long result aloud. free=False means
+        # the slot never opened and we injected against a busy session anyway.
+        logger.info("%s relay: waited %.1fs for a free slot (free=%s)", tool, waited, free)
+        tracer.emit("relay_wait", tool=tool, waited_s=round(waited, 1), free=free)
         try:
             session.generate_reply(instructions=instructions)
         except Exception:
