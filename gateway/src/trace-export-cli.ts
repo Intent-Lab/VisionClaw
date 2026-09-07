@@ -24,6 +24,10 @@ interface Session {
   end?: string;
   engine?: string;
   room?: string;
+  // glasses | phone. Emitted by the worker from the published video track name,
+  // so it records the mode a session actually ran in. The 2-day counterbalanced
+  // study filters on this.
+  source?: string;
   synthetic: boolean;
   events: Ev[];
 }
@@ -160,6 +164,9 @@ function groupSessions(events: Ev[]): Session[] {
       sessions.push(cur);
     }
     cur.events.push(e);
+    if (e.type === "capture_source" && typeof e.source === "string") {
+      cur.source = e.source;
+    }
     if (e.type === "session_end") {
       cur.end = String(e.ts ?? "");
       cur = null;
@@ -247,7 +254,7 @@ function eventsCsv(sessions: Session[]): string {
 
 function sessionsCsv(sessions: Session[]): string {
   const rows: unknown[][] = [
-    ["index", "start", "end", "duration_s", "engine", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial"],
+    ["index", "start", "end", "duration_s", "engine", "source", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial"],
   ];
   for (const s of sessions) {
     const st = sessionStats(s);
@@ -257,6 +264,7 @@ function sessionsCsv(sessions: Session[]): string {
       s.end ?? "",
       durationS(s),
       s.engine ?? "",
+      s.source ?? "",
       st.userTurns,
       st.agentTurns,
       JSON.stringify(st.byTool),

@@ -980,10 +980,31 @@ CARD_TOOL_SCHEMA = {
 }
 
 
-def _watch_video(ctx: JobContext, holder: FrameHolder) -> None:
+def _capture_source(track_name: str | None) -> str:
+    """Which mode a session actually ran in. The phone publishes the glasses
+    feed as a track named "glasses" on both platforms and the phone camera
+    under LiveKit's default camera name, so the published track name is ground
+    truth: it reflects what was really sent, not what the client claimed. That
+    distinction has mattered here, since a source-switch race once published
+    the phone camera while the app was in glasses mode."""
+    return "glasses" if (track_name or "").lower().startswith("glasses") else "phone"
+
+
+def _watch_video(ctx: JobContext, holder: FrameHolder, tracer: "Tracer") -> None:
     """Keep holder current with the user's camera. Runs beside the realtime
     model's own video consumption; this copy exists so tool calls can attach
-    the exact frame the user is looking at."""
+    the exact frame the user is looking at. Also labels the session with the
+    capture mode, which the 2-day counterbalanced study filters on."""
+
+    seen: set[str] = set()
+
+    def note_source(track_name: str | None) -> None:
+        source = _capture_source(track_name)
+        if source in seen:
+            return
+        seen.add(source)
+        logger.info("capture source: %s (track=%r)", source, track_name)
+        tracer.emit("capture_source", source=source, track=track_name or "")
 
     def start_reader(track: rtc.Track) -> None:
         async def read() -> None:
@@ -1000,11 +1021,13 @@ def _watch_video(ctx: JobContext, holder: FrameHolder) -> None:
     @ctx.room.on("track_subscribed")
     def _on_track(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant) -> None:
         if track.kind == rtc.TrackKind.KIND_VIDEO:
+            note_source(getattr(publication, "name", None) or getattr(track, "name", None))
             start_reader(track)
 
     for p in ctx.room.remote_participants.values():
         for pub in p.track_publications.values():
             if pub.track is not None and pub.track.kind == rtc.TrackKind.KIND_VIDEO:
+                note_source(getattr(pub, "name", None) or getattr(pub.track, "name", None))
                 start_reader(pub.track)
 
 
@@ -1023,11 +1046,11 @@ async def entrypoint(ctx: JobContext):
     user_id = participant.identity or "demo"
     logger.info("session start: user=%s engine=%s", user_id, engine)
 
-    frames = FrameHolder()
-    _watch_video(ctx, frames)
-
     tracer = Tracer(user_id)
     tracer.emit("session_start", engine=engine, room=ctx.room.name)
+
+    frames = FrameHolder()
+    _watch_video(ctx, frames, tracer)
     pump = asyncio.create_task(tracer.pump())
 
     async def _finish_trace() -> None:
