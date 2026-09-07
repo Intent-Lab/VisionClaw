@@ -163,7 +163,9 @@ class Tracer:
     voice model said, and what actions ran. Text only BY DESIGN -- events must
     never carry frames or base64 image payloads (the gateway strips image-like
     fields as a second line of defense). Events batch to the gateway; a failed
-    delivery drops that batch rather than ever stalling the voice loop."""
+    delivery re-queues rather than ever stalling the voice loop, and only a
+    gateway outage long enough to overflow the queue loses anything, oldest
+    first."""
 
     FLUSH_AFTER = 20
     FLUSH_SECONDS = 5.0
@@ -1000,19 +1002,26 @@ def _capture_source(track_name: str | None) -> str:
 
 
 def _watch_video(ctx: JobContext, holder: FrameHolder, tracer: "Tracer",
-                 declared_source: str | None = None) -> None:
+                 declared_source: str | None = None) -> dict[str, str]:
     """Keep holder current with the user's camera. Runs beside the realtime
     model's own video consumption; this copy exists so tool calls can attach
     the exact frame the user is looking at. Also labels the session with the
-    capture mode, which the 2-day counterbalanced study filters on."""
+    capture mode, which the 2-day counterbalanced study filters on.
+
+    Returns the observed label so the caller can repeat it at session end: the
+    trace queue trims oldest-first on overflow, and the first events of a call
+    are exactly the ones carrying the label."""
 
     seen: set[str] = set()
+    observed: dict[str, str] = {}
 
     def note_source(track_name: str | None) -> None:
         source = _capture_source(track_name)
         if source in seen:
             return
         seen.add(source)
+        if source != "unknown":
+            observed.setdefault("source", source)
         logger.info("capture source: %s (track=%r)", source, track_name)
         mismatch = declared_source not in (None, "", source) and source != "unknown"
         tracer.emit(
@@ -1052,6 +1061,8 @@ def _watch_video(ctx: JobContext, holder: FrameHolder, tracer: "Tracer",
                 note_source(getattr(pub, "name", None) or getattr(pub.track, "name", None))
                 start_reader(pub.track)
 
+    return observed
+
 
 async def entrypoint(ctx: JobContext):
     await ctx.connect()
@@ -1078,12 +1089,16 @@ async def entrypoint(ctx: JobContext):
                 source_declared=declared_source or "")
 
     frames = FrameHolder()
-    _watch_video(ctx, frames, tracer, declared_source)
+    observed_source = _watch_video(ctx, frames, tracer, declared_source)
     pump = asyncio.create_task(tracer.pump())
 
     async def _finish_trace() -> None:
         pump.cancel()
-        tracer.emit("session_end")
+        # The label rides the last event as well as the first. session_start
+        # sits at the head of the queue, which is what an overflow trims, and
+        # this one gets the end-of-call retries.
+        tracer.emit("session_end", source_declared=declared_source or "",
+                    source_observed=observed_source.get("source", ""))
         # Last chance before the process exits -- a failed attempt re-queues,
         # so retry a couple of times instead of losing the tail of the call.
         for attempt in range(3):

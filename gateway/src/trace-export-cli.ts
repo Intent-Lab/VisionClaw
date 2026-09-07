@@ -176,6 +176,15 @@ function groupSessions(events: Ev[]): Session[] {
       if (e.mismatch === true) cur.sourceConflict = true;
     }
     if (e.type === "session_end") {
+      // The worker repeats the label here because the trace queue trims
+      // oldest-first, and session_start is the oldest event of a call. Only
+      // fills gaps: an earlier, more direct reading always wins.
+      if (!cur.sourceObserved && typeof e.source_observed === "string" && e.source_observed && e.source_observed !== "unknown") {
+        cur.sourceObserved = e.source_observed;
+      }
+      if (!cur.sourceDeclared && typeof e.source_declared === "string" && e.source_declared) {
+        cur.sourceDeclared = e.source_declared;
+      }
       cur.end = String(e.ts ?? "");
       cur = null;
     }
