@@ -31,6 +31,14 @@ interface Session {
   sourceObserved?: string;
   sourceDeclared?: string;
   sourceConflict?: boolean;
+  // From study-assignments.json: the operator's record of which arm a
+  // participant was on, for sessions that predate in-band labelling. Fills a
+  // gap only, never overrides evidence, so a session labelled this way is
+  // recognisable by having neither an observed nor a declared value.
+  sourceAssigned?: string;
+  // false only for an assignment window marked valid:false. Absent means either
+  // no assignment or an assignment with nothing known against it.
+  conditionValid?: boolean;
   synthetic: boolean;
   events: Ev[];
 }
@@ -273,13 +281,55 @@ function eventsCsv(sessions: Session[]): string {
 // disagree: what was actually published wins, the client's own claim is the
 // fallback for a session that never published video, and an empty string means
 // genuinely unlabelled rather than a guess.
+interface AssignmentWindow {
+  participant: string; user: string; mode: string; from: string; to: string;
+  /** false when the assigned mode was attempted but did not work, so the
+   * sessions are not usable as that condition. */
+  valid?: boolean;
+}
+
+/** Operator-recorded condition windows, used only where the logs carry nothing.
+ * Absent file means no backfill, which is the correct default. */
+async function loadAssignments(file: string | undefined): Promise<AssignmentWindow[]> {
+  const path_ = file ?? new URL("../study-assignments.json", import.meta.url).pathname;
+  try {
+    const raw = JSON.parse(await fs.readFile(path_, "utf8")) as { windows?: AssignmentWindow[] };
+    return raw.windows ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function applyAssignments(userId: string, sessions: Session[], windows: AssignmentWindow[]): number {
+  let filled = 0;
+  for (const s of sessions) {
+    if (s.sourceObserved || s.sourceDeclared || !s.start) continue;
+    // Compare instants truncated to the second, and treat both bounds as
+    // inclusive. The bounds are themselves session start times quoted from the
+    // operator's dashboard at second precision, so the first and last session
+    // of a block land exactly on them: 10:18:53.439 against a bound of
+    // 10:18:53 is that block's last session, not the one after it. Comparing
+    // raw ISO strings or exact millis drops those boundary sessions.
+    const sec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+    const t = sec(s.start);
+    if (Number.isNaN(t)) continue;
+    const w = windows.find((w) => w.user === userId && t >= sec(w.from) && t <= sec(w.to));
+    if (w) {
+      s.sourceAssigned = w.mode;
+      if (w.valid === false) s.conditionValid = false;
+      filled++;
+    }
+  }
+  return filled;
+}
+
 function resolvedSource(s: Session): string {
-  return s.sourceObserved ?? s.sourceDeclared ?? "";
+  return s.sourceObserved ?? s.sourceDeclared ?? s.sourceAssigned ?? "";
 }
 
 function sessionsCsv(sessions: Session[]): string {
   const rows: unknown[][] = [
-    ["index", "start", "end", "duration_s", "engine", "source", "source_observed", "source_declared", "source_conflict", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial"],
+    ["index", "start", "end", "duration_s", "engine", "source", "source_observed", "source_declared", "source_assigned", "condition_valid", "source_conflict", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial"],
   ];
   for (const s of sessions) {
     const st = sessionStats(s);
@@ -292,6 +342,8 @@ function sessionsCsv(sessions: Session[]): string {
       resolvedSource(s),
       s.sourceObserved ?? "",
       s.sourceDeclared ?? "",
+      s.sourceAssigned ?? "",
+      s.conditionValid === false ? "no" : "",
       s.sourceConflict ? "yes" : "",
       st.userTurns,
       st.agentTurns,
@@ -371,9 +423,16 @@ function summaryMd(userId: string, sessions: Session[], truncated: boolean): { m
     modes[key] = (modes[key] ?? 0) + 1;
   }
   const conflicts = sessions.filter((s) => s.sourceConflict).length;
+  const fromEvidence = sessions.filter((s) => s.sourceObserved || s.sourceDeclared).length;
+  const fromRecord = sessions.filter((s) => s.sourceAssigned && !s.sourceObserved && !s.sourceDeclared).length;
   lines.push("## Capture mode", "");
   lines.push("| Mode | Sessions |", "|---|---|");
   for (const [m, n] of Object.entries(modes).sort((a, b) => b[1] - a[1])) lines.push(`| ${m} | ${n} |`);
+  const broken = sessions.filter((s) => s.conditionValid === false).length;
+  if (broken)
+    lines.push("", `WARNING: ${broken} session(s) ran in the assigned mode but the mode did not work. They carry a source label but condition_valid=no, so exclude them from that condition.`);
+  if (fromRecord)
+    lines.push("", `Of these, ${fromEvidence} labelled from the session's own logs and ${fromRecord} from the operator's assignment record (sessions predating in-band labelling).`);
   if (conflicts)
     lines.push("", `WARNING: ${conflicts} session(s) published a different mode than the client declared; see source_conflict in sessions.csv.`);
   lines.push("");
@@ -454,6 +513,8 @@ function aggregateMd(reports: UserReport[]): string {
 
 async function exportUser(userId: string, events: Ev[], truncated: boolean, outDir: string): Promise<UserReport> {
   const sessions = groupSessions(sortEvents(events));
+  const filled = applyAssignments(userId, sessions, await loadAssignments(undefined));
+  if (filled) console.log(`${userId}: ${filled} session(s) labelled from the assignment record`);
   const dir = path.join(outDir, userId);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, "events.csv"), eventsCsv(sessions));

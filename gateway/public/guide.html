@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VisionClaw Participant Guide</title>
+<title>VisionClaw Study</title>
 <style>
   :root {
     --bg: #f6f7f9; --panel: #ffffff; --border: #e2e5ea; --text: #1a1d21;
@@ -44,12 +44,61 @@
   table { border-collapse: collapse; width: 100%; font-size: 15px; }
   td { padding: 6px 4px; border-top: 1px solid var(--border); vertical-align: top; }
   td:first-child { color: var(--muted); width: 42%; }
+  .glance td:first-child { width: 34%; }
+  .rule { border: 0; border-top: 1px solid var(--border); margin: 32px 0 22px; }
+  .stage { font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+           color: var(--muted); margin-bottom: 12px; }
+  .day { display: flex; gap: 12px; margin: 10px 0; }
+  .day b { flex: 0 0 66px; color: var(--accent); font-size: 15px; }
+  section > p + p { margin-top: 10px; }
+  ul.plain { list-style: none; padding-left: 0; }
+  ul.plain li { padding-left: 16px; text-indent: -16px; }
 </style>
 </head>
 <body>
 <main>
-  <h1>VisionClaw Participant Guide</h1>
-  <p class="lead">Thanks for joining the study. This page gets the app on your phone and shows what you can do with it. Setup takes about ten minutes with a researcher nearby.</p>
+  <h1>VisionClaw Study</h1>
+  <p class="lead">A two day study of an AI assistant that can see what you see. One day you use it through your phone, the other through a pair of Ray-Ban Meta glasses. We want to know whether having it on your face changes what you ask it for.</p>
+
+  <section>
+    <h2>At a glance</h2>
+    <table class="glance">
+      <tr><td>How long</td><td>Two days, not consecutive if that suits you better</td></tr>
+      <tr><td>Each day</td><td>Roughly 10 to 20 short interactions, a few minutes each, spread through your normal day. There is no block of time to set aside.</td></tr>
+      <tr><td>What you need</td><td>Your own phone (iPhone or Android) and a Google account. Glasses are provided if you do not have a pair.</td></tr>
+      <tr><td>Setup</td><td>About ten minutes, once, with a researcher</td></tr>
+      <tr><td>At the end</td><td>A short interview about how the two days compared</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>What we are studying</h2>
+    <p>Assistants that can see are usually tested by handing someone a list of tasks. That tells you whether the technology works, but not whether anyone would reach for it unprompted.</p>
+    <p>So this study does the opposite. There are no assigned tasks. You go about an ordinary day and use the assistant whenever it seems useful, or not at all if it never does. What we learn from is the difference between the two days: the phone takes a deliberate act to pull out and point, while the glasses are already looking where you are looking. We want to see whether that changes what people bother to ask.</p>
+    <p>Questions you decide not to ask are as interesting to us as the ones you do, so please do not force it.</p>
+  </section>
+
+  <section>
+    <h2>What you would actually do</h2>
+    <div class="day"><b>Day 1</b><span>Set up the app with a researcher, about ten minutes. Then carry on with your day, using the assistant when something comes up.</span></div>
+    <div class="day"><b>Day 2</b><span>The same, in the other mode. If day 1 was the phone, day 2 is the glasses, or the reverse. Which order you get is assigned in advance so the two orders are balanced across participants.</span></div>
+    <div class="day"><b>After</b><span>A short conversation about what differed between the two days, what felt useful, and what got in the way.</span></div>
+    <p class="note">If a day goes badly, the glasses will not connect or you simply forget, tell the researcher rather than trying to make up for it. A failed day is data too, and a day of forced usage is not.</p>
+  </section>
+
+  <section>
+    <h2>Your data, in short</h2>
+    <ul class="plain">
+      <li>Camera video is <strong>not recorded</strong>. It is used live to answer you and then discarded. For some tasks a single still frame is passed to the assistant's action system and discarded after.</li>
+      <li>What you say is transcribed, and those transcripts plus the assistant's actions are kept and read by the research team.</li>
+      <li>You appear in the data under a random id, not your name or email.</li>
+      <li>Connected accounts such as Calendar or Gmail are only touched when you ask, and you can disconnect them at any point.</li>
+    </ul>
+    <p class="note">The longer version is in section 7 below. If any of this is uncomfortable, say so before you start rather than after.</p>
+  </section>
+
+  <hr class="rule">
+  <p class="stage">Once you have agreed, the setup</p>
 
   <section>
     <h2>1. Install the app</h2>
@@ -131,7 +180,7 @@
       <tr><td>"Error opening link" with glasses</td><td>Turn on Developer Mode in the Meta AI app and try again.</td></tr>
       <tr><td>The assistant said it was working on something, then the call ended</td><td>The answer arrives at the start of your next call.</td></tr>
     </table>
-    <p class="note">Contact: the researcher who enrolled you.</p>
+    <p class="note">Questions, or something went wrong: contact the researcher who enrolled you, or Xiaoan Liu at <a href="mailto:xl5040@nyu.edu">xl5040@nyu.edu</a>.</p>
   </section>
 </main>
 </body>

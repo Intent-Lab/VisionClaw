@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "Condition assignment for sessions that ran before the client started",
+    "declaring its capture mode (first observed label: 2026-09-07T11:42Z).",
+    "Source: the study operator's dashboard record, reported 2026-09-07.",
+    "Timestamps are UTC, confirmed by matching one window end to a session",
+    "start to the second and four more to within 25 seconds.",
+    "Participant names are deliberately not stored here; keep the code-to-name",
+    "mapping in the study notes, not in git.",
+    "A window only fills a gap. An observed or client-declared label always",
+    "wins, so a session that recorded what it actually published keeps it,",
+    "and the two never get confused: a session labelled from this file has an",
+    "empty source_observed and source_declared.",
+    "A window with valid=false ran in the assigned mode but the mode did not work, so it is not usable as that condition. Analysis should filter on both source and condition_valid."
+  ],
+  "windows": [
+    {
+      "participant": "P1",
+      "user": "u_c61beea28befc104",
+      "mode": "phone",
+      "from": "2026-09-02T10:28:36Z",
+      "to": "2026-09-03T00:30:00Z"
+    },
+    {
+      "participant": "P1",
+      "user": "u_c61beea28befc104",
+      "mode": "glasses",
+      "from": "2026-09-03T05:15:00Z",
+      "to": "2026-09-03T11:52:59Z",
+      "valid": false,
+      "note": "Attempted glasses day. The glasses never streamed on either handset; the operator confirmed on 2026-09-07 that these are failed attempts. Redone as the 9/4 window."
+    },
+    {
+      "participant": "P1",
+      "user": "u_c61beea28befc104",
+      "mode": "glasses",
+      "from": "2026-09-04T04:33:47Z",
+      "to": "2026-09-04T05:00:00Z"
+    },
+    {
+      "participant": "P2",
+      "user": "u_2ce03b11cda9f1a4",
+      "mode": "glasses",
+      "from": "2026-09-04T09:54:42Z",
+      "to": "2026-09-05T05:49:22Z"
+    },
+    {
+      "participant": "P2",
+      "user": "u_2ce03b11cda9f1a4",
+      "mode": "phone",
+      "from": "2026-09-05T11:56:32Z",
+      "to": "2026-09-06T10:18:53Z"
+    },
+    {
+      "participant": "P3",
+      "user": "u_86f6be3ed0a292fa",
+      "mode": "glasses",
+      "from": "2026-09-07T05:43:44Z",
+      "to": "2026-09-07T23:59:59Z"
+    }
+  ]
+}
