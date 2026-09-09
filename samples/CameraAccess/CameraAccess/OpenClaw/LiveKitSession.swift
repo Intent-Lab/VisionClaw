@@ -110,8 +110,9 @@ final class LiveKitSession: NSObject, ObservableObject {
     // built-in speaker by default -- which overrode the glasses route once video
     // streaming displaced the glasses' A2DP audio. Not preferring the speaker
     // lets iOS route to the glasses' HFP (8kHz, two-way) when they're connected.
-    // Set once, up front -- never a mid-call setPreferredInput, which breaks the
-    // route (the "deafness" bug).
+    // Set up front -- never a mid-call setPreferredInput, which breaks the
+    // route (the "deafness" bug). start() then picks per capture source, since
+    // phone mode has no Bluetooth route to yield to.
     AudioManager.shared.isSpeakerOutputPreferred = false
   }
 
@@ -319,6 +320,11 @@ final class LiveKitSession: NSObject, ObservableObject {
     await stopPreview()
 
     usingGlassesSource = SettingsManager.shared.captureSource == .glasses
+    // Glasses mode declines the speaker so iOS routes to their HFP. Phone mode has
+    // no such route, and declining leaves call audio on the receiver -- the earpiece,
+    // inaudible unless the phone is held to the ear. The speaker preset only adds
+    // .defaultToSpeaker, so wired and Bluetooth headsets still take precedence.
+    AudioManager.shared.isSpeakerOutputPreferred = !usingGlassesSource
 
     do {
       let ticket = try await fetchTicket()
