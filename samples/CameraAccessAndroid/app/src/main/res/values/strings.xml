@@ -6,12 +6,14 @@
     <string name="unregister_button_title" description="Disconnect App">Disconnect</string>
     <string name="stream_button_title" description="Start streaming">Start streaming</string>
     <string name="stop_stream_button_title" description="Stop streaming">Stop streaming</string>
-    <string name="home_tip_video_title" description="Tip title about video capture">Video Capture</string>
-    <string name="home_tip_audio_title" description="Tip title about audio">Open-Ear Audio</string>
-    <string name="home_tip_hands_title" description="Tip title about hands free">Enjoy On-the-Go</string>
-    <string name="home_tip_video" description="Tip about video capture">Record videos directly from your glasses, from your point of view.</string>
-    <string name="home_tip_audio" description="Tip about audio">Hear notifications while keeping your ears open to the world around you.</string>
-    <string name="home_tip_hands" description="Tip about hands free">Stay hands-free while you move through your day. Move freely, stay connected.</string>
+    <string name="home_app_title" description="App name on the home screen">VisionClaw</string>
+    <string name="home_app_tagline" description="App tagline on the home screen">A real-time AI assistant for your smart glasses. It sees what you see, hears what you say, and takes action — all hands-free.</string>
+    <string name="home_tip_video_title" description="Tip title about seeing the scene">See what you see</string>
+    <string name="home_tip_audio_title" description="Tip title about talking to the AI">Just talk</string>
+    <string name="home_tip_hands_title" description="Tip title about taking action">Take action</string>
+    <string name="home_tip_video" description="Tip about seeing the scene">The AI looks through your glasses camera and understands the scene in front of you.</string>
+    <string name="home_tip_audio" description="Tip about talking to the AI">Tap the AI button and speak naturally. Ask questions and get answers out loud.</string>
+    <string name="home_tip_hands" description="Tip about taking action">Send messages, search the web, and manage your lists by voice — powered by OpenClaw.</string>
     <string name="home_redirect_message" description="Redirect message">You\'ll be redirected to the Meta AI app to confirm your connection.</string>
 
     <!-- Stream Screen -->

@@ -45,21 +45,35 @@ struct HomeScreenView: View {
           .aspectRatio(contentMode: .fit)
           .frame(width: 120)
 
+        VStack(spacing: 6) {
+          Text("VisionClaw")
+            .font(.system(size: 32, weight: .bold))
+            .foregroundColor(.black)
+
+          Text("A real-time AI assistant for your smart glasses. It sees what you see, hears what you say, and takes action — all hands-free.")
+            .font(.system(size: 15))
+            .foregroundColor(.gray)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+        }
+        .padding(.bottom, 8)
+
         VStack(spacing: 12) {
           HomeTipItemView(
             resource: .smartGlassesIcon,
-            title: "Video Capture",
-            text: "Record videos directly from your glasses, from your point of view."
+            title: "See what you see",
+            text: "The AI looks through your glasses camera and understands the scene in front of you."
           )
           HomeTipItemView(
             resource: .soundIcon,
-            title: "Open-Ear Audio",
-            text: "Hear notifications while keeping your ears open to the world around you."
+            title: "Just talk",
+            text: "Tap the AI button and speak naturally. Ask questions and get answers out loud."
           )
           HomeTipItemView(
-            resource: .walkingIcon,
-            title: "Enjoy On-the-Go",
-            text: "Stay hands-free while you move through your day. Move freely, stay connected."
+            resource: .tapIcon,
+            title: "Take action",
+            text: "Send messages, search the web, and manage your lists by voice — powered by OpenClaw."
           )
         }
 
