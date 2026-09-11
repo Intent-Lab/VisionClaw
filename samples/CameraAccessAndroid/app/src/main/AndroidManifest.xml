@@ -19,7 +19,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="VisionClaw"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.CameraAccess">
 
         <!-- Without Developer Mode, this key will need to be set with ID from app registered in Wearables Developer Center -->
