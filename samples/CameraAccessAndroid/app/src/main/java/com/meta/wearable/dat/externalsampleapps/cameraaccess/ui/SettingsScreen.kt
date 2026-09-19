@@ -49,6 +49,7 @@ fun SettingsScreen(
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
     var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
+    var liveConversationEnabled by remember { mutableStateOf(SettingsManager.liveConversationEnabled) }
     var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
     var showResetDialog by remember { mutableStateOf(false) }
 
@@ -60,6 +61,7 @@ fun SettingsScreen(
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
         SettingsManager.videoStreamingEnabled = videoStreamingEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
+        SettingsManager.liveConversationEnabled = liveConversationEnabled
         SettingsManager.speechRecognizerProvider = if (whisperSttEnabled) "whisper" else "android"
     }
 
@@ -71,6 +73,7 @@ fun SettingsScreen(
         webrtcSignalingURL = SettingsManager.webrtcSignalingURL
         videoStreamingEnabled = SettingsManager.videoStreamingEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
+        liveConversationEnabled = SettingsManager.liveConversationEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
     }
 
@@ -139,31 +142,51 @@ fun SettingsScreen(
             )
 
             // Speech recognition
-            SectionHeader("Speech Recognition")
+            SectionHeader("음성 대화")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
+                    Text("실시간 대화", style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        if (whisperSttEnabled) "Whisper.cpp STT" else "Android Korean STT",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        if (whisperSttEnabled) {
-                            "Experimental offline mode. Slower, but useful for accuracy comparison."
-                        } else {
-                            "Default stable mode. Faster startup and better for daily testing."
-                        },
+                        "말하는 동안 Gemini가 듣고 답합니다. 답변 중에도 끼어들 수 있고, 종료 버튼을 누를 때까지 대화가 이어집니다.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Switch(
-                    checked = whisperSttEnabled,
-                    onCheckedChange = { whisperSttEnabled = it },
+                    checked = liveConversationEnabled,
+                    onCheckedChange = { liveConversationEnabled = it },
                 )
+            }
+            if (!liveConversationEnabled) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (whisperSttEnabled) "Whisper.cpp STT" else "Android Korean STT",
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            if (whisperSttEnabled) {
+                                "Experimental offline mode. Slower, but useful for accuracy comparison."
+                            } else {
+                                "Default stable mode. Faster startup and better for daily testing."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = whisperSttEnabled,
+                        onCheckedChange = { whisperSttEnabled = it },
+                    )
+                }
             }
 
             // Video

@@ -95,6 +95,10 @@ object SettingsManager {
         get() = prefs.getBoolean("proactiveNotificationsEnabled", true)
         set(value) = prefs.edit().putBoolean("proactiveNotificationsEnabled", value).apply()
 
+    var liveConversationEnabled: Boolean
+        get() = prefs.getBoolean("liveConversationEnabled", true)
+        set(value) = prefs.edit().putBoolean("liveConversationEnabled", value).apply()
+
     var speechRecognizerProvider: String
         get() {
             val stored = prefs.getString("speechRecognizerProvider", null)

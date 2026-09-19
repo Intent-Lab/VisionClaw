@@ -8,6 +8,13 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
 import android.app.Application
 import android.content.Intent
 import android.graphics.Bitmap
@@ -278,6 +285,8 @@ class StreamViewModel(
         }
   }
 
+  private val photoCaptureMutex = Mutex()
+
   fun capturePhoto() {
     if (uiState.value.isCapturing) {
       Log.d(TAG, "Photo capture already in progress, ignoring request")
@@ -297,17 +306,17 @@ class StreamViewModel(
       _uiState.update { it.copy(isCapturing = true) }
 
       viewModelScope.launch {
-        streamSession
-            ?.capturePhoto()
-            ?.onSuccess { photoData ->
-              Log.d(TAG, "Photo capture successful")
-              handlePhotoData(photoData)
-              _uiState.update { it.copy(isCapturing = false) }
-            }
-            ?.onFailure {
-              Log.e(TAG, "Photo capture failed")
-              _uiState.update { it.copy(isCapturing = false) }
-            }
+        try {
+          val result = photoCaptureMutex.withLock {
+            currentCoroutineContext().ensureActive()
+            withContext(NonCancellable) { streamSession?.capturePhoto() }
+          }
+          currentCoroutineContext().ensureActive()
+          result?.onSuccess { photoData -> handlePhotoData(photoData) }
+              ?.onFailure { Log.e(TAG, "Photo capture failed") }
+        } finally {
+          _uiState.update { it.copy(isCapturing = false) }
+        }
       }
     } else {
       Log.w(
@@ -397,10 +406,16 @@ class StreamViewModel(
           // DAT video delivery trails the real scene. Capture only after the spoken request has
           // completed and allow the glasses camera pipeline to catch up before taking the still.
           delay(2000L)
-          val photoData = streamSession?.capturePhoto()?.getOrNull() ?: return null
+          val photoData = photoCaptureMutex.withLock {
+            currentCoroutineContext().ensureActive()
+            withContext(NonCancellable) { streamSession?.capturePhoto()?.getOrNull() }
+          } ?: return null
+          currentCoroutineContext().ensureActive()
           val bitmap = withContext(Dispatchers.Default) { photoDataToBitmap(photoData) }
           _uiState.update { state -> state.copy(capturedPhoto = bitmap) }
           VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "glasses_capture_photo")
+        } catch (e: CancellationException) {
+          throw e
         } catch (e: Exception) {
           Log.w(TAG, "Fresh glasses photo capture failed, falling back to latest frame: ${e.message}")
           null

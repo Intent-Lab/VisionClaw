@@ -67,6 +67,11 @@ fun GeminiOverlay(
             ToolCallStatusView(status = toolStatus)
         }
 
+        if (uiState.taskSummary.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(uiState.taskSummary, color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+        }
+
         // Speaking indicator
         if (uiState.isModelSpeaking) {
             Spacer(modifier = Modifier.height(4.dp))

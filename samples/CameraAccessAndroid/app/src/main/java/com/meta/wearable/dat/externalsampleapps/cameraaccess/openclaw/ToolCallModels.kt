@@ -121,7 +121,7 @@ sealed class OpenClawConnectionState {
 // Type name `ToolDeclarations` is preserved for wiring compatibility.
 
 object ToolDeclarations {
-    fun allDeclarationsJSON(): JSONArray = JSONArray()
+    fun allDeclarationsJSON(liveConversation: Boolean = false): JSONArray = JSONArray()
         .put(captureCurrentView())
         .put(searchContacts())
         .put(callContact())
@@ -135,6 +135,39 @@ object ToolDeclarations {
         .put(universalSearch())
         .put(saveNeed())
         .put(getProposalContext())
+        .apply {
+            put(decl("list_tasks", "앱에 보관된 이전/현재 작업 목록. '아까 하던 것', 진행 상황, 이전 결과를 찾을 때 DB 검색보다 먼저 사용하세요.",
+                JSONObject().put("query", strProp("제목 또는 도구 이름 필터. 모호하면 생략하고 최근 목록 조회")), emptyList()))
+            put(decl("get_task_result", "작업 상태와 보관한 결과를 조회. 완료된 사진은 해당 사진을 대화에 첨부합니다. 진행 중이면 반복 호출하지 말고 기다리거나 다른 요청을 처리하세요.",
+                JSONObject().put("task_id", strProp("앱이 발급한 작업 ID"))
+                    .put("expected_revision", intProp("최근 조회한 작업 버전")), listOf("task_id", "expected_revision")))
+            put(decl("record_task_result", "사진 분석 등 Gemini가 확인한 작업 해석을 로컬 작업 기록에 보관합니다. 실제 도구 성공/실패 상태는 변경하지 않습니다. 나중에 사용자가 이전 결과를 물으면 이 해석을 재사용할 수 있습니다.",
+                JSONObject().put("task_id", strProp("해석한 작업 ID"))
+                    .put("expected_revision", intProp("작업 버전"))
+                    .put("interpretation", strProp("실제로 확인한 분석 결과. 불확실한 부분은 명시")),
+                listOf("task_id", "expected_revision", "interpretation")))
+            put(decl("update_task", "명시적인 사용자 의도에 따라 작업 취소/보류/재개/관심 전환. 단순 새 주제나 추가 요청이면 기존 작업을 취소하지 마세요. 대체 요청은 기존 작업 cancel 후 새 업무 도구를 호출하세요.",
+                JSONObject().put("task_id", strProp("변경할 작업 ID"))
+                    .put("expected_revision", intProp("최근 조회한 작업 버전"))
+                    .put("action", enumProp("작업 처리", listOf("cancel", "hold", "resume", "focus"))),
+                listOf("task_id", "expected_revision", "action")))
+            if (liveConversation) {
+                put(decl(
+                    "resolve_contact_action",
+                    "이미 확인을 요청한 전화/문자를 사용자의 다음 발화에 따라 승인 또는 취소합니다. 명확한 승인 없이 confirm하지 마세요. 최초 전화/문자 요청만으로 승인하지 마세요.",
+                    JSONObject()
+                        .put("action_id", strProp("call_contact 또는 text_contact 결과의 action_id"))
+                        .put("decision", enumProp("사용자의 명시적 선택", listOf("confirm", "cancel"))),
+                    listOf("action_id", "decision"),
+                ))
+                put(decl(
+                    "control_meeting_recording",
+                    "사용자가 회의 녹음을 시작/종료하라고 명시적으로 요청할 때만 호출합니다. 부정, 취소, 가정, 일반 질문에는 호출하지 마세요.",
+                    JSONObject().put("action", enumProp("녹음 동작", listOf("start", "stop"))),
+                    listOf("action"),
+                ))
+            }
+        }
 
     // ── helpers ───────────────────────────────────────────────────
     private fun strProp(desc: String) = JSONObject()
@@ -184,8 +217,15 @@ object ToolDeclarations {
         put("description", description)
         put("parameters", JSONObject().apply {
             put("type", "object")
+            if (name !in setOf("list_tasks", "get_task_result", "update_task", "record_task_result")) {
+                properties.put("task_title", strProp("사용자 목적을 나타내는 짧은 한국어 제목"))
+                properties.put("task_id", strProp("이미 접수한 동일 작업을 다시 조회할 때만 지정. 새 요청이면 생략"))
+                properties.put("expected_revision", intProp("task_id를 지정할 때 해당 작업 버전"))
+                properties.put("source_task_id", strProp("이 작업이 사용하는 완료된 선행 작업 ID. 사진 저장은 확인한 사진 작업 ID 필수"))
+                properties.put("source_revision", intProp("선행 작업의 버전"))
+            }
             put("properties", properties)
-            put("required", JSONArray(required))
+            put("required", JSONArray(required + if (name == "save_life_memory") listOf("source_task_id", "source_revision") else emptyList()))
         })
         put("behavior", "BLOCKING")
     }
@@ -329,7 +369,7 @@ object ToolDeclarations {
 
     private fun saveLifeMemory() = decl(
         name = "save_life_memory",
-        description = "일상 장면을 이미지와 함께 저장. 반드시 사용자가 저장을 승인한 뒤에만 호출하세요. 저장 요청을 받으면 먼저 capture_current_view로 현재 장면을 확인하고, 보이는 내용을 설명한 뒤 '이 내용을 ...로 저장하면 될까요?'라고 확인해야 합니다. 사용자가 '응', '저장해', '맞아'처럼 승인한 경우에만 현재 장면에 대한 AI 해석과 사용자 메모를 함께 저장하세요. 이미지는 앱이 최신 카메라 프레임을 자동 첨부합니다.",
+        description = "일상 장면을 이미지와 함께 저장. 반드시 사용자가 저장을 승인한 뒤에만 호출하세요. 저장 요청을 받으면 먼저 capture_current_view로 현재 장면을 확인하고, 보이는 내용을 설명한 뒤 '이 내용을 ...로 저장하면 될까요?'라고 확인해야 합니다. 사용자가 '응', '저장해', '맞아'처럼 승인한 경우에만 현재 장면에 대한 AI 해석과 사용자 메모를 함께 저장하세요. 이미지는 source_task_id/source_revision으로 지정한, 사용자가 확인한 사진을 사용합니다. 다시 촬영하지 않습니다.",
         properties = JSONObject()
             .put("captured_at", strProp("관측 시각 ISO 8601 UTC"))
             .put("user_note", strProp("사용자가 저장하고 싶다고 말한 핵심 정보"))
@@ -356,7 +396,7 @@ object ToolDeclarations {
 
     private fun universalSearch() = decl(
         name = "universal_search",
-        description = "저장된 사람, 물건, 명함, 문서, 장소, 미팅, 니즈 등 모든 과거 정보를 하나의 기억 검색으로 찾습니다. memories에서 의미/정확 검색 후 연결된 people, person_candidates, meeting, entities, needs를 함께 반환합니다. 전화/문자 대상 찾기처럼 STT가 이름을 틀릴 수 있는 상황에서는 person_candidates를 score 높은 순서로 사용자에게 추천하세요. 모든 과거 정보 질문에는 이 도구를 우선 사용하세요.",
+        description = "저장된 사람, 물건, 명함, 문서, 장소, 미팅, 니즈 등 모든 과거 정보를 하나의 기억 검색으로 찾습니다. memories에서 의미/정확 검색 후 연결된 people, person_candidates, meeting, entities, needs를 함께 반환합니다. 전화/문자 대상 찾기처럼 STT가 이름을 틀릴 수 있는 상황에서는 person_candidates를 score 높은 순서로 사용자에게 추천하세요. DB에 저장한 과거 정보 질문에 사용하세요. 방금 또는 아까 진행한 앱 작업의 결과를 물으면 list_tasks/get_task_result를 먼저 사용하세요.",
         properties = JSONObject()
             .put("query", strProp("사용자의 자연어 검색 질문 전체"))
             .put("top_k", intProp("반환할 기억 개수. 기본 5"))

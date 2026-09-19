@@ -7,12 +7,16 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 // in a follow-up if you want.
 
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.awaitTaskResponse
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -88,10 +92,23 @@ class OpenClawBridge {
     }
 
     // ─── Typed dispatch — called by ToolCallRouter ───────────────
-    suspend fun dispatch(toolName: String, args: Map<String, Any?>): ToolResult =
+    suspend fun dispatch(
+        toolName: String,
+        args: Map<String, Any?>,
+        visualFrame: VisualMemoryFrameStore.VisualFrame? = null,
+        beforeWrite: suspend () -> Unit = {},
+    ): ToolResult =
         withContext(Dispatchers.IO) {
             _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
             val result: ToolResult = try {
+                currentCoroutineContext().ensureActive()
+                // Mark before dispatch, not when the tool is merely queued.
+                if (toolName in setOf("save_person", "save_meeting", "save_memory", "save_life_memory", "save_need")) {
+                    if (toolName == "save_life_memory" && visualFrame == null) {
+                        return@withContext ToolResult.Failure("저장할 사진이 없습니다. 먼저 사진 작업 결과를 확인해주세요.")
+                    }
+                    beforeWrite()
+                }
                 when (toolName) {
                     "save_person" -> post(
                         "/people",
@@ -127,11 +144,9 @@ class OpenClawBridge {
                             "related_person_ids",
                             "source",
                         )
-                        val capturedAtKst = nowKstIso()
-                        val visualFrame = VisualMemoryFrameStore.captureFreshVisual()
-                            ?: return@withContext ToolResult.Failure(
-                                "No fresh camera image is available. Ask the user to hold still for a moment and try saving again."
-                            )
+                        val visualFrame = requireNotNull(visualFrame)
+                        val capturedAtKst = java.time.Instant.ofEpochMilli(visualFrame.capturedAtMs)
+                            .atZone(ZoneId.of("Asia/Seoul")).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
                         body.put("captured_at", capturedAtKst)
                         body.put("image_base64", visualFrame.base64)
                         body.put("image_mime_type", "image/jpeg")
@@ -140,7 +155,8 @@ class OpenClawBridge {
                             JSONObject()
                                 .put("captured_at_kst", capturedAtKst)
                                 .put("frame_captured_at_ms", visualFrame.capturedAtMs)
-                                .put("frame_age_ms_at_save", visualFrame.ageMs)
+                                .put("frame_age_ms_at_save", (System.currentTimeMillis() - visualFrame.capturedAtMs).coerceAtLeast(0))
+                                .put("saved_at_kst", nowKstIso())
                                 .put("visual_source", visualFrame.source)
                                 .put("visual_width", visualFrame.width)
                                 .put("visual_height", visualFrame.height)
@@ -168,6 +184,8 @@ class OpenClawBridge {
                     }
                     else -> ToolResult.Failure("Unknown tool: $toolName")
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Tool $toolName error: ${e.message}")
                 ToolResult.Failure(e.message ?: "Unknown error")
@@ -199,37 +217,30 @@ class OpenClawBridge {
         return o
     }
 
-    private fun post(path: String, body: JSONObject): ToolResult {
+    private suspend fun post(path: String, body: JSONObject): ToolResult {
         val request = Request.Builder()
             .url("${baseUrl()}$path")
             .post(body.toString().toRequestBody(jsonMediaType))
             .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
             .addHeader("Content-Type", "application/json")
             .build()
-        return execute(request, "POST $path", body)
+        return execute(request, "POST $path")
     }
 
-    private fun get(path: String): ToolResult {
+    private suspend fun get(path: String): ToolResult {
         val request = Request.Builder()
             .url("${baseUrl()}$path")
             .get()
             .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
             .build()
-        return execute(request, "GET $path", null)
+        return execute(request, "GET $path")
     }
 
-    private fun execute(request: Request, label: String, requestBody: JSONObject?): ToolResult {
-        val response = client.newCall(request).execute()
-        val responseBody = response.body?.string() ?: ""
-        val statusCode = response.code
-        response.close()
-        if (requestBody != null) Log.d(TAG, "$label body=${requestBody.toString().take(200)}")
-        Log.d(TAG, "$label -> HTTP $statusCode resp=${responseBody.take(200)}")
-        return if (statusCode in 200..299) {
-            ToolResult.Success(responseBody)
-        } else {
-            ToolResult.Failure("HTTP $statusCode: ${responseBody.take(200)}")
-        }
+    private suspend fun execute(request: Request, label: String): ToolResult {
+        val response = client.newCall(request).awaitTaskResponse()
+        Log.d(TAG, "$label -> HTTP ${response.code}")
+        return if (response.code in 200..299) ToolResult.Success(response.body)
+        else ToolResult.Failure("HTTP ${response.code}: ${response.body.take(200)}")
     }
 
     // Keep these symbols referenced so unused-import lints stay quiet if

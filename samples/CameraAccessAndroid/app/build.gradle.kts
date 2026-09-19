@@ -72,6 +72,8 @@ android {
 }
 
 dependencies {
+  testImplementation("junit:junit:4.13.2")
+  testImplementation("org.json:json:20240303")
   implementation(libs.androidx.activity.compose)
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
