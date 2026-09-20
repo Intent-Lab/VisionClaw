@@ -72,6 +72,7 @@ struct ConnectedAppsView: View {
                   Label("Connected", systemImage: "checkmark.circle.fill")
                     .labelStyle(.iconOnly)
                     .foregroundStyle(.green)
+                    .accessibilityLabel("Connected")
                 } else {
                   Button("Connect") { connect(app) }
                     .buttonStyle(.borderless)

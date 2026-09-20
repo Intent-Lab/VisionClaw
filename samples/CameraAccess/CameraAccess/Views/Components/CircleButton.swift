@@ -17,6 +17,9 @@ import SwiftUI
 struct CircleButton: View {
   let icon: String
   let text: String?
+  /// VoiceOver name for the icon-only variant. Without it the button is read
+  /// as its SF Symbol, so callers that pass `text: nil` must pass a label.
+  var label: String? = nil
   let action: () -> Void
 
   var body: some View {
@@ -37,5 +40,6 @@ struct CircleButton: View {
     .frame(width: 56, height: 56)
     .background(.white)
     .clipShape(Circle())
+    .a11yLabel(label ?? text)
   }
 }

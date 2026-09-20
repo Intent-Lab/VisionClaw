@@ -35,7 +35,9 @@ struct DebugMenuView: View {
             .background(.secondary)
             .clipShape(Circle())
             .shadow(radius: 4)
-        }.accessibilityIdentifier("debug_menu_button")
+        }
+        .accessibilityLabel("Debug menu")
+        .accessibilityIdentifier("debug_menu_button")
         Spacer()
       }
       .padding(.trailing)

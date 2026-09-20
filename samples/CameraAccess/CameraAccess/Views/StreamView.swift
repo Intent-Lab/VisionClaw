@@ -39,6 +39,7 @@ struct StreamView: View {
               .padding(10)
               .background(.black.opacity(0.35), in: Circle())
           }
+          .accessibilityLabel("Settings")
           .padding(.trailing, 16)
         }
         Spacer()
@@ -54,6 +55,7 @@ struct StreamView: View {
             .aspectRatio(contentMode: .fill)
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
+            .accessibilityHidden(true)
         }
         .edgesIgnoringSafeArea(.all)
       } else {
@@ -115,9 +117,10 @@ struct ControlsView: View {
 
       // Photo button (glasses mode only -- DAT SDK capture)
       if viewModel.streamingMode == .glasses {
-        CircleButton(icon: "camera.fill", text: nil) {
+        CircleButton(icon: "camera.fill", text: nil, label: "Capture photo") {
           viewModel.capturePhoto()
         }
+        .accessibilityHint("Takes a photo through your glasses")
       }
 
     }

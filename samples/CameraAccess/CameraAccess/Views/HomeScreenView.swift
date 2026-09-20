@@ -36,6 +36,7 @@ struct HomeScreenView: View {
               .foregroundColor(.black)
               .frame(width: 24, height: 24)
           }
+          .accessibilityLabel("Settings")
         }
 
         Spacer()
@@ -44,6 +45,7 @@ struct HomeScreenView: View {
           .resizable()
           .aspectRatio(contentMode: .fit)
           .frame(width: 120)
+          .accessibilityHidden(true)
 
         VStack(spacing: 12) {
           HomeTipItemView(
@@ -114,6 +116,7 @@ struct HomeTipItemView: View {
         .frame(width: 24)
         .padding(.leading, 4)
         .padding(.top, 4)
+        .accessibilityHidden(true)
 
       VStack(alignment: .leading, spacing: 6) {
         Text(title)

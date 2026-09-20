@@ -87,7 +87,8 @@ fun HomeScreen(
       ) {
         Icon(
             painter = painterResource(id = R.drawable.camera_access_icon),
-            contentDescription = stringResource(R.string.camera_access_icon_description),
+            // Decorative branding: the tips below carry the screen's meaning.
+            contentDescription = null,
             tint = AppColor.DeepBlue,
             modifier = Modifier.size(80.dp * LocalDensity.current.density),
         )
@@ -153,7 +154,8 @@ private fun TipItem(
   Row(modifier = modifier.fillMaxWidth()) {
     Icon(
         painter = painterResource(id = iconResId),
-        contentDescription = "Tip icon",
+        // Decorative: the title and body beside it carry the meaning.
+        contentDescription = null,
         modifier = Modifier.padding(start = 4.dp, top = 4.dp).width(24.dp),
     )
     Spacer(modifier = Modifier.width(12.dp))

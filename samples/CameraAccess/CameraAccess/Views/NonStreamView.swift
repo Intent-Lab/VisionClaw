@@ -45,6 +45,7 @@ struct NonStreamView: View {
               .foregroundColor(.white)
               .frame(width: 24, height: 24)
           }
+          .accessibilityLabel("Settings")
         }
 
         Spacer()
@@ -56,6 +57,7 @@ struct NonStreamView: View {
             .foregroundColor(.white)
             .aspectRatio(contentMode: .fit)
             .frame(width: 120)
+            .accessibilityHidden(true)
 
           Text("Stream Your Glasses Camera")
             .font(.system(size: 20, weight: .semibold))
@@ -76,6 +78,7 @@ struct NonStreamView: View {
             .aspectRatio(contentMode: .fit)
             .foregroundColor(.white.opacity(0.7))
             .frame(width: 16, height: 16)
+            .accessibilityHidden(true)
 
           Text("Waiting for an active device")
             .font(.system(size: 14))
@@ -199,6 +202,7 @@ struct TipItemView: View {
         .frame(width: 24)
         .padding(.leading, 4)
         .padding(.top, 4)
+        .accessibilityHidden(true)
 
       Text(text)
         .font(.system(size: 15))
