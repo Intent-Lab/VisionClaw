@@ -158,13 +158,19 @@ fun LiveKitStreamScreen(
     }
 
     // The glasses placeholder is the app's only voice for a dropped link, so
-    // read it out -- otherwise losing the stream is silent. Same null-previous
-    // guard as the haptics: remounting already in the state must not re-speak.
+    // read it out -- otherwise losing the stream is silent. Remounting already
+    // in the state must not re-speak, but unlike the haptics above a null
+    // previous value cannot stand in for "first composition" here: null IS the
+    // healthy state, and healthy -> reconnecting is exactly the transition to
+    // announce. Track the first pass explicitly instead.
     var previousGlassesIssue by remember { mutableStateOf<GlassesIssue?>(null) }
+    var seenGlassesIssue by remember { mutableStateOf(false) }
     LaunchedEffect(glassesIssue) {
         val previous = previousGlassesIssue
+        val first = !seenGlassesIssue
         previousGlassesIssue = glassesIssue
-        if (previous == null || previous == glassesIssue) return@LaunchedEffect
+        seenGlassesIssue = true
+        if (first || previous == glassesIssue) return@LaunchedEffect
         if (glassesIssue == GlassesIssue.Reconnecting) {
             view.announceForAccessibility(
                 "Reconnecting to glasses. Make sure your glasses are on and the hinges are open.",
