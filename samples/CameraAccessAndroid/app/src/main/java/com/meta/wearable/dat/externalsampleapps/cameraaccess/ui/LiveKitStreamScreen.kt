@@ -66,7 +66,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -131,8 +133,15 @@ fun LiveKitStreamScreen(
         previousState = uiState.state
         if (previous == null || previous == uiState.state) return@LaunchedEffect
         when (uiState.state) {
-            SessionState.Connected -> view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-            is SessionState.Failed -> view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+            SessionState.Connected -> {
+                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                view.announceForAccessibility("Session started")
+            }
+            is SessionState.Failed -> {
+                view.performHapticFeedback(HapticFeedbackConstants.REJECT)
+                view.announceForAccessibility("Connection lost")
+            }
+            SessionState.Disconnected -> view.announceForAccessibility("Session ended")
             else -> {}
         }
     }
@@ -145,6 +154,22 @@ fun LiveKitStreamScreen(
         view.performHapticFeedback(
             if (isFrozen) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.CLOCK_TICK,
         )
+        view.announceForAccessibility(if (isFrozen) "Frame frozen" else "Returned to live")
+    }
+
+    // The glasses placeholder is the app's only voice for a dropped link, so
+    // read it out -- otherwise losing the stream is silent. Same null-previous
+    // guard as the haptics: remounting already in the state must not re-speak.
+    var previousGlassesIssue by remember { mutableStateOf<GlassesIssue?>(null) }
+    LaunchedEffect(glassesIssue) {
+        val previous = previousGlassesIssue
+        previousGlassesIssue = glassesIssue
+        if (previous == null || previous == glassesIssue) return@LaunchedEffect
+        if (glassesIssue == GlassesIssue.Reconnecting) {
+            view.announceForAccessibility(
+                "Reconnecting to glasses. Make sure your glasses are on and the hinges are open.",
+            )
+        }
     }
 
     Box(
@@ -799,7 +824,13 @@ private fun FreezeButton(
             .size(68.dp)
             .border(4.dp, color, CircleShape)
             .clip(CircleShape)
-            .clickable { onClick() },
+            .clickable { onClick() }
+            // The shutter is drawn from shapes, so without this it is a
+            // clickable box that announces nothing.
+            .semantics {
+                contentDescription = if (isFrozen) "Return to live" else "Freeze frame"
+                role = Role.Button
+            },
         contentAlignment = Alignment.Center,
     ) {
         Box(

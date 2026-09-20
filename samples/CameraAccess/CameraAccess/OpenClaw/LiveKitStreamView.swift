@@ -35,6 +35,8 @@ struct LiveKitStreamView: View {
               .foregroundStyle(captureSourceRaw == source.rawValue ? .white : .white.opacity(0.4))
               .frame(width: itemWidth, height: itemHeight)
           }
+          .accessibilityLabel(source == .glasses ? "Glasses camera" : "Phone camera")
+          .accessibilityAddTraits(captureSourceRaw == source.rawValue ? [.isSelected] : [])
           .buttonStyle(.plain)
         }
       }
@@ -127,6 +129,7 @@ struct LiveKitStreamView: View {
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.9), lineWidth: 2))
             .shadow(radius: 18)
+            .accessibilityLabel("Frozen frame")
           Text("Tap anywhere to return to live")
             .font(.subheadline)
             .foregroundStyle(.white.opacity(0.85))
@@ -192,6 +195,7 @@ struct LiveKitStreamView: View {
               .padding(10)
               .background(.black.opacity(0.35), in: Circle())
           }
+          .accessibilityLabel("Settings")
           .padding(.trailing, 16)
         }
         Spacer()
@@ -240,6 +244,37 @@ struct LiveKitStreamView: View {
     .sensoryFeedback(trigger: session.frozenFrame != nil) { _, pinned in
       pinned ? .impact(weight: .medium) : .impact(weight: .light)
     }
+    // The call screen's state lives in centered text and icon-only buttons,
+    // none of which VoiceOver reads out when they change; announce the
+    // transitions a user needs to hear. Connect and freeze already buzz, but
+    // haptics are opt-in, so speech is the only signal that always lands.
+    .onChange(of: session.state) { newState in
+      switch newState {
+      case .connected:
+        A11y.announce("Session started")
+      case .disconnected:
+        A11y.announce("Session ended")
+      case .failed:
+        A11y.announce("Connection lost", assertive: true)
+      case .connecting:
+        break
+      }
+    }
+    .onChange(of: session.agentStatus) { status in
+      switch status {
+      case .waiting:
+        A11y.announce("Waiting for agent")
+      case .starting:
+        A11y.announce("Agent starting")
+      case .left:
+        A11y.announce("Agent left the call", assertive: true)
+      default:
+        break
+      }
+    }
+    .onChange(of: session.frozenFrame != nil) { isFrozen in
+      A11y.announce(isFrozen ? "Frame frozen" : "Returned to live")
+    }
     .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
     .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
   }
@@ -266,6 +301,7 @@ struct AgentCardView: View {
             .foregroundStyle(.white.opacity(0.6))
             .padding(6)
         }
+        .accessibilityLabel("Dismiss")
       }
       if card.type == "live", let urlString = card.url, let url = URL(string: urlString) {
         // Live browser view (Browser Use): the CUA's screen, mid-card, while the
@@ -293,6 +329,7 @@ struct AgentCardView: View {
               ProgressView().tint(.white)
             }
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            .accessibilityHidden(true)
           }
           ForEach(Array(card.facts.enumerated()), id: \.offset) { _, fact in
             HStack(alignment: .firstTextBaseline) {
@@ -406,6 +443,8 @@ struct AgentStatusPill: View {
     .padding(.horizontal, 12)
     .padding(.vertical, 7)
     .background(.black.opacity(0.45), in: Capsule())
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(Text(label))
   }
 }
 
@@ -437,6 +476,7 @@ struct LiveKitCallButton: View {
         }
       }
     }
+    .accessibilityLabel(session.isActive ? "End call" : "Start call")
     .disabled(session.state == .connecting)
   }
 }
@@ -458,5 +498,6 @@ struct FreezeButton: View {
           .frame(width: 54, height: 54)
       }
     }
+    .accessibilityLabel(session.frozenFrame != nil ? "Return to live" : "Freeze frame")
   }
 }

@@ -62,6 +62,7 @@ struct PhotoPreviewView: View {
         .frame(maxWidth: geometry.size.width, maxHeight: geometry.size.height * 0.6)
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+        .accessibilityLabel("Captured photo")
         .gesture(
           DragGesture()
             .onChanged { value in

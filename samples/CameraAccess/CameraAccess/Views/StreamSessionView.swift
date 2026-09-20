@@ -137,6 +137,14 @@ struct StreamSessionView: View {
         }
       }
     }
+    .onChange(of: viewModel.glassesIssue) { issue in
+      // The placeholder is the app's only voice for a dropped glasses link, so
+      // read it out -- otherwise losing the stream is silent.
+      guard captureSource == .glasses,
+            issue == StreamSessionViewModel.GlassesIssue.reconnecting else { return }
+      let placeholder = glassesPlaceholder
+      A11y.announce("\(placeholder.title). \(placeholder.caption)")
+    }
     .alert("Error", isPresented: $viewModel.showError) {
       Button("OK") { viewModel.dismissError() }
     } message: {
