@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2" project="cameraaccess">
 
+    <!-- DAT SDK: APPLICATION_ID must be a String; inline integer literals are parsed as Integer by Android -->
+    <string name="mwdat_application_id" translatable="false">0</string>
+
     <!-- Home Screen -->
     <string name="register_button_title" description="Connect App">Connect my glasses</string>
     <string name="unregister_button_title" description="Disconnect App">Disconnect</string>
