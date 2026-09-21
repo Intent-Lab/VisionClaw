@@ -356,7 +356,30 @@ For full details, see [`samples/CameraAccess/CameraAccess/WebRTC/README.md`](sam
 
 **OpenClaw opens duplicate browser tabs** -- This is a known upstream issue in OpenClaw's CDP (Chrome DevTools Protocol) connection management ([#13851](https://github.com/nichochar/openclaw/issues/13851), [#12317](https://github.com/nichochar/openclaw/issues/12317)). Using `profile: "openclaw"` (managed Chrome) instead of the default extension relay may improve stability.
 
+**OpenClaw tool calls work at home but fail on mobile data** -- The `.local` Bonjour hostname only resolves on the same Wi-Fi network. To reach OpenClaw from anywhere:
+- **Tailscale (recommended):** Install [Tailscale](https://tailscale.com) on your Mac and phone, then replace the gateway hostname in the in-app Settings (or `Secrets.swift` / `Secrets.kt`) with your Mac's Tailscale IP (e.g. `http://100.x.x.x`).
+- **Public bind:** Set `bind: "public"` in `openclaw.json` and use your Mac's public IP -- only do this with a strong auth token.
+
+Both iOS and Android have an in-app Settings screen where you can change the gateway host at runtime without editing source code.
+
 ### iOS-specific
+
+**Xcode build stalls at 70/82 (or any step near the end)** -- This is almost always an SPM package resolution issue. Fix:
+1. In Xcode: **File > Packages > Reset Package Caches**
+2. If that does not help: close Xcode, delete `~/Library/Developer/Xcode/DerivedData`, then reopen.
+3. Make sure you have a stable internet connection -- SPM fetches the DAT SDK from GitHub during the first build.
+
+**"XPC connection invalid" when connecting glasses** -- The DAT SDK communicates with the Meta AI companion app via XPC. This error means the companion app rejected the connection. Check:
+1. Developer Mode is enabled in the Meta AI app (Settings > App Info > tap version 5 times)
+2. The VisionClaw app is trusted: after the first registration attempt, the Meta AI app may show a permission prompt -- accept it.
+3. The Meta AI app is up to date on the App Store.
+4. Try force-quitting the Meta AI app and reconnecting.
+
+**"Permission error" when returning from the Meta AI app** -- The glasses association was not granted. This can happen when:
+- Developer Mode is not yet enabled (see above).
+- The app has not been granted the association in the Meta AI app -- tap **Allow** on any prompt that appears after tapping "Connect my glasses".
+- On a fresh install, wait a few seconds after the Meta AI app opens before tapping anything.
+
 
 **"Gemini API key not configured"** -- Add your API key in Secrets.swift or in the in-app Settings.
 
