@@ -12,6 +12,10 @@ struct LiveKitStreamView: View {
   /// app's own voice for glasses-state conditions (never alert dialogs).
   var glassesPlaceholder: (title: String, caption: String)? = nil
   @State private var showSettings = false
+  // Set once a dropped connection has lasted long enough to be worth telling
+  // the user about, so its recovery is announced too -- and a sub-second blip
+  // that LiveKit heals on its own stays silent.
+  @State private var reconnectAnnounced = false
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
 
   // Quick glasses/phone source switch on the call screen. Flips the shared
@@ -248,14 +252,19 @@ struct LiveKitStreamView: View {
     // none of which VoiceOver reads out when they change; announce the
     // transitions a user needs to hear. Connect and freeze already buzz, but
     // haptics are opt-in, so speech is the only signal that always lands.
+    // Assistive mode adds a short sound to the same transitions (Earcons plays
+    // nothing when it is off), for users who do not run VoiceOver at all.
     .onChange(of: session.state) { newState in
       switch newState {
       case .connected:
         A11y.announce("Session started")
+        Earcons.play(.connected)
       case .disconnected:
         A11y.announce("Session ended")
+        Earcons.play(.ended)
       case .failed:
         A11y.announce("Connection lost", assertive: true)
+        Earcons.play(.lost)
       case .connecting:
         break
       }
@@ -268,12 +277,29 @@ struct LiveKitStreamView: View {
         A11y.announce("Agent starting")
       case .left:
         A11y.announce("Agent left the call", assertive: true)
+        Earcons.play(.lost)
       default:
         break
       }
     }
     .onChange(of: session.frozenFrame != nil) { isFrozen in
       A11y.announce(isFrozen ? "Frame frozen" : "Returned to live")
+      if isFrozen { Earcons.play(.captured) }
+    }
+    .task(id: session.isReconnecting) {
+      if session.isReconnecting {
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        guard !Task.isCancelled, session.isReconnecting else { return }
+        reconnectAnnounced = true
+        A11y.announce("Connection lost, reconnecting", assertive: true)
+        Earcons.play(.lost)
+      } else if reconnectAnnounced {
+        reconnectAnnounced = false
+        // Recovered, not ended: a failed reconnect surfaces as .failed above.
+        guard session.state == .connected else { return }
+        A11y.announce("Reconnected")
+        Earcons.play(.reconnected)
+      }
     }
     .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
     .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }

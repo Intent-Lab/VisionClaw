@@ -34,6 +34,15 @@ final class LiveKitSession: NSObject, ObservableObject {
   @Published private(set) var state: State = .disconnected
   @Published private(set) var agentStatus: AgentStatus = .none
 
+  /// True while LiveKit is re-establishing a dropped connection mid-call. The
+  /// call is still "connected" from the user's point of view, but nothing they
+  /// say reaches the agent until this clears.
+  @Published private(set) var isReconnecting = false
+
+  /// Set for the duration of stop(), so the room's own disconnect callback for
+  /// a hang-up we asked for is not mistaken for a dropped connection.
+  private var isStopping = false
+
   /// True when this call's video comes from the glasses (DAT bridge) instead
   /// of the phone camera. Decided at start() from the persisted capture source.
   @Published private(set) var usingGlassesSource = false
@@ -511,15 +520,21 @@ final class LiveKitSession: NSObject, ObservableObject {
     }
   }
 
-  func stop() async {
+  /// Hangs up. `failure` ends the call in `.failed` instead of `.disconnected`,
+  /// for a room that dropped under us rather than one the user left, so the
+  /// screen, announcements and cues report a lost connection, not a hang-up.
+  func stop(failure: String? = nil) async {
+    isStopping = true
+    defer { isStopping = false }
     // Invalidate any start() still waiting on the network so it cannot publish
     // into, or resurrect, the session we are tearing down here.
     startGeneration &+= 1
     await room.disconnect()
     localVideoTrack = nil
     pendingGlassesTrack = nil
-    state = .disconnected
+    state = failure.map { .failed($0) } ?? .disconnected
     agentStatus = .none
+    isReconnecting = false
     resetZoom()
     frozenFrame = nil
     caption = nil
@@ -647,10 +662,13 @@ final class LiveKitSession: NSObject, ObservableObject {
     // even when no video track is ever published. Normalised to the wire
     // vocabulary the gateway accepts: iOS stores the phone case as "iphone"
     // while Android stores "phone", and the study wants one label across both.
-    request.httpBody = try JSONSerialization.data(withJSONObject: [
+    var body: [String: String] = [
       "engine": SettingsManager.shared.intelligenceEngine.rawValue,
       "source": SettingsManager.shared.captureSource == .glasses ? "glasses" : "phone",
-    ])
+    ]
+    // Only the opt-in travels; the default profile is the key's absence.
+    if SettingsManager.shared.assistiveMode { body["profile"] = "assistive" }
+    request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -692,6 +710,27 @@ extension LiveKitSession: RoomDelegate {
   ) {
     guard participant.isAgent else { return }
     Task { @MainActor in self.refreshAgentStatus() }
+  }
+
+  // Without these, a room that dropped mid-call left the screen saying
+  // "connected" while nothing the user said reached the agent -- a dead call
+  // that is invisible to anyone who cannot see the video freeze.
+  nonisolated func room(_ room: Room, didStartReconnectWithMode reconnectMode: ReconnectMode) {
+    Task { @MainActor in
+      if self.state == .connected { self.isReconnecting = true }
+    }
+  }
+
+  nonisolated func room(_ room: Room, didCompleteReconnectWithMode reconnectMode: ReconnectMode) {
+    Task { @MainActor in self.isReconnecting = false }
+  }
+
+  nonisolated func room(_ room: Room, didDisconnectWithError error: LiveKitError?) {
+    Task { @MainActor in
+      guard !self.isStopping, self.state == .connected else { return }
+      NSLog("[LiveKit] room dropped: %@", error?.localizedDescription ?? "no error")
+      await self.stop(failure: "Connection lost")
+    }
   }
 }
 

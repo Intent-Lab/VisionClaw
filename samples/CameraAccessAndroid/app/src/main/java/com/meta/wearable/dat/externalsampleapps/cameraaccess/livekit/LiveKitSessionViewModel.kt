@@ -31,6 +31,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsMa
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesInit
 import io.livekit.android.LiveKit
+import io.livekit.android.events.DisconnectReason
 import io.livekit.android.events.RoomEvent
 import io.livekit.android.events.collect
 import io.livekit.android.room.Room
@@ -151,6 +152,9 @@ data class LiveKitUiState(
     val videoEstablishing: Boolean = false,
     val caption: Caption? = null,
     val card: UiCard? = null,
+    // LiveKit is re-establishing a dropped connection mid-call: still
+    // "connected" to the user, but nothing they say reaches the agent.
+    val isReconnecting: Boolean = false,
 ) {
     val isActive: Boolean
         get() = state == SessionState.Connected || state == SessionState.Connecting
@@ -250,6 +254,27 @@ class LiveKitSessionViewModel(
                     is RoomEvent.ParticipantAttributesChanged -> {
                         if (event.participant.kind == Participant.Kind.AGENT) {
                             refreshAgentStatus()
+                        }
+                    }
+                    // Without these, a room that dropped mid-call left the
+                    // screen saying "connected" while nothing the user said
+                    // reached the agent -- a dead call that is invisible to
+                    // anyone who cannot see the video freeze.
+                    is RoomEvent.Reconnecting -> {
+                        if (_uiState.value.state == SessionState.Connected) {
+                            _uiState.update { it.copy(isReconnecting = true) }
+                        }
+                    }
+                    is RoomEvent.Reconnected -> _uiState.update { it.copy(isReconnecting = false) }
+                    is RoomEvent.Disconnected -> {
+                        // A hang-up we asked for has already moved the state
+                        // off Connected by the time this arrives.
+                        if (event.reason != DisconnectReason.CLIENT_INITIATED &&
+                            _uiState.value.state == SessionState.Connected
+                        ) {
+                            Log.w(TAG, "room dropped: ${event.reason} ${event.error?.message}")
+                            disconnectInternal(failure = "Connection lost")
+                            startPreview()
                         }
                     }
                     else -> {}
@@ -470,6 +495,8 @@ class LiveKitSessionViewModel(
     // The engine the current call was dialed with, so a settings change can be
     // detected and applied by redialing.
     private var connectedEngine: IntelligenceEngine? = null
+    // Likewise the assistive prompt profile, which is also fixed at dial time.
+    private var connectedAssistive: Boolean? = null
     private var autoStarted = false
 
     fun start() {
@@ -509,14 +536,16 @@ class LiveKitSessionViewModel(
     }
 
     /**
-     * The brain is chosen at session start (room-token metadata), so a live
-     * call redials itself to apply an engine switch -- the user flips a toggle
-     * in Settings and seconds later the other model picks up.
+     * The brain and the prompt profile are chosen at session start (room-token
+     * metadata), so a live call redials itself to apply an engine or assistive
+     * mode switch -- the user flips a toggle in Settings and seconds later the
+     * change is live.
      */
     fun redialIfEngineChanged() {
         val selected = SettingsManager.intelligenceEngine
         if (_uiState.value.state != SessionState.Connected) return
-        if (connectedEngine == null || connectedEngine == selected) return
+        if (connectedEngine == null) return
+        if (connectedEngine == selected && connectedAssistive == SettingsManager.assistiveMode) return
         viewModelScope.launch {
             disconnectInternal()
             connectInternal()
@@ -533,9 +562,11 @@ class LiveKitSessionViewModel(
         stopPreview()
         try {
             val engine = SettingsManager.intelligenceEngine
-            val ticket = fetchTicket(engine)
+            val assistive = SettingsManager.assistiveMode
+            val ticket = fetchTicket(engine, assistive)
             room.connect(ticket.url, ticket.token)
             connectedEngine = engine
+            connectedAssistive = assistive
             room.localParticipant.setMicrophoneEnabled(true)
             // Video failure (emulator, permission denied, glasses hiccup)
             // degrades to voice-only rather than killing the call.
@@ -601,17 +632,24 @@ class LiveKitSessionViewModel(
         }
     }
 
-    private fun disconnectInternal() {
+    /**
+     * [failure] ends the call as Failed instead of Disconnected, for a room
+     * that dropped under us rather than one the user left, so the screen,
+     * announcements and cues report a lost connection, not a hang-up.
+     */
+    private fun disconnectInternal(failure: String? = null) {
         room.disconnect()
         attachGrabber(null)
         connectedEngine = null
+        connectedAssistive = null
         captionClearJob?.cancel()
         videoEstablishingJob?.cancel()
         dismissedCardUuid = null
         _uiState.update {
             it.copy(
-                state = SessionState.Disconnected,
+                state = if (failure != null) SessionState.Failed(failure) else SessionState.Disconnected,
                 agentStatus = AgentStatus.NONE,
+                isReconnecting = false,
                 localVideoTrack = null,
                 frozenFrame = null,
                 zoomFactor = 1f,
@@ -843,13 +881,15 @@ class LiveKitSessionViewModel(
      * room JWT. The engine choice (which realtime model answers) rides along
      * and comes back inside the token as participant metadata for the worker.
      */
-    private suspend fun fetchTicket(engine: IntelligenceEngine): Ticket = withContext(Dispatchers.IO) {
+    private suspend fun fetchTicket(engine: IntelligenceEngine, assistive: Boolean): Ticket = withContext(Dispatchers.IO) {
         val baseUrl = SettingsManager.gatewayBaseUrl.trimEnd('/')
         // Capture mode travels with the ticket so the study can label a session
         // even when no video track is ever published (see the iOS counterpart).
         val body = JSONObject()
             .put("engine", engine.value)
             .put("source", if (SettingsManager.captureSource == CaptureSource.GLASSES) "glasses" else "phone")
+            // Only the opt-in travels; the default profile is the key's absence.
+            .apply { if (assistive) put("profile", "assistive") }
             .toString()
             .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()

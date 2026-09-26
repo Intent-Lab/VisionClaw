@@ -449,10 +449,18 @@ app.post("/livekit-token", async (req, res) => {
   // unknown, never as a confident wrong condition.
   const rawSource = req.body?.source;
   const source = rawSource === "glasses" || rawSource === "phone" ? rawSource : undefined;
+  // Assistive mode (blind / low-vision users) is opt-in from Settings and
+  // switches the worker to a speech-first prompt. Only the opt-in is carried;
+  // the default profile is the absence of the key, so default tokens stay
+  // byte-identical to what they were before assistive mode existed.
+  const assistive = req.body?.profile === "assistive";
+  const metadata: Record<string, string> = { engine };
+  if (source) metadata.source = source;
+  if (assistive) metadata.profile = "assistive";
   const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
     identity: userId,
     ttl: "15m",
-    metadata: JSON.stringify(source ? { engine, source } : { engine }),
+    metadata: JSON.stringify(metadata),
   });
   // One room per call, not per user: agent dispatch fires on room creation,
   // so a redial into a still-draining room from the previous call would get

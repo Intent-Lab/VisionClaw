@@ -26,6 +26,7 @@ struct StreamSessionView: View {
   @StateObject private var liveKit = LiveKitSession()
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
   @AppStorage(IntelligenceEngine.defaultsKey) private var intelligenceRaw = IntelligenceEngine.openai.rawValue
+  @AppStorage(SettingsManager.assistiveModeKey) private var assistiveMode = false
   @State private var glassesAutoStarted = false
 
   private var captureSource: CaptureSource {
@@ -124,6 +125,34 @@ struct StreamSessionView: View {
           await liveKit.stop()
           await liveKit.start()
         }
+      }
+    }
+    .onChange(of: assistiveMode) { _ in
+      // The prompt profile is fixed at session start too; redial like an
+      // engine switch so the change is heard on the very next reply.
+      Task {
+        if liveKit.isActive {
+          await liveKit.stop()
+          await liveKit.start()
+        }
+      }
+    }
+    // Siri, Shortcuts and the Action Button (CallIntents.swift). Start never
+    // hangs up a live call; in glasses mode it wakes the stream, whose
+    // .streaming status opens the call as usual.
+    .onReceive(CallCommands.shared.startRequests) { _ in
+      Task {
+        guard !liveKit.isActive else { return }
+        if captureSource == .glasses, !viewModel.isStreaming {
+          await viewModel.handleStartStreaming()
+        } else {
+          await liveKit.start()
+        }
+      }
+    }
+    .onReceive(CallCommands.shared.endRequests) { _ in
+      Task {
+        if liveKit.isActive { await liveKit.stop() }
       }
     }
     .onChange(of: captureSourceRaw) { newRaw in

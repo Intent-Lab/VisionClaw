@@ -131,6 +131,16 @@ object SettingsManager {
         get() = prefs.getBoolean("showCaptions", true)
         set(value) = prefs.edit().putBoolean("showCaptions", value).apply()
 
+    /**
+     * Assistive mode, for blind and low-vision users: the agent switches to a
+     * speech-first prompt (clock directions, verbatim reading, no safety
+     * claims) and the call plays short audio cues for state changes. Off by
+     * default, so everyone else's experience is unchanged.
+     */
+    var assistiveMode: Boolean
+        get() = prefs.getBoolean("assistiveMode", false)
+        set(value) = prefs.edit().putBoolean("assistiveMode", value).apply()
+
     var webrtcSignalingURL: String
         get() = prefs.getString("webrtcSignalingURL", null) ?: DEFAULT_SIGNALING_URL
         set(value) = prefs.edit().putString("webrtcSignalingURL", value).apply()

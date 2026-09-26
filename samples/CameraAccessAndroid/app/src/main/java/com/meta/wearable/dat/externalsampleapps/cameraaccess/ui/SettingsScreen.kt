@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -41,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -82,6 +84,7 @@ private fun SettingsMainScreen(
     val captureSource by SettingsManager.captureSourceFlow.collectAsStateWithLifecycle()
     var intelligenceEngine by remember { mutableStateOf(SettingsManager.intelligenceEngine) }
     var showCaptions by remember { mutableStateOf(SettingsManager.showCaptions) }
+    var assistiveMode by remember { mutableStateOf(SettingsManager.assistiveMode) }
     var gatewayStatus by remember { mutableStateOf<GatewayStatus>(GatewayStatus.Checking) }
     var showResetDialog by remember { mutableStateOf(false) }
 
@@ -176,6 +179,33 @@ private fun SettingsMainScreen(
                 )
             }
 
+            SectionHeader("Accessibility")
+            // The whole row is the switch, so TalkBack reads the label and the
+            // state as one element -- this setting is for screen-reader users.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = assistiveMode,
+                        role = Role.Switch,
+                        onValueChange = {
+                            assistiveMode = it
+                            SettingsManager.assistiveMode = it
+                        },
+                    ),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Assistive mode", style = MaterialTheme.typography.bodyLarge)
+                Switch(checked = assistiveMode, onCheckedChange = null)
+            }
+            FooterText(
+                "For blind and low-vision users. The assistant describes positions with clock " +
+                    "directions, reads text word for word, speaks what is shown on cards, and never " +
+                    "says a path is safe. The call also plays short sounds when it connects, drops, " +
+                    "reconnects, ends, or pins a frame. Applies right away, redialing a live call.",
+            )
+
             // Gateway status + navigation rows
             SectionHeader("Gateway")
             Row(
@@ -213,6 +243,7 @@ private fun SettingsMainScreen(
                     SettingsManager.resetAll()
                     intelligenceEngine = SettingsManager.intelligenceEngine
                     showCaptions = SettingsManager.showCaptions
+                    assistiveMode = SettingsManager.assistiveMode
                     showResetDialog = false
                 }) {
                     Text("Reset", color = Color.Red)

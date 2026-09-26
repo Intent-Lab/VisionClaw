@@ -51,6 +51,7 @@ struct SettingsView: View {
   @AppStorage(CaptureSource.defaultsKey) private var captureSourceRaw = CaptureSource.iPhoneCamera.rawValue
   @AppStorage(IntelligenceEngine.defaultsKey) private var intelligenceRaw = IntelligenceEngine.openai.rawValue
   @AppStorage(SettingsManager.showCaptionsKey) private var showCaptions = true
+  @AppStorage(SettingsManager.assistiveModeKey) private var assistiveMode = false
 
   var body: some View {
     NavigationView {
@@ -76,6 +77,14 @@ struct SettingsView: View {
           }
           .pickerStyle(.segmented)
           Toggle("Show captions", isOn: $showCaptions)
+        }
+
+        Section(header: Text("Accessibility"), footer: Text(
+          "For blind and low-vision users. The assistant describes positions with clock directions, "
+            + "reads text word for word, speaks what is shown on cards, and never says a path is safe. "
+            + "The call also plays short sounds when it connects, drops, reconnects, ends, "
+            + "or pins a frame. Applies right away, redialing a live call.")) {
+          Toggle("Assistive mode", isOn: $assistiveMode)
         }
 
         // Cloud gateway is the only backend now.

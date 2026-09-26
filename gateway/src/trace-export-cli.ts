@@ -23,6 +23,9 @@ interface Session {
   start: string;
   end?: string;
   engine?: string;
+  // default | assistive. Assistive sessions run a different prompt, so a study
+  // analysis should be able to set them aside. Absent on sessions that predate it.
+  profile?: string;
   room?: string;
   // glasses | phone. observed comes from the published video track name and is
   // the stronger evidence; declared comes from the client and is the only label
@@ -168,6 +171,7 @@ function groupSessions(events: Ev[]): Session[] {
         index: sessions.length,
         start: String(e.ts ?? ""),
         engine: typeof e.engine === "string" ? e.engine : undefined,
+        profile: typeof e.profile === "string" ? e.profile : undefined,
         room: typeof e.room === "string" ? e.room : undefined,
         synthetic: e.type !== "session_start",
         events: [],
@@ -193,6 +197,7 @@ function groupSessions(events: Ev[]): Session[] {
       if (!cur.sourceDeclared && typeof e.source_declared === "string" && e.source_declared) {
         cur.sourceDeclared = e.source_declared;
       }
+      if (!cur.profile && typeof e.profile === "string" && e.profile) cur.profile = e.profile;
       cur.end = String(e.ts ?? "");
       cur = null;
     }
@@ -329,7 +334,7 @@ function resolvedSource(s: Session): string {
 
 function sessionsCsv(sessions: Session[]): string {
   const rows: unknown[][] = [
-    ["index", "start", "end", "duration_s", "engine", "source", "source_observed", "source_declared", "source_assigned", "condition_valid", "source_conflict", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial"],
+    ["index", "start", "end", "duration_s", "engine", "source", "source_observed", "source_declared", "source_assigned", "condition_valid", "source_conflict", "user_turns", "agent_turns", "actions_by_tool", "cards", "partial", "profile"],
   ];
   for (const s of sessions) {
     const st = sessionStats(s);
@@ -350,6 +355,7 @@ function sessionsCsv(sessions: Session[]): string {
       JSON.stringify(st.byTool),
       st.cards,
       s.synthetic || !s.end ? "yes" : "",
+      s.profile ?? "",
     ]);
   }
   return csv(rows);

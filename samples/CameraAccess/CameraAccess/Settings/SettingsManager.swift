@@ -130,6 +130,17 @@ final class SettingsManager {
 
   static let showCaptionsKey = "showCaptions"
 
+  /// Assistive mode, for blind and low-vision users: the agent switches to a
+  /// speech-first prompt (clock directions, verbatim reading, no safety claims)
+  /// and the call plays short audio cues for state changes. Off by default, so
+  /// everyone else's experience is unchanged. Views observe it via @AppStorage.
+  static let assistiveModeKey = "assistiveMode"
+
+  var assistiveMode: Bool {
+    get { defaults.bool(forKey: Self.assistiveModeKey) }
+    set { defaults.set(newValue, forKey: Self.assistiveModeKey) }
+  }
+
   var showCaptions: Bool {
     get { defaults.object(forKey: Self.showCaptionsKey) as? Bool ?? true }
     set { defaults.set(newValue, forKey: Self.showCaptionsKey) }
@@ -202,5 +213,6 @@ final class SettingsManager {
                 .proactiveNotificationsEnabled] {
       defaults.removeObject(forKey: key.rawValue)
     }
+    defaults.removeObject(forKey: Self.assistiveModeKey)
   }
 }

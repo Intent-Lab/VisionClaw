@@ -94,6 +94,36 @@ answer to what was asked, not as a notification. If the task is about something 
 is showing on camera, set attach_view=true so the actual image travels with the task --
 still describe what you see in the task text as well."""
 
+# Appended to INSTRUCTIONS when the user turns on assistive mode in Settings
+# (participant metadata profile="assistive"): for blind and low-vision users,
+# who hear the call but cannot see the screen. Everyone else gets INSTRUCTIONS
+# unchanged, so the default experience -- and the study's condition -- stay
+# exactly as they were.
+ASSISTIVE_INSTRUCTIONS = """
+
+ASSISTIVE MODE. The user is blind or has low vision. They hear you but cannot see the phone
+screen, so speech is the only channel that reaches them. This overrides anything above that
+relies on the screen.
+
+- Lead with what matters most. Hazards and obstacles first, then the answer, then details only
+  if asked. Keep each reply to one or two short sentences unless the user asks for more.
+- Describe positions with clock directions and distance from the user: "a cup at 2 o'clock,
+  about an arm's length away", "a door straight ahead, roughly five steps". Never say "as you
+  can see", "over there", "this one" or "here" without a direction.
+- When the user asks you to read something -- mail, labels, packaging, prices, expiry dates,
+  medication -- read the text word for word. Do not summarize or paraphrase it. Say which part
+  you could not read instead of filling it in.
+- Say plainly when you are not sure: "I can't read the dose clearly, try moving it closer."
+  Never guess at medication names, doses, money amounts or dates.
+- You only see about one frame a second and cannot judge the ground, traffic or distance
+  reliably. Never tell the user that a path is clear, that it is safe to walk, or that it is
+  safe to cross. Describe what you see and say that they should confirm with their cane,
+  guide dog or another person.
+- Cards on screen are not seen. Whenever you or a tool put a card on screen, also speak its
+  essentials -- the few rows that answer the question -- instead of only a summary.
+- Before any action that spends money or sends something on the user's behalf, say exactly
+  what you are about to do and wait for a clear yes."""
+
 
 class FrameHolder:
     """Most recent camera frame from the user's video track. When the user
@@ -1081,12 +1111,16 @@ async def entrypoint(ctx: JobContext):
     # track at all, so without this those sessions would go unlabelled -- and
     # they are exactly the glasses-arm failures, which would bias the study.
     declared_source = meta.get("source") or None
+    # Assistive mode (blind / low-vision users) is opt-in from Settings. Absent
+    # means the default profile; it is traced either way so a study analysis
+    # can set assistive sessions aside.
+    profile = "assistive" if meta.get("profile") == "assistive" else "default"
     user_id = participant.identity or "demo"
-    logger.info("session start: user=%s engine=%s", user_id, engine)
+    logger.info("session start: user=%s engine=%s profile=%s", user_id, engine, profile)
 
     tracer = Tracer(user_id)
     tracer.emit("session_start", engine=engine, room=ctx.room.name,
-                source_declared=declared_source or "")
+                source_declared=declared_source or "", profile=profile)
 
     frames = FrameHolder()
     observed_source = _watch_video(ctx, frames, tracer, declared_source)
@@ -1098,7 +1132,7 @@ async def entrypoint(ctx: JobContext):
         # sits at the head of the queue, which is what an overflow trims, and
         # this one gets the end-of-call retries.
         tracer.emit("session_end", source_declared=declared_source or "",
-                    source_observed=observed_source.get("source", ""))
+                    source_observed=observed_source.get("source", ""), profile=profile)
         # Last chance before the process exits -- a failed attempt re-queues,
         # so retry a couple of times instead of losing the tail of the call.
         for attempt in range(3):
@@ -1209,7 +1243,7 @@ async def entrypoint(ctx: JobContext):
 
     await session.start(
         agent=Agent(
-            instructions=INSTRUCTIONS,
+            instructions=INSTRUCTIONS + (ASSISTIVE_INSTRUCTIONS if profile == "assistive" else ""),
             tools=[execute, browse, quick_search, show_card, save_note, recall_notes, delete_note],
         ),
         room=ctx.room,

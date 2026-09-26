@@ -30,5 +30,7 @@ Same data flow on both sides: client -> LiveKit SFU -> agent worker + gateway.
 | LiveKit session | `OpenClaw/LiveKitSession.swift` | `livekit/LiveKitSessionViewModel.kt`, `livekit/GlassesVideoCapturer.kt` |
 | Glasses (DAT) stream VM | `ViewModels/StreamSessionViewModel.swift` | `stream/StreamViewModel.kt`, `wearables/WearablesViewModel.kt` |
 | Study engagement nudges | `OpenClaw/NudgeScheduler.swift` | not yet ported (Android has only the foreground-service notification) |
+| Assistive-mode audio cues | `OpenClaw/Earcons.swift` | `livekit/Earcons.kt` (same note sequences) |
+| Siri / Action Button call control | `OpenClaw/CallIntents.swift` | iOS only: Android has no Action Button; "Hey Google, open VisionClaw" plus auto-start covers launch |
 
 Keep this map current when files move or new parallel features land.

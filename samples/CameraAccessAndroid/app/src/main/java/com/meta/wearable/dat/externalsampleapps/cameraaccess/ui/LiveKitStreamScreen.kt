@@ -82,6 +82,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.AgentStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.Caption
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.Earcons
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.LiveKitUiState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.livekit.SessionState
@@ -93,6 +94,7 @@ import io.livekit.android.renderer.TextureViewRenderer
 import io.livekit.android.room.Room
 import io.livekit.android.room.track.VideoTrack
 import kotlin.math.abs
+import kotlinx.coroutines.delay
 import livekit.org.webrtc.RendererCommon
 
 /**
@@ -115,8 +117,8 @@ fun LiveKitStreamScreen(
 
     LaunchedEffect(Unit) {
         if (!viewModel.autoStartIfNeeded()) {
-            // Re-entering from Settings: apply an engine switch by redialing,
-            // and make sure the between-calls preview is up.
+            // Re-entering from Settings: apply an engine or assistive-mode
+            // switch by redialing, and make sure the between-calls preview is up.
             viewModel.redialIfEngineChanged()
             viewModel.startPreview()
         }
@@ -132,17 +134,53 @@ fun LiveKitStreamScreen(
         val previous = previousState
         previousState = uiState.state
         if (previous == null || previous == uiState.state) return@LaunchedEffect
+        // Assistive mode adds a short sound to the same transitions (Earcons
+        // plays nothing when it is off), for users who do not run TalkBack.
         when (uiState.state) {
             SessionState.Connected -> {
                 view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                 view.announceForAccessibility("Session started")
+                Earcons.play(Earcons.Cue.CONNECTED)
             }
             is SessionState.Failed -> {
                 view.performHapticFeedback(HapticFeedbackConstants.REJECT)
                 view.announceForAccessibility("Connection lost")
+                Earcons.play(Earcons.Cue.LOST)
             }
-            SessionState.Disconnected -> view.announceForAccessibility("Session ended")
+            SessionState.Disconnected -> {
+                view.announceForAccessibility("Session ended")
+                Earcons.play(Earcons.Cue.ENDED)
+            }
             else -> {}
+        }
+    }
+    var previousAgentStatus by remember { mutableStateOf<AgentStatus?>(null) }
+    LaunchedEffect(uiState.agentStatus) {
+        val previous = previousAgentStatus
+        previousAgentStatus = uiState.agentStatus
+        if (previous == null || previous == uiState.agentStatus) return@LaunchedEffect
+        if (uiState.agentStatus == AgentStatus.LEFT) {
+            view.announceForAccessibility("Agent left the call")
+            Earcons.play(Earcons.Cue.LOST)
+        }
+    }
+    // A dropped connection is only worth telling the user about once it has
+    // lasted a moment; a sub-second blip LiveKit heals on its own stays silent.
+    // Once announced, the recovery is announced too.
+    var reconnectAnnounced by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.isReconnecting) {
+        if (uiState.isReconnecting) {
+            delay(2_000)
+            reconnectAnnounced = true
+            view.announceForAccessibility("Connection lost, reconnecting")
+            Earcons.play(Earcons.Cue.LOST)
+        } else if (reconnectAnnounced) {
+            reconnectAnnounced = false
+            // Recovered, not ended: a failed reconnect surfaces as Failed above.
+            if (uiState.state == SessionState.Connected) {
+                view.announceForAccessibility("Reconnected")
+                Earcons.play(Earcons.Cue.RECONNECTED)
+            }
         }
     }
     val isFrozen = uiState.frozenFrame != null
@@ -155,6 +193,7 @@ fun LiveKitStreamScreen(
             if (isFrozen) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.CLOCK_TICK,
         )
         view.announceForAccessibility(if (isFrozen) "Frame frozen" else "Returned to live")
+        if (isFrozen) Earcons.play(Earcons.Cue.CAPTURED)
     }
 
     // The glasses placeholder is the app's only voice for a dropped link, so
