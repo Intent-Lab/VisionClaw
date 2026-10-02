@@ -1,0 +1,37 @@
+# ── Gradle / build output ──
+.gradle
+/build
+/captures
+
+# ── Android / native ──
+*.iml
+.externalNativeBuild
+.cxx
+
+# ── IntelliJ / Android Studio ──
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+
+# ── Kotlin ──
+.kotlin/errors/
+
+# ── Local config (secrets, SDK path — never commit) ──
+local.properties
+app/google-services.json
+
+# ── Logs & local databases ──
+*.log
+*.logcat
+glasslink.db
+streaming-server/glasslink.db
+
+# ── OS ──
+.DS_Store
+
+# ── AI assistant tooling ──
+.claude/
+.cursor/

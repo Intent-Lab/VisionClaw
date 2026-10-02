@@ -1,9 +1,20 @@
 .DS_Store
 
 # Android
-samples/CameraAccessAndroid/app/src/main/java/**/Secrets.kt
-samples/CameraAccessAndroid/local.properties
-samples/CameraAccessAndroid/app/google-services.json
-samples/CameraAccessAndroid/.gradle/
-samples/CameraAccessAndroid/build/
-samples/CameraAccessAndroid/app/build/
+frontend/samples/CameraAccessAndroid/app/src/main/java/**/Secrets.kt
+frontend/samples/CameraAccessAndroid/local.properties
+frontend/samples/CameraAccessAndroid/app/google-services.json
+frontend/samples/CameraAccessAndroid/.gradle/
+frontend/samples/CameraAccessAndroid/build/
+frontend/samples/CameraAccessAndroid/app/build/
+
+# Local credentials and signing keys (all projects)
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.pem
+*.key
+**/Secrets.kt
+**/Secrets.swift

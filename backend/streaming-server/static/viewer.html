@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>👓 글라스 라이브</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background:#0a0a0a; color:#fff;
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      height:100dvh; display:flex; flex-direction:column;
+      overflow:hidden;
+    }
+
+    /* ── 상단 바 ── */
+    #statusBar {
+      display:flex; align-items:center; gap:10px;
+      padding:10px 14px; background:rgba(0,0,0,0.85);
+      font-size:13px; flex-shrink:0;
+      border-bottom:1px solid #1a1a1a;
+      z-index:10;
+    }
+    #dot { width:9px; height:9px; border-radius:50%; background:#444; transition:background 0.3s; flex-shrink:0; }
+    #dot.live { background:#e53935; animation:pulse 1.5s infinite; }
+    #dot.wait { background:#ffc107; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
+
+    #statusTxt { font-weight:600; }
+    #timerTxt  { color:#888; font-size:12px; font-variant-numeric:tabular-nums; }
+
+    .badge {
+      display:flex; align-items:center; gap:4px;
+      background:rgba(255,255,255,0.07); border:1px solid #333;
+      padding:3px 9px; border-radius:20px; font-size:12px; color:#ccc;
+    }
+    .badge.rec { background:rgba(123,31,162,0.3); border-color:#7b1fa2; color:#ce93d8; }
+    #qualityBadge { color:#4caf50; }
+    #qualityBadge.medium { color:#ffc107; }
+    #qualityBadge.poor   { color:#e53935; }
+
+    #controls { margin-left:auto; display:flex; gap:6px; }
+    .btn {
+      background:rgba(255,255,255,0.08); border:1px solid #333;
+      color:#fff; padding:5px 12px; border-radius:20px;
+      cursor:pointer; font-size:12px; white-space:nowrap;
+      transition:background 0.2s;
+    }
+    .btn:hover { background:rgba(255,255,255,0.15); }
+    .btn.on    { background:rgba(229,57,53,0.25); border-color:#e53935; }
+    .btn.rec-on { background:rgba(123,31,162,0.3); border-color:#7b1fa2; color:#ce93d8; }
+
+    /* ── 메인 영역 ── */
+    #main {
+      flex:1; display:flex; align-items:center; justify-content:center;
+      background:#000; position:relative; overflow:hidden;
+    }
+    #remoteVideo {
+      width:100%; height:100%; object-fit:contain; display:none;
+    }
+
+    #waiting {
+      display:flex; flex-direction:column; align-items:center;
+      gap:16px; color:#444;
+    }
+    #waiting .icon { font-size:72px; }
+    #waiting p { font-size:14px; }
+
+    /* 녹화 중 오버레이 */
+    #recOverlay {
+      display:none; position:absolute; top:14px; left:14px;
+      background:rgba(123,31,162,0.85); border-radius:6px;
+      padding:5px 12px; font-size:12px; font-weight:700;
+      letter-spacing:0.05em;
+    }
+    #recOverlay::before {
+      content:''; display:inline-block;
+      width:7px; height:7px; border-radius:50%; background:#fff;
+      margin-right:6px; animation:pulse 1s infinite;
+    }
+
+    /* 에러 토스트 */
+    #errMsg {
+      display:none; position:absolute; bottom:24px; left:50%;
+      transform:translateX(-50%);
+      background:rgba(229,57,53,0.92); padding:10px 20px;
+      border-radius:8px; font-size:13px; white-space:nowrap;
+    }
+
+    /* 풀스크린일 때 상단 바 숨기기 (페이드 처리) */
+    :fullscreen #statusBar { opacity:0; transition:opacity 0.4s; }
+    :fullscreen:hover #statusBar { opacity:1; }
+    :fullscreen #statusBar { position:absolute; top:0; left:0; right:0; }
+    :fullscreen #main { position:fixed; inset:0; z-index:1; }
+  </style>
+</head>
+<body>
+
+<!-- ── 상단 바 ── -->
+<div id="statusBar">
+  <div id="dot" class="wait"></div>
+  <span id="statusTxt">연결 중...</span>
+  <span id="timerTxt"></span>
+
+  <div class="badge" id="viewerBadge" style="display:none">
+    👥 <span id="viewerCount">0</span>명
+  </div>
+  <div class="badge" id="qualityBadge" style="display:none">
+    <span id="qualityTxt">●●●</span>
+  </div>
+  <div class="badge rec" id="recBadge" style="display:none">⏺ REC</div>
+
+  <div id="controls">
+    <button class="btn" id="micBtn"      onclick="toggleMic()">🎤 마이크</button>
+    <button class="btn" id="recBtn"      onclick="toggleRecording()">⏺ 녹화</button>
+    <button class="btn" id="fsBtn"       onclick="toggleFullscreen()">⛶ 전체화면</button>
+  </div>
+</div>
+
+<!-- ── 메인 영역 ── -->
+<div id="main">
+  <div id="waiting">
+    <div class="icon">👓</div>
+    <p>글라스 스트리밍 시작을 기다리는 중</p>
+    <p style="color:#333;font-size:12px;margin-top:4px;">시작되면 자동으로 재생됩니다</p>
+  </div>
+  <video id="remoteVideo" autoplay playsinline></video>
+  <div id="recOverlay">REC</div>
+  <div id="errMsg"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+<script>
+  const params  = new URLSearchParams(location.search);
+  const roomId  = params.get('room');
+
+  const dot          = document.getElementById('dot');
+  const statusTxt    = document.getElementById('statusTxt');
+  const timerTxt     = document.getElementById('timerTxt');
+  const waiting      = document.getElementById('waiting');
+  const video        = document.getElementById('remoteVideo');
+  const errMsg       = document.getElementById('errMsg');
+  const micBtn       = document.getElementById('micBtn');
+  const recBtn       = document.getElementById('recBtn');
+  const viewerBadge  = document.getElementById('viewerBadge');
+  const viewerCount  = document.getElementById('viewerCount');
+  const qualityBadge = document.getElementById('qualityBadge');
+  const qualityTxt   = document.getElementById('qualityTxt');
+  const recBadge     = document.getElementById('recBadge');
+  const recOverlay   = document.getElementById('recOverlay');
+
+  let lkRoom         = null;
+  let micOn          = false;
+  let localMicTrack  = null;
+  let liveStartTime  = 0;
+  let timerInterval  = null;
+
+  // ── 브라우저 녹화 ────────────────────────────────
+  let mediaRecorder  = null;
+  let recChunks      = [];
+  let recOn          = false;
+
+  if (!roomId) {
+    showError('유효하지 않은 링크 (room 파라미터 없음)');
+  } else {
+    connect();
+  }
+
+  // ── LiveKit 연결 ─────────────────────────────────
+  async function connect() {
+    try {
+      const resp = await fetch(`/api/rooms/${roomId}/viewer-token`);
+      if (!resp.ok) {
+        if (resp.status === 410) { showError('만료된 링크입니다'); return; }
+        throw new Error(`토큰 발급 실패 (${resp.status})`);
+      }
+      const { token, livekit_url } = await resp.json();
+
+      const room = new LivekitClient.Room({
+        adaptiveStream: true,
+        dynacast:       true,
+      });
+      lkRoom = room;
+
+      // 트랙 구독
+      room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+        if (track.kind === LivekitClient.Track.Kind.Video) {
+          track.attach(video);
+          waiting.style.display = 'none';
+          video.style.display   = 'block';
+          dot.className         = 'live';
+          statusTxt.textContent = 'LIVE';
+          liveStartTime         = Date.now();
+          startTimer();
+          viewerBadge.style.display  = 'flex';
+          qualityBadge.style.display = 'flex';
+          updateViewerCount();
+        } else if (track.kind === LivekitClient.Track.Kind.Audio) {
+          track.attach(); // 글라스 마이크 → 브라우저 스피커
+        }
+      });
+
+      room.on(LivekitClient.RoomEvent.TrackUnsubscribed, (track) => {
+        track.detach();
+        if (track.kind === LivekitClient.Track.Kind.Video) {
+          video.style.display   = 'none';
+          waiting.style.display = 'flex';
+          dot.className         = 'wait';
+          statusTxt.textContent = '스트리밍 대기 중...';
+          stopTimer();
+          stopRecording();
+          viewerBadge.style.display  = 'none';
+          qualityBadge.style.display = 'none';
+        }
+      });
+
+      // 참가자 입/퇴장
+      room.on(LivekitClient.RoomEvent.ParticipantConnected,    updateViewerCount);
+      room.on(LivekitClient.RoomEvent.ParticipantDisconnected, updateViewerCount);
+
+      // 연결 품질
+      room.on(LivekitClient.RoomEvent.ConnectionQualityChanged, (quality, participant) => {
+        if (participant === room.localParticipant) return;
+        const map = {
+          [LivekitClient.ConnectionQuality.Excellent]: { text:'●●●', cls:'' },
+          [LivekitClient.ConnectionQuality.Good]:      { text:'●●○', cls:'medium' },
+          [LivekitClient.ConnectionQuality.Poor]:      { text:'●○○', cls:'poor' },
+          [LivekitClient.ConnectionQuality.Lost]:      { text:'○○○', cls:'poor' },
+        };
+        const q = map[quality] || { text:'●●●', cls:'' };
+        qualityTxt.textContent    = q.text;
+        qualityBadge.className    = `badge ${q.cls}`;
+      });
+
+      room.on(LivekitClient.RoomEvent.Disconnected, () => {
+        dot.className         = 'wait';
+        statusTxt.textContent = '연결 끊김 — 재연결 중...';
+        stopTimer();
+        stopRecording();
+        setTimeout(connect, 3000);
+      });
+
+      await room.connect(livekit_url, token);
+      statusTxt.textContent = '글라스 연결 대기 중...';
+
+    } catch (e) {
+      showError(`연결 오류: ${e.message}`);
+      setTimeout(connect, 5000);
+    }
+  }
+
+  // ── 시청자 수 ────────────────────────────────────
+  function updateViewerCount() {
+    if (!lkRoom) return;
+    // 로컬(나 포함) + 원격 참가자 중 glasses identity 제외
+    const remote = [...lkRoom.remoteParticipants.values()];
+    const viewers = remote.filter(p => p.identity !== 'glasses').length + 1; // +1 = 나
+    viewerCount.textContent = viewers;
+  }
+
+  // ── 타이머 ───────────────────────────────────────
+  function startTimer() {
+    stopTimer();
+    timerInterval = setInterval(() => {
+      const sec = Math.floor((Date.now() - liveStartTime) / 1000);
+      const h = String(Math.floor(sec / 3600)).padStart(2,'0');
+      const m = String(Math.floor((sec % 3600) / 60)).padStart(2,'0');
+      const s = String(sec % 60).padStart(2,'0');
+      timerTxt.textContent = `${h}:${m}:${s}`;
+    }, 1000);
+  }
+  function stopTimer() {
+    clearInterval(timerInterval);
+    timerInterval  = null;
+    timerTxt.textContent = '';
+  }
+
+  // ── 브라우저 마이크 ──────────────────────────────
+  async function toggleMic() {
+    if (!lkRoom) return;
+    if (!micOn) {
+      try {
+        localMicTrack = await LivekitClient.createLocalAudioTrack({
+          echoCancellation: true,
+          noiseSuppression: true,
+        });
+        await lkRoom.localParticipant.publishTrack(localMicTrack);
+        micOn = true;
+        micBtn.textContent = '🔴 마이크 켜짐';
+        micBtn.classList.add('on');
+      } catch (_) {
+        alert('마이크 권한이 필요합니다');
+      }
+    } else {
+      if (localMicTrack) {
+        await lkRoom.localParticipant.unpublishTrack(localMicTrack);
+        localMicTrack.stop();
+        localMicTrack = null;
+      }
+      micOn = false;
+      micBtn.textContent = '🎤 마이크';
+      micBtn.classList.remove('on');
+    }
+  }
+
+  // ── 브라우저 화면 녹화 ───────────────────────────
+  function toggleRecording() {
+    if (!recOn) {
+      startRecording();
+    } else {
+      stopRecording();
+    }
+  }
+
+  function startRecording() {
+    if (video.style.display === 'none') {
+      alert('스트리밍이 시작된 후 녹화할 수 있습니다');
+      return;
+    }
+    recChunks = [];
+    const stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : 'video/webm';
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(recChunks, { type: 'video/webm' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `glasslink-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    };
+    mediaRecorder.start(1000);
+    recOn = true;
+    recBtn.textContent = '⏹ 녹화 중지';
+    recBtn.classList.add('rec-on');
+    recBadge.style.display   = 'flex';
+    recOverlay.style.display = 'block';
+  }
+
+  function stopRecording() {
+    if (!recOn || !mediaRecorder) return;
+    mediaRecorder.stop();
+    mediaRecorder = null;
+    recOn = false;
+    recBtn.textContent = '⏺ 녹화';
+    recBtn.classList.remove('rec-on');
+    recBadge.style.display   = 'none';
+    recOverlay.style.display = 'none';
+  }
+
+  // ── 풀스크린 ─────────────────────────────────────
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      fsBtn.textContent = '✕ 전체화면 해제';
+    } else {
+      document.exitFullscreen();
+      fsBtn.textContent = '⛶ 전체화면';
+    }
+  }
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) {
+      fsBtn.textContent = '⛶ 전체화면';
+    }
+  });
+
+  // ── 에러 ─────────────────────────────────────────
+  function showError(msg) {
+    errMsg.style.display  = 'block';
+    errMsg.textContent    = msg;
+    dot.className         = '';
+    statusTxt.textContent = '오류';
+    setTimeout(() => { errMsg.style.display = 'none'; }, 5000);
+  }
+</script>
+</body>
+</html>
