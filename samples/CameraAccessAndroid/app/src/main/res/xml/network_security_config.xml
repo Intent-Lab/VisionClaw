@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext only for loopback and mDNS hosts on the local network. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain>127.0.0.1</domain>
+        <domain includeSubdomains="true">local</domain>
+    </domain-config>
+    <!-- Block cleartext for all other domains (enforce HTTPS) -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
