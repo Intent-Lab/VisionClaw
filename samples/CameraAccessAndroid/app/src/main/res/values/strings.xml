@@ -48,6 +48,9 @@
     <string name="has_captured_image" description="Has captured image">Has captured image</string>
     <string name="no_captured_image" description="No captured image">No captured image</string>
 
+    <!-- Meta Wearables DAT SDK -->
+    <string name="mwdat_application_id" translatable="false">0</string>
+
     <!-- Getting Started Sheet -->
     <string name="getting_started_title" description="Getting Started sheet title">Getting started</string>
     <string name="getting_started_tip_permission" description="Tip about camera permission">First, Camera Access needs permission to use your glasses camera.</string>
