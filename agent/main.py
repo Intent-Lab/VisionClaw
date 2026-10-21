@@ -877,6 +877,8 @@ async def browse(ctx: RunContext[Userdata], task: str) -> str:
         return "Web browsing is not enabled yet. Tell the user you cannot browse live sites right now."
     run_id = start.get("runId")
     live_url = start.get("liveUrl")
+    # A desktop watcher can tail the logs for this line and open the live view.
+    logger.info("browse live: run=%s url=%s", run_id, live_url)
     live_uuid = "browse-live"
     card_shown = False
     if live_url and room is not None:
